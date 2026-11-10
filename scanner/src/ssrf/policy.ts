@@ -60,6 +60,25 @@ export function parseAllowlist(value: string | undefined): string[] {
   return [...new Set(hosts)];
 }
 
+export type StartupCheck = { ok: true; warning: string | null } | { ok: false; reason: string };
+
+// Na subida: em produção (`NODE_ENV=production`) a `SSRF_ALLOWLIST` preenchida impede o
+// scanner de subir, como no backend. Fora de produção, só um aviso. O Compose de teste roda
+// o scanner com `NODE_ENV=test`.
+export function checkStartup(nodeEnv: string | undefined, allowlist: readonly string[]): StartupCheck {
+  if (allowlist.length === 0) return { ok: true, warning: null };
+  const hosts = allowlist.join(", ");
+  if (nodeEnv === "production") {
+    return {
+      ok: false,
+      reason:
+        `SSRF_ALLOWLIST está preenchida em produção (${hosts}). Ela desliga a proteção contra ` +
+        "SSRF para esses hosts e só pode ser usada no Compose de teste. Esvazie a variável para o scanner subir.",
+    };
+  }
+  return { ok: true, warning: `SSRF_ALLOWLIST preenchida: ${hosts} sem checagem de nome e de IP` };
+}
+
 // Host em minúsculas, sem ponto final e sem os colchetes do IPv6.
 export function normalizeHost(hostname: string): string {
   let host = hostname.toLowerCase();

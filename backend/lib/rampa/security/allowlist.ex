@@ -11,7 +11,10 @@ defmodule Rampa.Security.Allowlist do
 
   require Logger
 
-  @doc "Interpreta o valor da variável: separa por vírgula, normaliza e descarta vazios."
+  @doc """
+  Interpreta o valor da variável: separa por vírgula, normaliza (minúsculas, sem ponto final
+  e sem os colchetes do IPv6, como o scanner) e descarta vazios.
+  """
   @spec parse(String.t() | [String.t()] | nil) :: [String.t()]
   def parse(nil), do: []
   def parse(hosts) when is_list(hosts), do: hosts |> Enum.join(",") |> parse()
@@ -19,9 +22,20 @@ defmodule Rampa.Security.Allowlist do
   def parse(value) when is_binary(value) do
     value
     |> String.split(",")
-    |> Enum.map(&(&1 |> String.trim() |> String.downcase() |> String.trim_trailing(".")))
+    |> Enum.map(&normalize/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
+  end
+
+  defp normalize(host) do
+    host = host |> String.trim() |> String.downcase()
+
+    host =
+      if String.starts_with?(host, "[") and String.ends_with?(host, "]"),
+        do: String.slice(host, 1..-2//1),
+        else: host
+
+    String.replace_suffix(host, ".", "")
   end
 
   @doc "Hosts liberados pela configuração atual."

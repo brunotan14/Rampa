@@ -1,20 +1,22 @@
 import { createSocket, type Socket } from "node:dgram";
+import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { brotliCompressSync, gzipSync } from "node:zlib";
+import { gzipSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
-import type { Browser, Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AxeFacts } from "../src/axe.js";
-import { launchBrowser } from "../src/browser.js";
+import { LAUNCH_OPTIONS, launchBrowser } from "../src/browser.js";
 import { buildServer, type ScanResult, type ServerOptions } from "../src/server.js";
 import { isBlockedIp } from "../src/ssrf/ip.js";
 import type { Resolve } from "../src/ssrf/policy.js";
 import { fixturesPolicy, notFound } from "./support/policy.js";
 import { startServers, type LocalServers } from "./support/servers.js";
 
-// Bloqueio de requisições no scanner (RF-RA002), com o Chromium de verdade. As páginas
-// destes testes ficam aqui, e não em `fixtures/`, porque apontam para endereços proibidos.
+// Bloqueio de requisições no scanner (RF-RA002), com o Chromium de verdade passando pelo
+// proxy de saída da varredura. As páginas destes testes ficam aqui, e não em `fixtures/`,
+// porque apontam para endereços proibidos.
 
 const fixturesDir = new URL("./fixtures/", import.meta.url);
 const limpa = readFileSync(new URL("limpa.html", fixturesDir));
@@ -24,27 +26,43 @@ const html = (title: string, body = "") =>
 
 let servers: LocalServers;
 let port: number;
+let otherPort: number;
+let other: Server;
 let udp: Socket;
 let udpPackets = 0;
 let browser: Browser;
 let app: FastifyInstance;
 
-const pages = (): Record<string, (cookie: string | undefined) => { status?: number; headers?: Record<string, string | string[]>; body: string | Buffer }> => ({
+type Page_ = { status?: number; headers?: Record<string, string | string[]>; body: string | Buffer; delayMs?: number };
+
+const pages = (): Record<string, (cookie: string | undefined) => Page_> => ({
   "/limpa.html": () => ({ body: limpa }),
   "/redireciona-privado": () => ({ status: 302, headers: { location: "http://127.0.0.1/" }, body: "" }),
   "/redireciona-cadeia": () => ({ status: 301, headers: { location: "/redireciona-privado" }, body: "" }),
   "/redireciona-limpa": () => ({ status: 302, headers: { location: "/limpa.html" }, body: "" }),
-  "/redireciona-cookie": () => ({
+  "/redireciona-porta": () => ({
     status: 302,
-    headers: { location: "/precisa-cookie", "set-cookie": ["visto=1; Path=/", "outro=2; Path=/"] },
+    headers: { location: `http://fixtures:${otherPort}/limpa.html` },
     body: "",
   }),
-  "/precisa-cookie": (cookie) =>
-    cookie?.includes("visto=1") && cookie.includes("outro=2")
-      ? { body: html("Com cookie") }
-      : { status: 403, body: html("Sem cookie") },
   "/laco": () => ({ status: 302, headers: { location: "/laco" }, body: "" }),
+  "/onload-navega.html": () => ({
+    body: html("Antes de navegar", `<script>onload = () => { location.href = "/redireciona-limpa"; };</script>`),
+  }),
+  "/onload-navega-privado.html": () => ({
+    body: html(
+      "Navega para nome privado",
+      `<script>onload = () => { location.href = "http://interno.exemplo.com:${port}/"; };</script>`,
+    ),
+  }),
+  "/navega-privado.html": () => ({
+    body: html("Navega para IP privado", `<script>setTimeout(() => { location.href = "http://10.0.0.5/"; }, 50);</script>`),
+  }),
   "/img-privada.html": () => ({ body: html("Imagem em IP privado", '<img src="http://192.168.0.1/x.png">') }),
+  "/img-redireciona-privada.html": () => ({
+    body: html("Imagem que redireciona para IP privado", '<img alt="" src="/redireciona-img">'),
+  }),
+  "/redireciona-img": () => ({ status: 302, headers: { location: `http://127.0.0.1:${port}/segredo.png` }, body: "" }),
   "/iframe-privado.html": () => ({
     body: html("Iframe em IP privado", '<iframe title="Interno" src="http://10.0.0.5/"></iframe>'),
   }),
@@ -54,14 +72,20 @@ const pages = (): Record<string, (cookie: string | undefined) => { status?: numb
       `<script>
         const results = [];
         const done = (r) => { results.push(r); if (results.length === 2) document.title = "fetch:" + results.sort().join(","); };
-        fetch("http://127.0.0.1:${port}/segredo").then(() => done("vazou-ip"), () => done("bloqueado-ip"));
-        fetch("http://interno.exemplo.com:${port}/segredo").then(() => done("vazou-nome"), () => done("bloqueado-nome"));
+        const check = (name) => (r) => done((r.ok ? "vazou-" : "bloqueado-") + name);
+        fetch("http://127.0.0.1:${port}/segredo").then(check("ip"), () => done("bloqueado-ip"));
+        fetch("http://interno.exemplo.com:${port}/segredo").then(check("nome"), () => done("bloqueado-nome"));
       </script>`,
     ),
   }),
-  "/navega-privado.html": () => ({
-    body: html("Navega para IP privado", `<script>setTimeout(() => { location.href = "http://10.0.0.5/"; }, 50);</script>`),
+  "/cookie-sub.html": () => ({
+    body: html(
+      "Cookie em redirecionamento de sub-recurso",
+      `<script>fetch("/sub-redireciona").then((r) => r.text()).then((t) => { document.title = "sub:" + t; });</script>`,
+    ),
   }),
+  "/sub-redireciona": () => ({ status: 302, headers: { location: "/sub-destino", "set-cookie": "sc=1; Path=/" }, body: "" }),
+  "/sub-destino": (cookie) => ({ body: cookie?.includes("sc=1") ? "com-cookie" : "sem-cookie" }),
   "/sw.html": () => ({
     body: html(
       "Service worker",
@@ -73,20 +97,8 @@ const pages = (): Record<string, (cookie: string | undefined) => { status?: numb
   }),
   "/sw.js": () => ({ headers: { "content-type": "text/javascript" }, body: "self.addEventListener('fetch', () => {});" }),
   "/gzip.html": () => ({ headers: { "content-encoding": "gzip" }, body: gzipSync(html("Página com gzip")) }),
-  "/br.html": () => ({ headers: { "content-encoding": "br" }, body: brotliCompressSync(html("Página com brotli")) }),
-  "/grande.html": () => ({
-    body: html(
-      "Recursos grandes",
-      `<script>
-        const get = (path) => fetch(path).then((r) => r.text()).then((t) => "ok:" + t.length, () => "falhou");
-        Promise.all([get("/grande.bin"), get("/bomba.bin"), get("/pequeno.txt")]).then((r) => { document.title = r.join(","); });
-      </script>`,
-    ),
-  }),
-  "/grande.bin": () => ({ body: Buffer.alloc(100 * 1024, 97) }),
-  "/bomba.bin": () => ({ headers: { "content-encoding": "gzip" }, body: gzipSync(Buffer.alloc(4 * 1024 * 1024)) }),
-  "/pequeno.txt": () => ({ body: "abc" }),
-  "/documento-grande.html": () => ({ body: html("Grande", "x".repeat(100 * 1024)) }),
+  "/pesada.html": () => ({ body: html("Página pesada", '<img alt="" src="/grande.bin">') }),
+  "/grande.bin": () => ({ headers: { "content-type": "application/octet-stream" }, body: Buffer.alloc(300 * 1024, 97) }),
   "/rebind.html": () => ({
     body: html(
       "Rebinding",
@@ -94,17 +106,50 @@ const pages = (): Record<string, (cookie: string | undefined) => { status?: numb
     ),
   }),
   "/px.gif": () => ({ headers: { "content-type": "image/gif" }, body: Buffer.from("R0lGODlhAQABAAAAACw=", "base64") }),
-  "/fugas.html": () => ({
+  "/lento.gif": () => ({
+    headers: { "content-type": "image/gif" },
+    body: Buffer.from("R0lGODlhAQABAAAAACw=", "base64"),
+    delayMs: 300,
+  }),
+  "/muitas-imagens.html": () => ({
+    body: html("Muitas imagens", Array.from({ length: 4 }, (_, i) => `<img alt="" src="/lento.gif?${i}">`).join("")),
+  }),
+  "/websocket.html": () => ({
     body: html(
-      "Fugas do route",
-      `<link rel="preconnect" href="http://127.0.0.1:${port}/">
-      <script>
-        try { new WebSocket("ws://127.0.0.1:${port}/ws"); } catch {}
-        try { new WebSocket("ws://fixtures:${port}/ws"); } catch {}
-        try {
-          const code = "fetch('http://127.0.0.1:${port}/shared').catch(() => {})";
-          new SharedWorker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
-        } catch {}
+      "WebSocket",
+      `<script>
+        const results = {};
+        const done = () => { if (Object.keys(results).length === 2) document.title = "ws:" + results.publico + "," + results.privado; };
+        const open = (name, url) => {
+          const ws = new WebSocket(url);
+          ws.onopen = () => { results[name] = "aberto"; done(); ws.close(); };
+          ws.onerror = () => { results[name] = "falhou"; done(); };
+        };
+        open("publico", "ws://fixtures:${port}/ws-aceita");
+        open("privado", "ws://127.0.0.1:${port}/ws-aceita-privado");
+      </script>`,
+    ),
+  }),
+  "/shared-worker.html": () => ({
+    body: html(
+      "SharedWorker",
+      `<script>
+        const code = "fetch('http://fixtures:${port}/shared-publico'); fetch('http://interno.exemplo.com:${port}/shared-privado')";
+        new SharedWorker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+      </script>`,
+    ),
+  }),
+  "/shared-publico": () => ({ body: "ok" }),
+  "/preconnect.html": () => ({
+    body: html(
+      "Preconnect",
+      `<link rel="preconnect" href="http://interno.exemplo.com:${port}/"><link rel="preconnect" href="https://10.0.0.5/">`,
+    ),
+  }),
+  "/webrtc.html": () => ({
+    body: html(
+      "WebRTC",
+      `<script>
         const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${udpPort()}" }] });
         pc.createDataChannel("x");
         pc.createOffer().then((offer) => pc.setLocalDescription(offer));
@@ -120,10 +165,17 @@ beforeAll(async () => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
     const page = pages()[path];
     if (!page) return res.writeHead(404, { "content-type": "text/html" }).end(html("Não encontrada"));
-    const { status = 200, headers = {}, body } = page(req.headers.cookie);
-    res.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers }).end(body);
+    const { status = 200, headers = {}, body, delayMs = 0 } = page(req.headers.cookie);
+    const send = () => res.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers }).end(body);
+    if (delayMs > 0) setTimeout(send, delayMs);
+    else send();
   });
   port = servers.port;
+
+  // Servidor público numa porta que não é a do documento.
+  other = createServer((_req, res) => res.writeHead(200, { "content-type": "text/html" }).end(limpa));
+  await new Promise<void>((resolve) => other.listen(0, "127.0.0.1", resolve));
+  otherPort = (other.address() as AddressInfo).port;
 
   udp = createSocket("udp4");
   udp.on("message", () => (udpPackets += 1));
@@ -137,6 +189,7 @@ afterAll(async () => {
   await app.close();
   await browser.close();
   await servers.close();
+  other.close();
   udp.close();
 });
 
@@ -160,24 +213,25 @@ async function scanWith(server: FastifyInstance, target: string) {
 
 const scan = (target: string) => scanWith(app, target);
 
+async function withServer<T>(overrides: ServerOptions, run: (server: FastifyInstance) => Promise<T>): Promise<T> {
+  const server = buildServer(browser, options(overrides));
+  try {
+    return await run(server);
+  } finally {
+    await server.close();
+  }
+}
+
 // `analyze` que espera o script da página trocar o título e guarda o título.
-function waitTitle(prefix: string, seen: { title?: string }, extra: (title: string) => boolean = () => true) {
+function waitTitle(prefix: string, seen: { title?: string }) {
   return async (page: Page): Promise<AxeFacts> => {
-    await expectTitle(page, prefix, extra);
+    await page.waitForFunction((p) => document.title.startsWith(p), prefix, { timeout: 10_000 });
     seen.title = await page.title();
     return { version: "4.0.0", violations: [], incomplete: [] };
   };
 }
 
-async function expectTitle(page: Page, prefix: string, extra: (title: string) => boolean) {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const title = await page.title();
-    if (title.startsWith(prefix) && extra(title)) return;
-    if (Date.now() > deadline) throw new Error(`título não mudou: ${title}`);
-    await page.waitForTimeout(50);
-  }
-}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("documento principal", () => {
   it("URL de endereço proibido é recusada sem abrir o navegador", async () => {
@@ -193,6 +247,12 @@ describe("documento principal", () => {
     expect(res.json()).toEqual({ error: "blocked_address", detail: "porta não permitida: 8080" });
   });
 
+  it("URL com credenciais é recusada como invalid_url", async () => {
+    const res = await scan(`http://usuario:senha@fixtures:${port}/limpa.html`);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({ error: "invalid_url", detail: "URL com credenciais" });
+  });
+
   it("página que redireciona para http://127.0.0.1/ devolve blocked_address", async () => {
     const res = await scan(url("/redireciona-privado"));
     expect(res.statusCode).toBe(422);
@@ -203,7 +263,7 @@ describe("documento principal", () => {
   it("o bloqueio vale para qualquer salto da cadeia de redirecionamentos", async () => {
     const res = await scan(url("/redireciona-cadeia"));
     expect(res.statusCode).toBe(422);
-    expect(res.json().error).toBe("blocked_address");
+    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 127.0.0.1" });
   });
 
   it("redirecionamento permitido é seguido e a página final é analisada", async () => {
@@ -212,35 +272,38 @@ describe("documento principal", () => {
     expect(res.json()).toMatchObject({ final_url: url("/limpa.html"), http_status: 200, title: "Página limpa" });
   });
 
-  it("os cookies do redirecionamento chegam ao destino", async () => {
-    const res = await scan(url("/redireciona-cookie"));
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ final_url: url("/precisa-cookie"), title: "Com cookie" });
+  it("redirecionamento do documento para porta não permitida devolve blocked_address", async () => {
+    const res = await scan(url("/redireciona-porta"));
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({ error: "blocked_address", detail: `porta não permitida: ${otherPort}` });
   });
 
-  it("para depois de 10 redirecionamentos", async () => {
+  it("redirecionamento em laço devolve navigation_failed", async () => {
     const res = await scan(url("/laco"));
     expect(res.statusCode).toBe(502);
-    expect(res.json()).toEqual({ error: "navigation_failed", detail: "mais de 10 redirecionamentos" });
+    expect(res.json().error).toBe("navigation_failed");
+    expect(res.json().detail).toMatch(/ERR_TOO_MANY_REDIRECTS/);
+  });
+
+  it("navegação por script no onload que responde 302: analisa o destino real", async () => {
+    const res = await scan(url("/onload-navega.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ final_url: url("/limpa.html"), http_status: 200, title: "Página limpa" });
   });
 
   it("navegação do documento para IP proibido depois de aberto devolve blocked_address", async () => {
-    const server = buildServer(
-      browser,
-      options({
-        analyze: async (page) => {
-          await page.waitForEvent("requestfailed", { predicate: (r) => r.url().startsWith("http://10.0.0.5") });
-          return { version: "4.0.0", violations: [], incomplete: [] };
-        },
-      }),
-    );
-    try {
-      const res = await scanWith(server, url("/navega-privado.html"));
-      expect(res.statusCode).toBe(422);
-      expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 10.0.0.5" });
-    } finally {
-      await server.close();
-    }
+    const res = await scan(url("/navega-privado.html"));
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 10.0.0.5" });
+  });
+
+  it("navegação para nome que resolve para IP proibido, vista só pelo proxy, devolve blocked_address", async () => {
+    const res = await scan(url("/onload-navega-privado.html"));
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: "blocked_address",
+      detail: "interno.exemplo.com resolve para endereço proibido: 127.0.0.1",
+    });
   });
 });
 
@@ -249,81 +312,77 @@ describe("sub-recursos", () => {
     const res = await scan(url("/img-privada.html"));
     expect(res.statusCode).toBe(200);
     const body = res.json<ScanResult>();
-    expect(body.blocked_requests).toBeGreaterThanOrEqual(1);
+    expect(body.blocked_requests).toBe(1);
     expect(body.axe.violations.map((rule) => rule.id)).toContain("image-alt");
+  });
+
+  it("imagem que redireciona para IP privado: o proxy bloqueia o salto e conta", async () => {
+    const res = await scan(url("/img-redireciona-privada.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(hitsTo("/segredo.png")).toEqual([]);
   });
 
   it("iframe para IP privado é bloqueado e a varredura continua", async () => {
     const res = await scan(url("/iframe-privado.html"));
     expect(res.statusCode).toBe(200);
-    expect(res.json<ScanResult>().blocked_requests).toBeGreaterThanOrEqual(1);
+    expect(res.json<ScanResult>().blocked_requests).toBe(1);
   });
 
-  it("fetch por script para IP privado, literal ou resolvido, é bloqueado", async () => {
+  it("fetch por script para IP privado, literal ou resolvido, é bloqueado e contado uma vez", async () => {
     const seen: { title?: string } = {};
-    const server = buildServer(browser, options({ analyze: waitTitle("fetch:", seen) }));
-    try {
+    await withServer({ analyze: waitTitle("fetch:", seen) }, async (server) => {
       const res = await scanWith(server, url("/fetch-privado.html"));
       expect(res.statusCode).toBe(200);
       expect(seen.title).toBe("fetch:bloqueado-ip,bloqueado-nome");
+      // O IP literal o route recusa; o nome só o proxy vê. Cada um conta uma vez.
       expect(res.json<ScanResult>().blocked_requests).toBe(2);
       // O servidor local é acessível: se a requisição tivesse escapado, ele a teria recebido.
       expect(hitsTo("/segredo")).toEqual([]);
-    } finally {
-      await server.close();
-    }
+    });
+  });
+
+  it("cookie definido num redirecionamento de sub-recurso chega ao destino", async () => {
+    const seen: { title?: string } = {};
+    await withServer({ analyze: waitTitle("sub:", seen) }, async (server) => {
+      const res = await scanWith(server, url("/cookie-sub.html"));
+      expect(res.statusCode).toBe(200);
+      expect(seen.title).toBe("sub:com-cookie");
+    });
   });
 
   it("service worker não é registrado", async () => {
     const seen: { title?: string } = {};
-    const server = buildServer(browser, options({ analyze: waitTitle("sw:", seen) }));
-    try {
+    await withServer({ analyze: waitTitle("sw:", seen) }, async (server) => {
       const res = await scanWith(server, url("/sw.html"));
       expect(res.statusCode).toBe(200);
       expect(seen.title).not.toBe("sw:registrado");
       expect(hitsTo("/sw.js")).toEqual([]);
-    } finally {
-      await server.close();
-    }
+    });
+  });
+
+  it("conteúdo comprimido é repassado cru e o navegador descompacta", async () => {
+    const res = await scan(url("/gzip.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ title: "Página com gzip", http_status: 200 });
   });
 });
 
-describe("conteúdo buscado no Node", () => {
-  it.each([
-    ["/gzip.html", "Página com gzip"],
-    ["/br.html", "Página com brotli"],
-  ])("%s é descompactado antes de chegar ao navegador", async (path, title) => {
-    const res = await scan(url(path));
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ title, http_status: 200 });
+describe("limites da varredura", () => {
+  it("passar do teto de bytes devolve resource_limit", async () => {
+    await withServer({ limits: { maxBytes: 128 * 1024 } }, async (server) => {
+      const res = await scanWith(server, url("/pesada.html"));
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({ error: "resource_limit", detail: `a página passou de ${128 * 1024} bytes trafegados` });
+    });
   });
 
-  it("recurso acima do limite falha e a varredura continua", async () => {
-    // O script troca o título por "resultado,resultado,resultado" quando os três terminam.
-    const seen: { title?: string } = {};
-    const server = buildServer(
-      browser,
-      options({ analyze: waitTitle("", seen, (title) => title.includes(",")), limits: { maxResourceBytes: 64 * 1024 } }),
-    );
-    try {
-      const res = await scanWith(server, url("/grande.html"));
-      expect(res.statusCode).toBe(200);
-      // 100 KB e uma bomba de gzip de 4 MB passam do limite de 64 KB; o arquivo pequeno chega.
-      expect(seen.title).toBe("falhou,falhou,ok:3");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("documento acima do limite devolve navigation_failed", async () => {
-    const server = buildServer(browser, options({ limits: { maxResourceBytes: 64 * 1024 } }));
-    try {
-      const res = await scanWith(server, url("/documento-grande.html"));
-      expect(res.statusCode).toBe(502);
-      expect(res.json()).toEqual({ error: "navigation_failed", detail: "recurso passou de 65536 bytes" });
-    } finally {
-      await server.close();
-    }
+  it("passar do limite de conexões simultâneas devolve resource_limit", async () => {
+    await withServer({ limits: { maxConnections: 2 } }, async (server) => {
+      const res = await scanWith(server, url("/muitas-imagens.html"));
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({ error: "resource_limit", detail: "a página abriu mais de 2 conexões simultâneas" });
+    });
   });
 });
 
@@ -353,38 +412,82 @@ describe("DNS rebinding", () => {
   });
 });
 
-describe("o que escapa do route do Playwright", () => {
-  it("WebSocket, SharedWorker, preconnect e WebRTC não chegam à rede", async () => {
-    const before = servers.hits.length;
-    const res = await scan(url("/fugas.html"));
-    expect(res.statusCode).toBe(200);
-    // Dá tempo para o ICE do WebRTC e para as conexões do navegador.
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-
-    expect(servers.hits.slice(before).map((hit) => hit.url)).toEqual(["/fugas.html"]);
-    expect(servers.upgrades()).toBe(0);
-    expect(udpPackets).toBe(0);
+describe("o que o route do Playwright não vê passa pelo proxy", () => {
+  it("WebSocket público funciona e WebSocket para IP privado é bloqueado", async () => {
+    const seen: { title?: string } = {};
+    await withServer({ analyze: waitTitle("ws:", seen) }, async (server) => {
+      const res = await scanWith(server, url("/websocket.html"));
+      expect(res.statusCode).toBe(200);
+      expect(seen.title).toBe("ws:aberto,falhou");
+      expect(servers.upgrades).toContain("/ws-aceita");
+      expect(servers.upgrades).not.toContain("/ws-aceita-privado");
+      expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    });
   });
 
-  it("o Chromium sem o route não acessa a rede sozinho", async () => {
+  it("SharedWorker passa pelo proxy validado", async () => {
+    await withServer(
+      {
+        analyze: async (page) => {
+          await page.waitForTimeout(1_000);
+          return { version: "4.0.0", violations: [], incomplete: [] };
+        },
+      },
+      async (server) => {
+        const res = await scanWith(server, url("/shared-worker.html"));
+        expect(res.statusCode).toBe(200);
+        expect(hitsTo("/shared-publico")).not.toEqual([]);
+        expect(hitsTo("/shared-privado")).toEqual([]);
+        expect(res.json<ScanResult>().blocked_requests).toBe(1);
+      },
+    );
+  });
+
+  it("preconnect para destino proibido não chega ao destino", async () => {
+    const before = servers.hits.length;
+    const res = await scan(url("/preconnect.html"));
+    expect(res.statusCode).toBe(200);
+    await sleep(500);
+    expect(servers.hits.slice(before).map((hit) => hit.url)).toEqual(["/preconnect.html"]);
+  });
+
+  it("WebRTC não sai por UDP", async () => {
+    const before = udpPackets;
+    const res = await scan(url("/webrtc.html"));
+    expect(res.statusCode).toBe(200);
+    await sleep(1_500);
+    expect(udpPackets).toBe(before);
+  });
+
+  it("contexto sem o proxy da varredura não acessa a rede", async () => {
     const before = servers.hits.length;
     const context = await browser.newContext();
     try {
       const page = await context.newPage();
       await expect(page.goto(`http://127.0.0.1:${port}/limpa.html`)).rejects.toThrow(/ERR_PROXY_CONNECTION_FAILED/);
-      const rtc = await context.newPage();
-      await rtc.setContent(
-        `<script>
-          const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${udpPort()}" }] });
-          pc.createDataChannel("x");
-          pc.createOffer().then((offer) => pc.setLocalDescription(offer));
-        </script>`,
-      );
-      await rtc.waitForTimeout(1_500);
       expect(servers.hits.length).toBe(before);
-      expect(udpPackets).toBe(0);
     } finally {
       await context.close();
+    }
+  });
+
+  // Controle: prova que o teste acima e o de WebRTC detectam uma fuga. Sem a política de
+  // WebRTC do lançamento, o STUN sai por UDP direto, mesmo com o proxy no contexto.
+  it("controle: sem --force-webrtc-ip-handling-policy, o WebRTC escapa do proxy", async () => {
+    const plain = await chromium.launch({
+      ...LAUNCH_OPTIONS,
+      args: (LAUNCH_OPTIONS.args ?? []).filter((arg) => !arg.startsWith("--force-webrtc-ip-handling-policy")),
+    });
+    const server = buildServer(plain, options());
+    try {
+      const before = udpPackets;
+      const res = await scanWith(server, url("/webrtc.html"));
+      expect(res.statusCode).toBe(200);
+      for (let i = 0; i < 30 && udpPackets === before; i++) await sleep(100);
+      expect(udpPackets).toBeGreaterThan(before);
+    } finally {
+      await server.close();
+      await plain.close();
     }
   });
 });

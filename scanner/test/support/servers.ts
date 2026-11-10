@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 
 export interface Hit {
   url: string;
@@ -16,8 +18,9 @@ export interface LocalServers {
   // Pedidos que chegaram pelo ::1 (o endereço "privado" nos testes de rebinding).
   ipv6Hits: Hit[];
   ipv6: boolean;
-  // Pedidos de WebSocket (`Upgrade`) recebidos; todos são recusados.
-  upgrades: () => number;
+  // Caminhos dos pedidos de WebSocket (`Upgrade`) recebidos. Os que começam com
+  // `/ws-aceita` recebem o handshake; os outros são recusados.
+  upgrades: string[];
   close(): Promise<void>;
 }
 
@@ -39,11 +42,19 @@ export async function startServers(handler: (req: IncomingMessage, res: ServerRe
     });
   };
 
-  let upgrades = 0;
+  const upgrades: string[] = [];
+  const sockets = new Set<Duplex>();
   const countUpgrade = (server: Server) =>
-    server.on("upgrade", (_req, socket) => {
-      upgrades += 1;
-      socket.destroy();
+    server.on("upgrade", (req, socket) => {
+      upgrades.push(req.url ?? "");
+      const key = req.headers["sec-websocket-key"];
+      if (!req.url?.startsWith("/ws-aceita") || typeof key !== "string") return socket.destroy();
+      const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+      socket.write(
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      );
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
     });
 
   const ipv4 = createServer(listener);
@@ -71,9 +82,10 @@ export async function startServers(handler: (req: IncomingMessage, res: ServerRe
     hits,
     ipv6Hits,
     ipv6,
-    upgrades: () => upgrades,
+    upgrades,
     async close() {
       for (const res of open) res.destroy();
+      for (const socket of sockets) socket.destroy();
       await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
     },
   };

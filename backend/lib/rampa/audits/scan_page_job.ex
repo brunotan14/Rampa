@@ -7,15 +7,16 @@ defmodule Rampa.Audits.ScanPageJob do
   (RF-RA002): defesa em profundidade para as páginas que não vieram de `POST /api/audits`,
   como os links descobertos no M5. URL recusada marca a página `failed` com o código da
   recusa (`blocked_address`, `unsupported_scheme`, `invalid_url` ou `unresolvable`), sem
-  chamar o scanner.
+  chamar o scanner. Falha do resolvedor de DNS (`dns_error`) é passageira e ganha nova
+  tentativa.
 
   Tentativas (`max_attempts: 2`):
 
-    * definitivos: as recusas do `URLGuard`, `blocked_address`, `http_error` e
-      `invalid_request` marcam a página `failed` na hora e cancelam o job
-      (`{:cancel, code}`);
-    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: os erros
-      `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
+    * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
+      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` marcam a página
+      `failed` na hora e cancelam o job (`{:cancel, code}`);
+    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
+      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
       gravação recusada (`invalid_scan_result`) e exceções (`internal_error`). Na última
       tentativa a página é marcada `failed` com o código e a auditoria é atualizada; o job
       devolve `{:error, code}` (ou relança a exceção) para o Oban registrar;
@@ -43,6 +44,7 @@ defmodule Rampa.Audits.ScanPageJob do
     :unsupported_scheme,
     :invalid_url,
     :unresolvable,
+    :resource_limit,
     :http_error,
     :invalid_request
   ]

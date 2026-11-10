@@ -1,13 +1,15 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { errors, type Browser, type BrowserContext, type Page } from "playwright";
 import { runAxe, type AxeFacts } from "./axe.js";
-import { DEFAULT_LIMITS, type FetchLimits } from "./ssrf/fetch.js";
-import { interceptRequests, type InterceptState } from "./ssrf/intercept.js";
-import { checkUrl, defaultPolicy, type SsrfPolicy } from "./ssrf/policy.js";
+import { trackDocument, type DocumentTracker } from "./document.js";
+import { classifyRequests, type RouteState } from "./ssrf/intercept.js";
+import { checkUrl, defaultPolicy, type BlockReason, type SsrfPolicy } from "./ssrf/policy.js";
+import { DEFAULT_PROXY_LIMITS, startScanProxy, type ProxyLimits, type ScanProxy } from "./ssrf/proxy.js";
 
 // Serviço sem estado (PRD §7): recebe uma URL e devolve fatos sobre a página.
-// Toda requisição da página passa pela proteção contra SSRF (RF-RA002, `ssrf/`), e o
-// navegador precisa vir de `launchBrowser`, que tira do Chromium a saída de rede própria.
+// Proteção contra SSRF (RF-RA002, `ssrf/`): cada varredura tem um proxy de saída próprio,
+// que valida toda conexão, e um route que classifica e conta. O navegador precisa vir de
+// `launchBrowser`, que tira do Chromium a saída de rede fora do proxy.
 
 // Limites por página (RF-RA002): 30 s para carregar e 90 s de análise no total.
 const NAVIGATION_TIMEOUT_MS = 30_000;
@@ -22,18 +24,22 @@ export interface ScanResult {
   http_status: number | null;
   title: string;
   axe: AxeFacts;
-  // Sub-recursos (imagem, script, fetch, iframe) recusados pela proteção contra SSRF.
+  // Requisições recusadas pela proteção contra SSRF fora do documento principal: as que o
+  // route recusou e as que só o proxy viu (saltos de redirecionamento, WebSocket, workers).
   blocked_requests: number;
 }
 
-// `blocked_address`: a URL, um redirecionamento do documento ou uma navegação do documento
-// principal vai para endereço proibido (HTTP 422).
-// `timeout`: a página não carregou em 30 s ou a análise passou do limite total.
-// `navigation_failed`: a página não abriu. `http_error`: o documento respondeu >= 400.
-// `analysis_failed`: a página abriu, mas a coleta falhou depois (axe, título, contexto
-// destruído por um redirecionamento feito por script).
+// `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação
+// do documento principal vai para endereço proibido ou porta não permitida.
+// `invalid_url` (422): URL com credenciais ou host inválido.
+// `resource_limit` (422): a página passou do teto de dados ou de conexões da varredura.
+// `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total.
+// `navigation_failed` (502): a página não abriu. `http_error` (502): o documento respondeu >= 400.
+// `analysis_failed` (502): a página abriu, mas a coleta falhou depois (axe, título).
 export type ScanErrorCode =
   | "blocked_address"
+  | "invalid_url"
+  | "resource_limit"
   | "timeout"
   | "http_error"
   | "navigation_failed"
@@ -52,8 +58,8 @@ export interface ServerOptions {
   // Proteção contra SSRF. Em produção só a `allowlist` vem de fora (`SSRF_ALLOWLIST`); os
   // testes trocam o DNS e as portas do documento para usar um servidor local.
   ssrf?: Partial<SsrfPolicy>;
-  // Limites por recurso buscado no Node.
-  limits?: Partial<FetchLimits>;
+  // Teto de dados e de conexões do proxy de cada varredura.
+  limits?: Partial<ProxyLimits>;
 }
 
 type Outcome = { code: 200; body: ScanResult } | { code: 422 | 502 | 504; body: ScanError };
@@ -63,12 +69,9 @@ const fail = (code: 422 | 502 | 504, error: ScanErrorCode, detail: string): Outc
   body: { error, detail },
 });
 
-const blocked = (detail: string) => fail(422, "blocked_address", detail);
-
-// Redirecionamentos do documento principal seguidos ao abrir a página.
-const MAX_DOCUMENT_REDIRECTS = 10;
-
-type Opened = { status: number | null } | { outcome: Outcome };
+// URL recusada pelo `checkUrl`: endereço proibido ou URL inválida.
+const refused = (reason: BlockReason, detail: string) =>
+  fail(422, reason === "blocked_address" ? "blocked_address" : "invalid_url", detail);
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -76,77 +79,82 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
   const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS;
   const analyze = options.analyze ?? runAxe;
   const policy = defaultPolicy(options.ssrf);
-  const limits: FetchLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const limits: ProxyLimits = { ...DEFAULT_PROXY_LIMITS, ...options.limits };
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
-
-  // Abre a página seguindo os redirecionamentos do documento um a um: cada salto é uma
-  // navegação nova, que passa pela proteção contra SSRF (ver `ssrf/intercept.ts`). Os 30 s
-  // valem para a abertura inteira, com todos os saltos.
-  async function open(page: Page, url: string, state: InterceptState): Promise<Opened> {
-    const deadline = Date.now() + NAVIGATION_TIMEOUT_MS;
-    let target = url;
-    for (let redirects = 0; ; redirects++) {
-      state.documentRedirect = null;
-      state.documentError = null;
-      const timeout = deadline - Date.now();
-      if (timeout <= 0) return { outcome: fail(504, "timeout", `página não carregou em ${NAVIGATION_TIMEOUT_MS} ms`) };
-
-      let status: number | null;
-      try {
-        const response = await page.goto(target, { waitUntil: "load", timeout });
-        status = response?.status() ?? null;
-      } catch (error) {
-        if (state.documentBlocked !== null) return { outcome: blocked(state.documentBlocked) };
-        if (error instanceof errors.TimeoutError) return { outcome: fail(504, "timeout", error.message) };
-        return { outcome: fail(502, "navigation_failed", state.documentError ?? message(error)) };
-      }
-
-      if (state.documentRedirect === null) return { status };
-      if (redirects >= MAX_DOCUMENT_REDIRECTS) {
-        return { outcome: fail(502, "navigation_failed", `mais de ${MAX_DOCUMENT_REDIRECTS} redirecionamentos`) };
-      }
-      target = state.documentRedirect;
-    }
-  }
 
   // Nunca rejeita: todo erro vira um `Outcome`. Depois que o prazo total estoura e o
   // contexto é fechado, o erro que isso provoca aqui é descartado.
-  async function scan(context: BrowserContext, url: string, signal: AbortSignal): Promise<Outcome> {
+  async function scan(context: BrowserContext, proxy: ScanProxy, url: string): Promise<Outcome> {
     let page: Page | undefined;
-    let state: InterceptState;
-    let status: number | null;
+    let doc: DocumentTracker;
+    let route: RouteState;
     try {
-      state = await interceptRequests(context, () => page, policy, limits, signal);
+      route = await classifyRequests(context, () => page, policy);
       page = await context.newPage();
-      const opened = await open(page, url, state);
-      if ("outcome" in opened) return opened.outcome;
-      status = opened.status;
-      state.opening = false;
+      doc = trackDocument(page, proxy.token);
     } catch (error) {
       return fail(502, "navigation_failed", message(error));
     }
 
-    // Página de erro não é auditada: o axe acharia problemas da página de erro, não do site.
-    if (status !== null && status >= 400) return fail(502, "http_error", `HTTP ${status}`);
+    // O que invalida a varredura a qualquer momento: documento recusado pelo route, um
+    // bloqueio do proxy num salto ou navegação do documento, ou um limite estourado.
+    const verdict = (): Outcome | null => {
+      if (route.documentBlocked) return refused(route.documentBlocked.reason, route.documentBlocked.detail);
+      const block = proxy.blocks.findLast(({ target }) => doc.refusedTargets.has(target));
+      if (block) return refused("blocked_address", block.detail);
+      if (proxy.limitExceeded !== null) return fail(422, "resource_limit", proxy.limitExceeded);
+      return null;
+    };
+    const documentError = () => [...doc.targets].map((target) => proxy.errors.get(target)).findLast(Boolean);
 
-    let result: ScanResult;
+    const deadline = Date.now() + NAVIGATION_TIMEOUT_MS;
     try {
-      result = {
-        final_url: page.url(),
-        http_status: status,
-        title: await page.title(),
-        axe: await analyze(page),
-        blocked_requests: 0,
-      };
+      await page.goto(url, { waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
     } catch (error) {
-      if (state.documentBlocked !== null) return blocked(state.documentBlocked);
-      return fail(502, "analysis_failed", message(error));
+      const outcome = verdict();
+      if (outcome) return outcome;
+      if (error instanceof errors.TimeoutError) return fail(504, "timeout", error.message);
+      return fail(502, "navigation_failed", documentError() ?? message(error));
     }
 
-    // A página tentou navegar para endereço proibido depois de aberta: o que foi analisado
-    // pode ser a página de erro do navegador, então a varredura não vale.
-    if (state.documentBlocked !== null) return blocked(state.documentBlocked);
-    return { code: 200, body: { ...result, blocked_requests: state.blockedRequests } };
+    // A página pode navegar sozinha logo depois de abrir (ex.: no `onload`): analisa o destino.
+    const settled = await doc.settle(deadline);
+    const early = verdict();
+    if (early) return early;
+    if (!settled) return fail(504, "timeout", `a página não terminou de carregar em ${NAVIGATION_TIMEOUT_MS} ms`);
+
+    const finalUrl = page.url();
+    if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+      return fail(502, "navigation_failed", documentError() ?? "a navegação da página falhou depois de aberta");
+    }
+    // O salto de um redirecionamento não passa pelo route: a porta do destino é conferida aqui.
+    const finalCheck = checkUrl(finalUrl, policy, "document");
+    if (!finalCheck.ok) return refused(finalCheck.reason, finalCheck.detail);
+
+    // Página de erro não é auditada: o axe acharia problemas da página de erro, não do site.
+    const status = doc.status;
+    if (status !== null && status >= 400) return fail(502, "http_error", `HTTP ${status}`);
+
+    let facts: { title: string; axe: AxeFacts };
+    try {
+      facts = { title: await page.title(), axe: await analyze(page) };
+    } catch (error) {
+      return verdict() ?? fail(502, "analysis_failed", message(error));
+    }
+
+    const late = verdict();
+    if (late) return late;
+    // Aqui nenhum bloqueio do proxy é do documento (senão `verdict` teria recusado): todos
+    // são de sub-recursos que o route não recusou, então nada é contado duas vezes.
+    return {
+      code: 200,
+      body: {
+        final_url: finalUrl,
+        http_status: status,
+        ...facts,
+        blocked_requests: route.blockedRequests + proxy.blocks.length,
+      },
+    };
   }
 
   app.get("/health", async () => ({ status: "ok" }));
@@ -164,37 +172,42 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
       },
     },
     async (request, reply) => {
-      // Recusa cedo, sem abrir o navegador; a navegação confere de novo, a cada salto.
+      // Recusa cedo, sem abrir o navegador; o route e o proxy conferem de novo cada conexão.
       const check = checkUrl(request.body.url, policy, "document");
       if (!check.ok) {
-        const outcome = blocked(check.detail);
+        const outcome = refused(check.reason, check.detail);
         return reply.code(outcome.code).send(outcome.body);
       }
 
-      // Service worker atenderia requisições sem passar pelo route: fica bloqueado.
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        serviceWorkers: "block",
-        acceptDownloads: false,
-      });
-      const abort = new AbortController();
+      const proxy = await startScanProxy(policy, limits);
+      let context: BrowserContext | undefined;
       let timer: NodeJS.Timeout | undefined;
-      const deadline = new Promise<Outcome>((resolve) => {
-        timer = setTimeout(
-          () => resolve(fail(504, "timeout", `análise passou de ${totalTimeoutMs} ms`)),
-          totalTimeoutMs,
-        );
-      });
       let outcome: Outcome;
       try {
-        outcome = await Promise.race([scan(context, request.body.url, abort.signal), deadline]);
+        // Service worker atenderia requisições sem passar pelo route: fica bloqueado.
+        context = await browser.newContext({
+          viewport: { width: 1280, height: 800 },
+          proxy: { server: proxy.url },
+          serviceWorkers: "block",
+          acceptDownloads: false,
+        });
+        const deadline = new Promise<Outcome>((resolve) => {
+          timer = setTimeout(
+            () => resolve(fail(504, "timeout", `análise passou de ${totalTimeoutMs} ms`)),
+            totalTimeoutMs,
+          );
+        });
+        outcome = await Promise.race([scan(context, proxy, request.body.url), deadline]);
       } finally {
         clearTimeout(timer);
-        // Cancela as buscas que o route ainda tiver em andamento no Node.
-        abort.abort();
         // Fechar o contexto aborta a navegação ou o axe que ainda estiverem rodando, e
         // acontece antes da resposta: quando o backend recebe, a memória já foi liberada.
-        await context.close();
+        await context?.close();
+        await proxy.close();
+      }
+
+      if (proxy.blocks.length > 0) {
+        request.log.info({ blocked: proxy.blocks.map(({ detail }) => detail) }, "conexões bloqueadas pelo proxy");
       }
       return reply.code(outcome.code).send(outcome.body);
     },

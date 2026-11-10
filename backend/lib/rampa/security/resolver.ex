@@ -4,7 +4,8 @@ defmodule Rampa.Security.Resolver do
   escolhida por configuração (`:dns_resolver`), para os testes usarem Mox.
 
   `resolve/1` devolve **todos** os IPs do nome, IPv4 e IPv6: a checagem recusa o host se
-  qualquer um deles for proibido.
+  qualquer um deles for proibido. `{:error, :nxdomain}` quer dizer que o nome não tem
+  registro (definitivo); qualquer outro erro é falha do resolvedor (passageira).
   """
 
   @callback resolve(host :: String.t()) :: {:ok, [:inet.ip_address()]} | {:error, term()}

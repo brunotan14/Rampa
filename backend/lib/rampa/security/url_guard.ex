@@ -23,7 +23,9 @@ defmodule Rampa.Security.URLGuard do
     * `:blocked_address`: porta fora de 80/443, nome interno (sem ponto, `localhost`,
       `.local`, `.internal`, `.localdomain`, `.home.arpa`) ou IP, literal ou resolvido,
       numa faixa proibida (`Rampa.Security.IPRanges`). Basta **um** IP proibido;
-    * `:unresolvable`: o DNS não devolveu nenhum IP.
+    * `:unresolvable`: o nome não existe ou não tem registro A nem AAAA (definitivo);
+    * `:dns_error`: o resolvedor falhou (tempo esgotado, SERVFAIL...), o que pode ser
+      passageiro.
 
   Hosts da `SSRF_ALLOWLIST` (`Rampa.Security.Allowlist`) pulam a checagem de nome e de IP,
   mas não a de esquema nem a de porta.
@@ -31,7 +33,8 @@ defmodule Rampa.Security.URLGuard do
 
   alias Rampa.Security.{Allowlist, IPRanges, Resolver}
 
-  @type reason :: :invalid_url | :unsupported_scheme | :blocked_address | :unresolvable
+  @type reason ::
+          :invalid_url | :unsupported_scheme | :blocked_address | :unresolvable | :dns_error
 
   @max_length 2_048
   @schemes ["http", "https"]
@@ -131,7 +134,9 @@ defmodule Rampa.Security.URLGuard do
     else
       case resolver.resolve(name) do
         {:ok, [_ | _] = ips} -> check_ips(ips)
-        _empty_or_error -> {:error, :unresolvable}
+        {:ok, []} -> {:error, :unresolvable}
+        {:error, :nxdomain} -> {:error, :unresolvable}
+        {:error, _reason} -> {:error, :dns_error}
       end
     end
   end

@@ -334,7 +334,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros definitivos" do
-    for code <- [:blocked_address, :http_error, :invalid_request] do
+    for code <- [:blocked_address, :invalid_url, :resource_limit, :http_error, :invalid_request] do
       @tag :capture_log
       test "#{code} marca a página e a auditoria como falhas e cancela o job" do
         code = unquote(code)
@@ -512,12 +512,36 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
 
     @tag :capture_log
-    test "DNS que não resolve é definitivo" do
+    test "nome sem registro no DNS é definitivo" do
       page = page_fixture(%{url: "https://nao-existe.exemplo.com/"})
       expect(ResolverMock, :resolve, fn _host -> {:error, :nxdomain} end)
 
       assert {:cancel, :unresolvable} = perform(page, attempt: 1)
       assert %Page{status: :failed, error: "unresolvable"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "falha do resolvedor tenta de novo e só marca falha na última tentativa" do
+      page = page_fixture(%{url: "https://instavel.exemplo.com/"})
+      expect(ResolverMock, :resolve, 2, fn _host -> {:error, :timeout} end)
+
+      assert {:error, :dns_error} = perform(page, attempt: 1)
+      assert %Page{status: :scanning, error: nil} = reload(page)
+
+      assert {:error, :dns_error} = perform(page, attempt: 2)
+      assert %Page{status: :failed, error: "dns_error"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "falha passageira do DNS seguida de sucesso varre a página" do
+      page = page_fixture(%{url: "https://instavel.exemplo.com/limpa.html"})
+      expect(ResolverMock, :resolve, fn _host -> {:error, :servfail} end)
+      assert {:error, :dns_error} = perform(page, attempt: 1)
+
+      expect(ResolverMock, :resolve, fn _host -> {:ok, [{93, 184, 215, 14}]} end)
+      expect_scan(page, {:ok, scanner_response("limpa")})
+      assert :ok = perform(page, attempt: 2)
+      assert %Page{status: :done} = reload(page)
     end
 
     test "o scanner recebe a URL normalizada" do

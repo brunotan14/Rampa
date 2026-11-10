@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isBlockedIp } from "../src/ssrf/ip.js";
-import { checkUrl, defaultPolicy, parseAllowlist } from "../src/ssrf/policy.js";
+import { checkStartup, checkUrl, defaultPolicy, parseAllowlist } from "../src/ssrf/policy.js";
 
 // Casos compartilhados com o backend (`backend/test/rampa/security/url_guard_test.exs`).
 interface SharedCases {
@@ -21,7 +21,9 @@ describe("casos compartilhados com o backend: IPs", () => {
 
 describe("casos compartilhados com o backend: URLs do documento", () => {
   it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist }) => {
-    const check = checkUrl(url, defaultPolicy({ allowlist: new Set(allowlist ?? []) }), "document");
+    // A lista passa pela mesma interpretação da variável de ambiente, como no backend.
+    const hosts = parseAllowlist((allowlist ?? []).join(","));
+    const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }), "document");
     expect(check.ok ? "ok" : check.reason).toBe(expected);
   });
 });
@@ -84,6 +86,27 @@ describe("checkUrl", () => {
   });
 });
 
+describe("checkStartup", () => {
+  it("em produção, com a lista preenchida, recusa subir e explica o motivo", () => {
+    const result = checkStartup("production", ["fixtures"]);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason).toMatch(/SSRF_ALLOWLIST está preenchida em produção \(fixtures\)/);
+  });
+
+  it("em produção, com a lista vazia, sobe sem aviso", () => {
+    expect(checkStartup("production", [])).toEqual({ ok: true, warning: null });
+  });
+
+  it("fora de produção sobe e avisa", () => {
+    for (const env of ["test", "development", undefined]) {
+      expect(checkStartup(env, ["fixtures"])).toEqual({
+        ok: true,
+        warning: "SSRF_ALLOWLIST preenchida: fixtures sem checagem de nome e de IP",
+      });
+    }
+  });
+});
+
 describe("parseAllowlist", () => {
   it("é vazia por padrão", () => {
     expect(parseAllowlist(undefined)).toEqual([]);
@@ -93,5 +116,9 @@ describe("parseAllowlist", () => {
 
   it("separa por vírgula, normaliza e remove repetidos", () => {
     expect(parseAllowlist(" fixtures, FIXTURES. ,outro.test")).toEqual(["fixtures", "outro.test"]);
+  });
+
+  it("tira os colchetes do IPv6, como o backend", () => {
+    expect(parseAllowlist("[::1], FD00::1")).toEqual(["::1", "fd00::1"]);
   });
 });

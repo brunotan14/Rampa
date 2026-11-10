@@ -16,6 +16,10 @@ defmodule Rampa.Security.AllowlistTest do
       assert Allowlist.parse(" fixtures, Fixtures. ,outro.test") == ["fixtures", "outro.test"]
     end
 
+    test "tira os colchetes do IPv6, como o scanner" do
+      assert Allowlist.parse("[::1], FD00::1") == ["::1", "fd00::1"]
+    end
+
     test "aceita lista" do
       assert Allowlist.parse(["fixtures", "OUTRO"]) == ["fixtures", "outro"]
     end

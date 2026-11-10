@@ -10,6 +10,8 @@ defmodule Rampa.Scanner.HTTP do
 
   @error_codes %{
     "blocked_address" => :blocked_address,
+    "invalid_url" => :invalid_url,
+    "resource_limit" => :resource_limit,
     "timeout" => :timeout,
     "http_error" => :http_error,
     "navigation_failed" => :navigation_failed,

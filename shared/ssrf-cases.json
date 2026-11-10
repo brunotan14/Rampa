@@ -1,5 +1,5 @@
 {
-  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL do documento principal e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso.",
+  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL do documento principal e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso, interpretada pela mesma função que lê a variável de ambiente em cada lado.",
   "ips": [
     { "ip": "0.0.0.0", "blocked": true, "range": "0.0.0.0/8" },
     { "ip": "0.255.255.255", "blocked": true, "range": "0.0.0.0/8" },
@@ -136,6 +136,12 @@
     { "url": "http://postgres/", "allowlist": ["fixtures"], "expected": "blocked_address" },
     { "url": "http://fixtures:8080/", "allowlist": ["fixtures"], "expected": "blocked_address" },
     { "url": "ftp://fixtures/", "allowlist": ["fixtures"], "expected": "unsupported_scheme" },
-    { "url": "http://fixtures.local/", "allowlist": ["fixtures"], "expected": "blocked_address" }
+    { "url": "http://fixtures.local/", "allowlist": ["fixtures"], "expected": "blocked_address" },
+    { "url": "http://[::1]/", "allowlist": ["::1"], "expected": "ok" },
+    { "url": "http://[::1]/", "allowlist": ["[::1]"], "expected": "ok" },
+    { "url": "http://[0:0:0:0:0:0:0:1]/", "allowlist": ["[::1]"], "expected": "ok" },
+    { "url": "http://[::2]/", "allowlist": ["[::1]"], "expected": "blocked_address" },
+    { "url": "http://[::1]:8080/", "allowlist": ["[::1]"], "expected": "blocked_address" },
+    { "url": "http://127.0.0.1/", "allowlist": ["[::1]"], "expected": "blocked_address" }
   ]
 }

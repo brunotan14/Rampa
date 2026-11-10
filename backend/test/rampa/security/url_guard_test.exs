@@ -3,7 +3,7 @@ defmodule Rampa.Security.URLGuardTest do
 
   import Mox
 
-  alias Rampa.Security.{IPRanges, ResolverMock, URLGuard}
+  alias Rampa.Security.{Allowlist, IPRanges, ResolverMock, URLGuard}
 
   setup :verify_on_exit!
 
@@ -51,12 +51,19 @@ defmodule Rampa.Security.URLGuardTest do
       assert {:ok, "https://exemplo.com/"} = validate("https://exemplo.com")
     end
 
-    test "DNS que não resolve é recusado" do
+    test "nome sem registro é recusado como unresolvable" do
       expect(ResolverMock, :resolve, fn _host -> {:error, :nxdomain} end)
       assert {:error, :unresolvable} = validate("https://nao-existe.exemplo.com/")
 
       expect(ResolverMock, :resolve, fn _host -> {:ok, []} end)
       assert {:error, :unresolvable} = validate("https://vazio.exemplo.com/")
+    end
+
+    test "falha do resolvedor vira dns_error, que é passageiro" do
+      for reason <- [:timeout, :servfail, :etimedout, {:exit, :killed}] do
+        expect(ResolverMock, :resolve, fn _host -> {:error, reason} end)
+        assert {:error, :dns_error} = validate("https://instavel.exemplo.com/")
+      end
     end
   end
 
@@ -171,6 +178,14 @@ defmodule Rampa.Security.URLGuardTest do
                validate("http://a.fixtures.com/", allowlist: ["fixtures.com"])
     end
 
+    test "IPv6 na lista, com ou sem colchetes, libera o mesmo host" do
+      for entry <- ["::1", "[::1]"] do
+        allowlist = Allowlist.parse(entry)
+        assert {:ok, "http://[::1]/"} = validate("http://[::1]/", allowlist: allowlist)
+        assert {:error, :blocked_address} = validate("http://[::2]/", allowlist: allowlist)
+      end
+    end
+
     test "sem a opção, usa a configuração" do
       assert {:error, :blocked_address} = URLGuard.validate("http://fixtures/")
     end
@@ -205,9 +220,11 @@ defmodule Rampa.Security.URLGuardTest do
     end
 
     for %{"url" => url, "expected" => expected} = test_case <- @cases["urls"] do
-      allowlist = Map.get(test_case, "allowlist", [])
+      raw = Map.get(test_case, "allowlist", [])
+      # A lista passa pela mesma interpretação da variável de ambiente, como no scanner.
+      allowlist = Allowlist.parse(raw)
 
-      test "#{url} #{if allowlist != [], do: "(allowlist #{Enum.join(allowlist, ",")}) "}→ #{expected}" do
+      test "#{url} #{if raw != [], do: "(allowlist #{Enum.join(raw, ",")}) "}→ #{expected}" do
         result = validate(unquote(url), allowlist: unquote(allowlist))
 
         case unquote(expected) do
