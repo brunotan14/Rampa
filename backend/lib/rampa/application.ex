@@ -21,6 +21,8 @@ defmodule Rampa.Application do
       Rampa.Repo,
       {DNSCluster, query: Application.get_env(:rampa, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Rampa.PubSub},
+      # Tarefas sem link com quem chamou (ex.: consultas de DNS do `Resolver.Inet`).
+      {Task.Supervisor, name: Rampa.TaskSupervisor},
       {Oban, Application.fetch_env!(:rampa, Oban)},
       # Start to serve requests, typically the last entry
       RampaWeb.Endpoint

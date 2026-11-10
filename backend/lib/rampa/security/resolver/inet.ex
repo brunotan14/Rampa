@@ -2,7 +2,9 @@ defmodule Rampa.Security.Resolver.Inet do
   @moduledoc """
   Implementação do `Rampa.Security.Resolver` com o resolvedor do sistema (`:inet`).
 
-  Consulta A e AAAA em paralelo, com 5 s no total. Na dúvida, fecha:
+  Consulta A e AAAA em paralelo, com 5 s no total, em tarefas sem link
+  (`Rampa.TaskSupervisor`): um `exit` na consulta vira erro, e não derruba quem chamou.
+  Na dúvida, fecha:
 
     * as duas famílias sem registro (`:nxdomain`, que o Erlang usa também para "sem registro
       desse tipo") devolvem `{:error, :nxdomain}`;
@@ -29,7 +31,11 @@ defmodule Rampa.Security.Resolver.Inet do
     name = String.to_charlist(host)
 
     [:inet, :inet6]
-    |> Enum.map(fn family -> Task.async(fn -> getaddrs.(name, family, timeout) end) end)
+    |> Enum.map(fn family ->
+      Task.Supervisor.async_nolink(Rampa.TaskSupervisor, fn ->
+        getaddrs.(name, family, timeout)
+      end)
+    end)
     |> Task.yield_many(timeout)
     |> Enum.map(fn {task, result} -> result || Task.shutdown(task, :brutal_kill) end)
     |> Enum.map(&family_result/1)

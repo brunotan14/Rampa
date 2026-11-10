@@ -18,6 +18,8 @@ export interface LocalServers {
   // Pedidos que chegaram pelo ::1 (o endereço "privado" nos testes de rebinding).
   ipv6Hits: Hit[];
   ipv6: boolean;
+  // Servidor IPv4, para os testes que contam conexões.
+  server: Server;
   // Caminhos dos pedidos de WebSocket (`Upgrade`) recebidos. Os que começam com
   // `/ws-aceita` recebem o handshake; os outros são recusados.
   upgrades: string[];
@@ -82,6 +84,7 @@ export async function startServers(handler: (req: IncomingMessage, res: ServerRe
     hits,
     ipv6Hits,
     ipv6,
+    server: ipv4,
     upgrades,
     async close() {
       for (const res of open) res.destroy();

@@ -13,6 +13,8 @@ import { DEFAULT_PROXY_LIMITS, startScanProxy, type ProxyLimits, type ScanProxy 
 
 // Limites por página (RF-RA002): 30 s para carregar e 90 s de análise no total.
 const NAVIGATION_TIMEOUT_MS = 30_000;
+// Janela, depois de aberta a página, para a navegação que ela dispara sozinha terminar.
+const SETTLE_WINDOW_MS = 2_000;
 export const DEFAULT_TOTAL_TIMEOUT_MS = 90_000;
 
 interface ScanBody {
@@ -54,6 +56,8 @@ export interface ScanError {
 export interface ServerOptions {
   // Tempo máximo de uma análise, da abertura da página à resposta.
   totalTimeoutMs?: number;
+  // Prazo para abrir a página (padrão 30 s); menor só nos testes.
+  navigationTimeoutMs?: number;
   // Coleta do axe; substituível nos testes.
   analyze?: (page: Page) => Promise<AxeFacts>;
   // Proteção contra SSRF. Em produção só a `allowlist` vem de fora (`SSRF_ALLOWLIST`); os
@@ -78,6 +82,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 export function buildServer(browser: Browser, options: ServerOptions = {}): FastifyInstance {
   const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS;
+  const navigationTimeoutMs = options.navigationTimeoutMs ?? NAVIGATION_TIMEOUT_MS;
   const analyze = options.analyze ?? runAxe;
   const policy = defaultPolicy(options.ssrf);
   const limits: ProxyLimits = { ...DEFAULT_PROXY_LIMITS, ...options.limits };
@@ -85,7 +90,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
 
   // Nunca rejeita: todo erro vira um `Outcome`. Depois que o prazo total estoura e o
   // contexto é fechado, o erro que isso provoca aqui é descartado.
-  async function scan(context: BrowserContext, proxy: ScanProxy, url: string): Promise<Outcome> {
+  async function scan(context: BrowserContext, proxy: ScanProxy, url: string, scanDeadline: number): Promise<Outcome> {
     let page: Page | undefined;
     let doc: DocumentTracker;
     let route: RouteState;
@@ -108,9 +113,8 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     };
     const documentError = () => [...doc.targets].map((target) => proxy.errors.get(target)).findLast(Boolean);
 
-    const deadline = Date.now() + NAVIGATION_TIMEOUT_MS;
     try {
-      await page.goto(url, { waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
+      await page.goto(url, { waitUntil: "load", timeout: navigationTimeoutMs });
     } catch (error) {
       const outcome = verdict();
       if (outcome) return outcome;
@@ -119,10 +123,11 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     }
 
     // A página pode navegar sozinha logo depois de abrir (ex.: no `onload`): analisa o destino.
-    const settled = await doc.settle(deadline);
+    // A espera tem janela própria, limitada pelo prazo total, e não o que sobrou da abertura.
+    const settled = await doc.settle(Math.min(Date.now() + SETTLE_WINDOW_MS, scanDeadline));
     const early = verdict();
     if (early) return early;
-    if (!settled) return fail(504, "timeout", `a página não terminou de carregar em ${NAVIGATION_TIMEOUT_MS} ms`);
+    if (!settled) return fail(504, "timeout", `a página continuou navegando por mais de ${SETTLE_WINDOW_MS} ms`);
 
     const finalUrl = page.url();
     if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
@@ -181,6 +186,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
         return reply.code(outcome.code).send(outcome.body);
       }
 
+      const startedAt = Date.now();
       const proxy = await startScanProxy(policy, limits);
       let context: BrowserContext | undefined;
       let timer: NodeJS.Timeout | undefined;
@@ -199,7 +205,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
             totalTimeoutMs,
           );
         });
-        outcome = await Promise.race([scan(context, proxy, request.body.url), deadline]);
+        outcome = await Promise.race([scan(context, proxy, request.body.url, startedAt + totalTimeoutMs), deadline]);
       } finally {
         clearTimeout(timer);
         // Fechar o contexto aborta a navegação ou o axe que ainda estiverem rodando, e

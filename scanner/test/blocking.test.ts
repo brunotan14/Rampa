@@ -47,6 +47,14 @@ const pages = (): Record<string, (cookie: string | undefined) => Page_> => ({
     body: "",
   }),
   "/laco": () => ({ status: 302, headers: { location: "/laco" }, body: "" }),
+  "/onload-download.html": () => ({
+    body: html("Navega para download", `<script>onload = () => { location.href = "/arquivo.zip"; };</script>`),
+  }),
+  "/arquivo.zip": () => ({
+    headers: { "content-type": "application/zip", "content-disposition": 'attachment; filename="arquivo.zip"' },
+    body: "PK",
+  }),
+  "/demorada.html": () => ({ body: limpa, delayMs: 800 }),
   "/onload-navega.html": () => ({
     body: html("Antes de navegar", `<script>onload = () => { location.href = "/redireciona-limpa"; };</script>`),
   }),
@@ -313,6 +321,24 @@ describe("documento principal", () => {
     const res = await scan(url("/onload-navega.html"));
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ final_url: url("/limpa.html"), http_status: 200, title: "Página limpa" });
+  });
+
+  it("navegação para download abortada não deixa a varredura esperando até o prazo", async () => {
+    const started = Date.now();
+    const res = await scan(url("/onload-download.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ title: "Navega para download" });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("página que carrega no fim do prazo de abertura ainda é analisada", async () => {
+    // Prazo de abertura de 1 s e documento que chega aos 0,8 s: a espera depois do `goto`
+    // tem janela própria e não usa o que sobrou da abertura.
+    await withServer({ navigationTimeoutMs: 1_000 }, async (server) => {
+      const res = await scanWith(server, url("/demorada.html"));
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ title: "Página limpa" });
+    });
   });
 
   it("navegação do documento para IP proibido depois de aberto devolve blocked_address", async () => {

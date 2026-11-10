@@ -61,6 +61,8 @@ export function trackDocument(page: Page, blockedToken: string): DocumentTracker
     if (!isMain(request)) return;
     refuse(request.url());
     pending.delete(root(request));
+    // A resposta pode ter chegado (ex.: download abortado) sem documento novo: não haverá `load`.
+    committing = false;
   });
 
   page.on("response", (response: Response) => {

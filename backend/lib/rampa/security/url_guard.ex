@@ -1,8 +1,8 @@
 defmodule Rampa.Security.URLGuard do
   @moduledoc """
   Validação e normalização da URL a auditar (RF-RA001) e proteção contra SSRF (RF-RA002).
-  Toda URL passa por aqui antes de chegar ao scanner: na criação da auditoria e de novo no
-  `Rampa.Audits.ScanPageJob`, antes de cada varredura.
+  Toda URL passa por aqui antes de chegar ao scanner: o `Rampa.Audits.ScanPageJob` valida
+  a URL da página antes de cada varredura.
 
   Normalização:
 

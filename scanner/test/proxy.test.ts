@@ -234,6 +234,29 @@ describe("limites", () => {
     expect(proxy!.limitExceeded).toBe("a página abriu mais de 2 conexões simultâneas");
   });
 
+  it("pedidos concorrentes acima do limite: a vaga é reservada antes do DNS e só o limite conecta", async () => {
+    // DNS lento: sem a reserva, todos passariam pela checagem antes de alguém conectar.
+    await start(
+      {
+        resolve: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return [{ address: "127.0.0.1", family: 4 }];
+        },
+      },
+      { maxConnections: 2 },
+    );
+    let connections = 0;
+    const count = () => (connections += 1);
+    servers.server.on("connection", count);
+    try {
+      await Promise.allSettled(Array.from({ length: 6 }, () => viaProxy(`http://fixtures:${servers.port}/lento`)));
+      expect(proxy!.limitExceeded).toBe("a página abriu mais de 2 conexões simultâneas");
+      expect(connections).toBeLessThanOrEqual(2);
+    } finally {
+      servers.server.off("connection", count);
+    }
+  });
+
   it("os valores padrão são 100 MB e 64 conexões", () => {
     expect(DEFAULT_PROXY_LIMITS).toMatchObject({ maxBytes: 100 * 1024 * 1024, maxConnections: 64 });
   });

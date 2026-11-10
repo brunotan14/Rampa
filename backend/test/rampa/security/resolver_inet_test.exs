@@ -36,6 +36,16 @@ defmodule Rampa.Security.Resolver.InetTest do
     assert {:error, :servfail} = resolve(%{inet: {:ok, [@ipv4]}, inet6: {:error, :servfail}})
   end
 
+  @tag :capture_log
+  test "exit na consulta vira erro e não derruba quem chamou" do
+    crashing = fn _name, family, _timeout ->
+      if family == :inet6, do: exit(:quebrou), else: {:ok, [@ipv4]}
+    end
+
+    assert {:error, {:exit, :quebrou}} = Inet.resolve("exemplo.com", getaddrs: crashing)
+    assert Process.alive?(self())
+  end
+
   test "consulta as duas famílias em paralelo" do
     started = System.monotonic_time(:millisecond)
 

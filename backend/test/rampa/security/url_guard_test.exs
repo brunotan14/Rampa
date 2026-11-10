@@ -60,7 +60,7 @@ defmodule Rampa.Security.URLGuardTest do
     end
 
     test "falha do resolvedor vira dns_error, que é passageiro" do
-      for reason <- [:timeout, :servfail, :etimedout, {:exit, :killed}] do
+      for reason <- [:timeout, :servfail, :etimedout, {:exit, :quebrou}] do
         expect(ResolverMock, :resolve, fn _host -> {:error, reason} end)
         assert {:error, :dns_error} = validate("https://instavel.exemplo.com/")
       end

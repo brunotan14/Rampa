@@ -175,35 +175,49 @@ export async function startScanProxy(policy: SsrfPolicy, limits: ProxyLimits = D
   }
 
   // Abre a conexão com o primeiro IP validado que aceitar, dentro dos limites.
+  // A vaga é reservada antes do DNS: pedidos concorrentes não passam juntos pela checagem.
   async function connect(scheme: string, host: string, port: number): Promise<Socket> {
     if (limitExceeded !== null) throw new Error(limitExceeded);
-    const addresses = await resolveTarget(scheme, host, port);
     if (upstreams >= limits.maxConnections) {
       exceed(`a página abriu mais de ${limits.maxConnections} conexões simultâneas`);
       throw new Error(limitExceeded ?? "limite de conexões");
     }
-
-    let lastError: Error = new Error("sem endereço");
-    for (const { address, family } of addresses) {
-      try {
-        const socket = await new Promise<Socket>((resolve, reject) => {
-          const attempt = net.connect({ host: address, port, family, timeout: limits.connectTimeoutMs });
-          attempt.once("connect", () => {
-            attempt.setTimeout(0);
-            resolve(attempt);
-          });
-          attempt.once("timeout", () => attempt.destroy(new Error(`tempo esgotado ao conectar em ${host}:${port}`)));
-          attempt.once("error", reject);
-        });
-        upstreams += 1;
-        socket.once("close", () => (upstreams -= 1));
-        track(socket);
-        return socket;
-      } catch (error) {
-        lastError = error as Error;
+    upstreams += 1;
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        upstreams -= 1;
       }
+    };
+
+    try {
+      const addresses = await resolveTarget(scheme, host, port);
+      let lastError: Error = new Error("sem endereço");
+      for (const { address, family } of addresses) {
+        if (limitExceeded !== null) throw new Error(limitExceeded);
+        try {
+          const socket = await new Promise<Socket>((resolve, reject) => {
+            const attempt = net.connect({ host: address, port, family, timeout: limits.connectTimeoutMs });
+            attempt.once("connect", () => {
+              attempt.setTimeout(0);
+              resolve(attempt);
+            });
+            attempt.once("timeout", () => attempt.destroy(new Error(`tempo esgotado ao conectar em ${host}:${port}`)));
+            attempt.once("error", reject);
+          });
+          socket.once("close", release);
+          track(socket);
+          return socket;
+        } catch (error) {
+          lastError = error as Error;
+        }
+      }
+      throw lastError;
+    } catch (error) {
+      release();
+      throw error;
     }
-    throw lastError;
   }
 
   // Bloqueio registrado uma vez por conexão ou requisição recusada.
