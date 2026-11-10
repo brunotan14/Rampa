@@ -1,0 +1,33 @@
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Sistema e editores
+.DS_Store
+.vscode/
+.idea/
+
+# Elixir / Phoenix
+backend/_build/
+backend/deps/
+backend/*.ez
+backend/erl_crash.dump
+backend/priv/static/
+
+# Node (frontend e scanner)
+node_modules/
+frontend/dist/
+*.log
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Notas locais que não vão para o repositório público
+*.local.md
+
+CLAUDE.md
+PRD.md
