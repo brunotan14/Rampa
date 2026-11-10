@@ -1,0 +1,44 @@
+# Rampa
+
+Auditor de acessibilidade web com IA, em português do Brasil.
+
+Você informa o endereço de um site. O Rampa percorre as páginas, roda o [axe-core](https://github.com/dequelabs/axe-core) em cada uma e usa IA para avaliar o que a verificação automática não consegue decidir: se o texto alternativo descreve a imagem, se um link faz sentido fora do contexto, se a ordem de foco pelo teclado é lógica e se os títulos representam o conteúdo. O relatório liga cada problema aos critérios da WCAG 2.2 e do eMAG, explicando quem é afetado e como corrigir.
+
+> **Em construção.** O projeto está no primeiro marco: a fundação técnica. Ainda não audita sites.
+
+O Rampa não certifica conformidade: a verificação automática não substitui a avaliação com pessoas e tecnologias assistivas.
+
+## Stack
+
+| Parte | Tecnologia |
+|---|---|
+| `backend/` | Elixir, Phoenix (API JSON + Channels), PostgreSQL, Oban |
+| `frontend/` | React, TypeScript, Vite, React Router, React Aria Components |
+| `scanner/` | Node, Playwright (Chromium), axe-core |
+| `e2e/` | Playwright + axe nas telas do próprio Rampa |
+| `infra/` | Docker Compose |
+
+A interface do Rampa segue a WCAG 2.2 nível AA, e o CI falha com qualquer violação do axe nas telas do próprio produto.
+
+## Rodando localmente
+
+Pré-requisitos: Elixir 1.20 com OTP 29, Node 24 e Docker.
+
+```sh
+make setup   # dependências, banco e navegador do Playwright
+make dev     # banco e scanner no Docker, Phoenix em :4000, interface em http://localhost:5173
+```
+
+Verificar se tudo está de pé: `curl localhost:4000/api/health`.
+
+## Testes
+
+```sh
+make test    # unitários: ExUnit (backend), Vitest (frontend e scanner)
+make e2e     # Playwright + axe
+make lint    # formatação, lint e tipos
+```
+
+## Licença
+
+[AGPL-3.0](LICENSE).

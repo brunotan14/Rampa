@@ -31,3 +31,11 @@ playwright/.cache/
 
 CLAUDE.md
 PRD.md
+# Agentes e skills do Claude Code (locais)
+.claude/
+
+# Design system (cópia de trabalho local)
+design/
+
+# Build do scanner
+scanner/dist/

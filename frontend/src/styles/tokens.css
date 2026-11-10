@@ -1,0 +1,379 @@
+/* Tokens do Rampa. Cópia de design/exports/rampa.css sem o @import do Google Fonts: as fontes vêm dos pacotes @fontsource (ver main.tsx). */
+/* Rampa — variáveis CSS (gerado da mesma fonte que tokens.json). Camadas: primitivos → semânticos → componente. */
+
+/* 1. Primitivos: nunca use direto em componente */
+:root {
+  --azulejo-50: #eef3fb;
+  --azulejo-100: #dbe5f6;
+  --azulejo-200: #b6c9ec;
+  --azulejo-300: #8eaadf;
+  --azulejo-400: #6489cf;
+  --azulejo-500: #3f68b8;
+  --azulejo-600: #2c529e;
+  --azulejo-700: #1f4083;
+  --azulejo-800: #17326a;
+  --azulejo-900: #102551;
+  --azulejo-950: #0a1735;
+  --cerrado-100: #f7e4d9;
+  --cerrado-300: #e3a27f;
+  --cerrado-500: #b65a32;
+  --cerrado-700: #87401f;
+  --cerrado-900: #4d220e;
+  --concreto-0: #ffffff;
+  --concreto-25: #faf9f6;
+  --concreto-50: #f5f3ef;
+  --concreto-100: #e8e5df;
+  --concreto-200: #d5d1c9;
+  --concreto-300: #b8b3a9;
+  --concreto-400: #9a958d;
+  --concreto-500: #77726a;
+  --concreto-600: #55514b;
+  --concreto-700: #46433e;
+  --concreto-800: #302e2b;
+  --concreto-850: #262523;
+  --concreto-900: #1c1b19;
+  --concreto-950: #131211;
+  --concreto-1000: #000000;
+  --carmim-50: #fdedf0;
+  --carmim-700: #991339;
+  --carmim-900: #6e0d2a;
+  --carmim-200: #fbb3c4;
+  --carmim-950: #3b0a18;
+  --brasa-50: #fdefe5;
+  --brasa-700: #86320a;
+  --brasa-900: #692607;
+  --brasa-200: #f9bf96;
+  --brasa-950: #381606;
+  --ocre-50: #faf3dc;
+  --ocre-700: #634a00;
+  --ocre-900: #4f3b00;
+  --ocre-200: #ecd07a;
+  --ocre-950: #2c2306;
+  --ardosia-50: #eef1f4;
+  --ardosia-700: #425166;
+  --ardosia-900: #2c3848;
+  --ardosia-200: #bccad9;
+  --ardosia-950: #1a222c;
+  --mata-50: #e9f6f2;
+  --mata-700: #0a5c4e;
+  --mata-900: #07473c;
+  --mata-200: #86dcc6;
+  --mata-950: #0a2621;
+  --jabuticaba-50: #f4ecfa;
+  --jabuticaba-700: #6b3299;
+  --jabuticaba-900: #4a1f6d;
+  --jabuticaba-200: #d7b9f1;
+  --jabuticaba-950: #24143a;
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+  --border-1: 1px;
+  --border-2: 2px;
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  --target-min: 24px;
+  --target-comfort: 44px;
+  --control-sm: 2.25rem;
+  --control-md: 2.75rem;
+  --control-lg: 3.5rem;
+  --icon-sm: 1rem;
+  --icon-md: 1.25rem;
+  --measure: 70ch;
+  --container: 75rem;
+  --bp-sm: 30em;
+  --bp-md: 48em;
+  --bp-lg: 64em;
+  --bp-xl: 80em;
+  --z-base: 0;
+  --z-sticky: 100;
+  --z-dropdown: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+  --z-skiplink: 700;
+  --duration-instant: 0ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+  --font-sans: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* 2. Semânticos — tema claro (padrão) */
+:root, [data-theme="claro"] {
+  color-scheme: light;
+  --surface: var(--concreto-25);
+  --surface-raised: var(--concreto-0);
+  --surface-sunken: var(--concreto-50);
+  --surface-inverse: var(--concreto-900);
+  --ink: var(--concreto-900);
+  --ink-muted: var(--concreto-600);
+  --ink-inverse: var(--concreto-25);
+  --ink-disabled: var(--concreto-500);
+  --line: var(--concreto-100);
+  --line-strong: var(--concreto-500);
+  --action: var(--azulejo-700);
+  --action-hover: var(--azulejo-800);
+  --action-active: var(--azulejo-900);
+  --on-action: var(--concreto-0);
+  --action-soft: var(--azulejo-50);
+  --link: var(--azulejo-700);
+  --link-visited: var(--jabuticaba-700);
+  --focus-ring: var(--azulejo-700);
+  --critico: var(--carmim-700);
+  --critico-soft: var(--carmim-50);
+  --serio: var(--brasa-700);
+  --serio-soft: var(--brasa-50);
+  --moderado: var(--ocre-700);
+  --moderado-soft: var(--ocre-50);
+  --menor: var(--ardosia-700);
+  --menor-soft: var(--ardosia-50);
+  --sucesso: var(--mata-700);
+  --sucesso-soft: var(--mata-50);
+  --revisao: var(--jabuticaba-700);
+  --revisao-soft: var(--jabuticaba-50);
+  --diff-remove-soft: var(--carmim-50);
+  --diff-add-soft: var(--mata-50);
+  --highlight: var(--ocre-50);
+  --scrim: rgba(19, 18, 17, 0.56);
+  --brand-accent: var(--cerrado-500);
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(19, 18, 17, 0.08);
+  --elevation-2: 0 4px 12px rgba(19, 18, 17, 0.12), 0 1px 3px rgba(19, 18, 17, 0.08);
+  --elevation-3: 0 16px 40px rgba(19, 18, 17, 0.18), 0 2px 6px rgba(19, 18, 17, 0.1);
+}
+
+[data-theme="escuro"] {
+  color-scheme: dark;
+  --surface: var(--concreto-950);
+  --surface-raised: var(--concreto-900);
+  --surface-sunken: var(--concreto-1000);
+  --surface-inverse: var(--concreto-50);
+  --ink: var(--concreto-50);
+  --ink-muted: var(--concreto-300);
+  --ink-inverse: var(--concreto-950);
+  --ink-disabled: var(--concreto-400);
+  --line: var(--concreto-800);
+  --line-strong: var(--concreto-400);
+  --action: var(--azulejo-300);
+  --action-hover: var(--azulejo-200);
+  --action-active: var(--azulejo-100);
+  --on-action: var(--concreto-950);
+  --action-soft: var(--azulejo-950);
+  --link: var(--azulejo-300);
+  --link-visited: var(--jabuticaba-200);
+  --focus-ring: var(--azulejo-300);
+  --critico: var(--carmim-200);
+  --critico-soft: var(--carmim-950);
+  --serio: var(--brasa-200);
+  --serio-soft: var(--brasa-950);
+  --moderado: var(--ocre-200);
+  --moderado-soft: var(--ocre-950);
+  --menor: var(--ardosia-200);
+  --menor-soft: var(--ardosia-950);
+  --sucesso: var(--mata-200);
+  --sucesso-soft: var(--mata-950);
+  --revisao: var(--jabuticaba-200);
+  --revisao-soft: var(--jabuticaba-950);
+  --diff-remove-soft: var(--carmim-950);
+  --diff-add-soft: var(--mata-950);
+  --highlight: var(--ocre-950);
+  --scrim: rgba(0, 0, 0, 0.72);
+  --brand-accent: var(--cerrado-300);
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.6);
+  --elevation-3: 0 16px 40px rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --surface: var(--concreto-950);
+    --surface-raised: var(--concreto-900);
+    --surface-sunken: var(--concreto-1000);
+    --surface-inverse: var(--concreto-50);
+    --ink: var(--concreto-50);
+    --ink-muted: var(--concreto-300);
+    --ink-inverse: var(--concreto-950);
+    --ink-disabled: var(--concreto-400);
+    --line: var(--concreto-800);
+    --line-strong: var(--concreto-400);
+    --action: var(--azulejo-300);
+    --action-hover: var(--azulejo-200);
+    --action-active: var(--azulejo-100);
+    --on-action: var(--concreto-950);
+    --action-soft: var(--azulejo-950);
+    --link: var(--azulejo-300);
+    --link-visited: var(--jabuticaba-200);
+    --focus-ring: var(--azulejo-300);
+    --critico: var(--carmim-200);
+    --critico-soft: var(--carmim-950);
+    --serio: var(--brasa-200);
+    --serio-soft: var(--brasa-950);
+    --moderado: var(--ocre-200);
+    --moderado-soft: var(--ocre-950);
+    --menor: var(--ardosia-200);
+    --menor-soft: var(--ardosia-950);
+    --sucesso: var(--mata-200);
+    --sucesso-soft: var(--mata-950);
+    --revisao: var(--jabuticaba-200);
+    --revisao-soft: var(--jabuticaba-950);
+    --diff-remove-soft: var(--carmim-950);
+    --diff-add-soft: var(--mata-950);
+    --highlight: var(--ocre-950);
+    --scrim: rgba(0, 0, 0, 0.72);
+    --brand-accent: var(--cerrado-300);
+    --elevation-0: none;
+    --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.6);
+    --elevation-3: 0 16px 40px rgba(0, 0, 0, 0.7);
+  }
+}
+
+[data-theme="contraste"] {
+  color-scheme: light;
+  --surface: var(--concreto-0);
+  --surface-raised: var(--concreto-0);
+  --surface-sunken: var(--concreto-0);
+  --surface-inverse: var(--concreto-1000);
+  --ink: var(--concreto-1000);
+  --ink-muted: var(--concreto-800);
+  --ink-inverse: var(--concreto-0);
+  --ink-disabled: var(--concreto-700);
+  --line: var(--concreto-1000);
+  --line-strong: var(--concreto-1000);
+  --action: var(--azulejo-900);
+  --action-hover: var(--azulejo-950);
+  --action-active: var(--concreto-1000);
+  --on-action: var(--concreto-0);
+  --action-soft: var(--azulejo-50);
+  --link: var(--azulejo-900);
+  --link-visited: var(--jabuticaba-900);
+  --focus-ring: var(--concreto-1000);
+  --critico: var(--carmim-900);
+  --critico-soft: var(--concreto-0);
+  --serio: var(--brasa-900);
+  --serio-soft: var(--concreto-0);
+  --moderado: var(--ocre-900);
+  --moderado-soft: var(--concreto-0);
+  --menor: var(--ardosia-900);
+  --menor-soft: var(--concreto-0);
+  --sucesso: var(--mata-900);
+  --sucesso-soft: var(--concreto-0);
+  --revisao: var(--jabuticaba-900);
+  --revisao-soft: var(--concreto-0);
+  --diff-remove-soft: var(--concreto-0);
+  --diff-add-soft: var(--concreto-0);
+  --highlight: var(--concreto-0);
+  --scrim: rgba(0, 0, 0, 0.8);
+  --brand-accent: var(--cerrado-700);
+  --elevation-0: none;
+  --elevation-1: none;
+  --elevation-2: none;
+  --elevation-3: none;
+}
+
+@media (prefers-contrast: more) {
+  :root:not([data-theme]) {
+    --surface: var(--concreto-0);
+    --surface-raised: var(--concreto-0);
+    --surface-sunken: var(--concreto-0);
+    --surface-inverse: var(--concreto-1000);
+    --ink: var(--concreto-1000);
+    --ink-muted: var(--concreto-800);
+    --ink-inverse: var(--concreto-0);
+    --ink-disabled: var(--concreto-700);
+    --line: var(--concreto-1000);
+    --line-strong: var(--concreto-1000);
+    --action: var(--azulejo-900);
+    --action-hover: var(--azulejo-950);
+    --action-active: var(--concreto-1000);
+    --on-action: var(--concreto-0);
+    --action-soft: var(--azulejo-50);
+    --link: var(--azulejo-900);
+    --link-visited: var(--jabuticaba-900);
+    --focus-ring: var(--concreto-1000);
+    --critico: var(--carmim-900);
+    --critico-soft: var(--concreto-0);
+    --serio: var(--brasa-900);
+    --serio-soft: var(--concreto-0);
+    --moderado: var(--ocre-900);
+    --moderado-soft: var(--concreto-0);
+    --menor: var(--ardosia-900);
+    --menor-soft: var(--concreto-0);
+    --sucesso: var(--mata-900);
+    --sucesso-soft: var(--concreto-0);
+    --revisao: var(--jabuticaba-900);
+    --revisao-soft: var(--concreto-0);
+    --diff-remove-soft: var(--concreto-0);
+    --diff-add-soft: var(--concreto-0);
+    --highlight: var(--concreto-0);
+    --scrim: rgba(0, 0, 0, 0.8);
+    --brand-accent: var(--cerrado-700);
+    --elevation-0: none;
+    --elevation-1: none;
+    --elevation-2: none;
+    --elevation-3: none;
+  }
+}
+
+/* 3. Componente */
+:root {
+  --button-primary-bg: var(--action);
+  --button-primary-bg-hover: var(--action-hover);
+  --button-primary-bg-active: var(--action-active);
+  --button-primary-ink: var(--on-action);
+  --button-secondary-border: var(--line-strong);
+  --button-secondary-ink: var(--action);
+  --button-danger-ink: var(--critico);
+  --input-bg: var(--surface-raised);
+  --input-border: var(--line-strong);
+  --input-border-hover: var(--ink-muted);
+  --input-border-error: var(--critico);
+  --control-checked: var(--action);
+  --control-mark: var(--on-action);
+  --card-bg: var(--surface-raised);
+  --card-border: var(--line);
+  --tooltip-bg: var(--surface-inverse);
+  --tooltip-ink: var(--ink-inverse);
+  --progress-track: var(--surface-sunken);
+  --progress-fill: var(--action);
+  --code-bg: var(--surface-sunken);
+  --code-ink: var(--ink);
+  --table-row-selected: var(--action-soft);
+  --tab-indicator: var(--action);
+}
+
+/* Movimento reduzido: durações a zero, só opacidade quando essencial */
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration-fast: 0ms; --duration-base: 0ms; --duration-slow: 0ms; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Alto contraste do sistema (Windows): deixe o navegador pintar e garanta bordas e foco */
+@media (forced-colors: active) {
+  :root { --focus-ring: Highlight; }
+  .rp-badge, .rp-chip, .rp-card, .rp-btn, .rp-field__input, .rp-progress__track { border: 1px solid CanvasText; }
+  .rp-progress__fill { background: Highlight; forced-color-adjust: none; }
+  .rp-badge__icon, .rp-icon { forced-color-adjust: auto; }
+  :focus-visible { outline: 3px solid Highlight !important; outline-offset: 2px; }
+}
