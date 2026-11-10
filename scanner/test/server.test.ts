@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import { readdirSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import type { FastifyInstance } from "fastify";
-import { buildServer, type ScanResult } from "../src/server.js";
+import { launchBrowser } from "../src/browser.js";
+import { buildServer, type ScanResult, type ServerOptions } from "../src/server.js";
+import { fixturesPolicy } from "./support/policy.js";
 
 const fixturesDir = new URL("./fixtures/", import.meta.url);
 
@@ -14,6 +16,7 @@ const fixturesDir = new URL("./fixtures/", import.meta.url);
 interface Expected {
   title: string;
   http_status: number;
+  blocked_requests: number;
   violations: { id: string; impact: string; nodes: number }[];
   incomplete: { id: string; nodes: number }[];
 }
@@ -27,6 +30,7 @@ let browser: Browser;
 let app: FastifyInstance;
 let fixtures: Server;
 let fixturesUrl: string;
+let fixturesPort: number;
 // Respostas que nunca terminam (rota `/__lento`), encerradas no fim dos testes.
 const hanging = new Set<import("node:http").ServerResponse>();
 
@@ -45,10 +49,17 @@ beforeAll(async () => {
     }
   });
   await new Promise<void>((resolve) => fixtures.listen(0, "127.0.0.1", resolve));
-  fixturesUrl = `http://127.0.0.1:${(fixtures.address() as AddressInfo).port}`;
+  fixturesPort = (fixtures.address() as AddressInfo).port;
+  // `fixtures` é liberado pela allowlist e resolve para 127.0.0.1, como no Compose de teste.
+  fixturesUrl = `http://fixtures:${fixturesPort}`;
 
-  browser = await chromium.launch();
-  app = buildServer(browser);
+  browser = await launchBrowser();
+  app = buildServer(browser, serverOptions());
+});
+
+const serverOptions = (options: ServerOptions = {}): ServerOptions => ({
+  ssrf: fixturesPolicy(fixturesPort),
+  ...options,
 });
 
 afterAll(async () => {
@@ -100,6 +111,7 @@ describe("POST /scan com cada fixture", () => {
     expect(body.final_url).toBe(`${fixturesUrl}/${name}.html`);
     expect(body.title).toBe(expected.title);
     expect(body.http_status).toBe(expected.http_status);
+    expect(body.blocked_requests).toBe(expected.blocked_requests);
     expect(body.axe.version).toMatch(/^4\.\d+\.\d+/);
 
     const violations = body.axe.violations
@@ -148,15 +160,33 @@ describe("POST /scan", () => {
   });
 
   it("devolve navigation_failed quando a página não abre", async () => {
-    const res = await scan("http://127.0.0.1:1/");
+    // Nome público que o DNS de teste não resolve.
+    const res = await scan(`http://nao-resolve.exemplo.com:${fixturesPort}/`);
     expect(res.statusCode).toBe(502);
-    expect(res.json().error).toBe("navigation_failed");
+    expect(res.json()).toEqual({ error: "navigation_failed", detail: "getaddrinfo ENOTFOUND nao-resolve.exemplo.com" });
+  });
+
+  it("devolve navigation_failed quando a conexão é recusada", async () => {
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise((resolve) => closed.close(resolve));
+
+    const offline = buildServer(browser, { ssrf: fixturesPolicy(port) });
+    try {
+      const res = await offline.inject({ method: "POST", url: "/scan", payload: { url: `http://fixtures:${port}/` } });
+      expect(res.statusCode).toBe(502);
+      expect(res.json().error).toBe("navigation_failed");
+      expect(res.json().detail).toMatch(/ECONNREFUSED/);
+    } finally {
+      await offline.close();
+    }
   });
 });
 
 describe("limite total da análise", () => {
   it("devolve timeout e fecha o contexto quando a análise passa do limite", async () => {
-    const quick = buildServer(browser, { totalTimeoutMs: 500 });
+    const quick = buildServer(browser, serverOptions({ totalTimeoutMs: 500 }));
     try {
       const started = Date.now();
       const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/__lento` } });
@@ -172,7 +202,7 @@ describe("limite total da análise", () => {
   });
 
   it("não interfere numa análise que termina dentro do prazo", async () => {
-    const quick = buildServer(browser, { totalTimeoutMs: 20_000 });
+    const quick = buildServer(browser, serverOptions({ totalTimeoutMs: 20_000 }));
     try {
       const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
       expect(res.statusCode).toBe(200);
@@ -184,11 +214,14 @@ describe("limite total da análise", () => {
 
 describe("falha depois da navegação", () => {
   it("devolve analysis_failed quando a coleta quebra com a página já aberta", async () => {
-    const broken = buildServer(browser, {
-      analyze: async () => {
-        throw new Error("Execution context was destroyed");
-      },
-    });
+    const broken = buildServer(
+      browser,
+      serverOptions({
+        analyze: async () => {
+          throw new Error("Execution context was destroyed");
+        },
+      }),
+    );
     try {
       const res = await broken.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
       expect(res.statusCode).toBe(502);

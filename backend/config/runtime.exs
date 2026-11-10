@@ -24,6 +24,11 @@ config :rampa, RampaWeb.Endpoint, http: [port: String.to_integer(System.get_env(
 
 config :rampa, :scanner_url, System.get_env("SCANNER_URL", "http://localhost:4100")
 
+# Hosts liberados da proteção contra SSRF, separados por vírgula (RF-RA002). Só o Compose
+# de teste preenche. Em produção o app não sobe com ela preenchida
+# (`Rampa.Security.Allowlist.check_startup/2`, chamada em `Rampa.Application.start/2`).
+config :rampa, :ssrf_allowlist, System.get_env("SSRF_ALLOWLIST", "")
+
 if config_env() != :test do
   config :rampa, Oban,
     queues: [

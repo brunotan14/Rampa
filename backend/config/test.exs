@@ -24,6 +24,7 @@ config :rampa, RampaWeb.Endpoint,
 config :rampa, Oban, testing: :manual
 
 config :rampa, :scanner_client, Rampa.Scanner.ClientMock
+config :rampa, :dns_resolver, Rampa.Security.ResolverMock
 
 # Print only warnings and errors during test
 config :logger, level: :warning

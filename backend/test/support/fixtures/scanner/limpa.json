@@ -1,7 +1,8 @@
 {
-  "final_url": "http://127.0.0.1:8099/limpa.html",
+  "final_url": "https://exemplo.com/limpa.html",
   "http_status": 200,
   "title": "Página limpa",
+  "blocked_requests": 0,
   "axe": {
     "version": "4.14.0",
     "violations": [],
