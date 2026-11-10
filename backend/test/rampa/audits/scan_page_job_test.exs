@@ -7,8 +7,16 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
   alias Rampa.Audits.{Audit, Finding, Page, ScanPageJob}
   alias Rampa.Scanner.ClientMock
+  alias Rampa.Security.ResolverMock
 
   setup :verify_on_exit!
+
+  # As URLs das páginas passam pelo `URLGuard` antes do scanner: o DNS mockado resolve
+  # tudo para um IP público, salvo nos testes de recusa.
+  setup do
+    stub(ResolverMock, :resolve, fn _host -> {:ok, [{93, 184, 215, 14}]} end)
+    :ok
+  end
 
   defp expect_scan(page, response) do
     expect(ClientMock, :scan, fn url ->
@@ -51,7 +59,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
   describe "RF-RA003: img-sem-alt.html" do
     setup do
-      page = page_fixture(%{url: "http://fixtures/img-sem-alt.html"})
+      page = page_fixture(%{url: "https://exemplo.com/img-sem-alt.html"})
       expect_scan(page, {:ok, scanner_response("img-sem-alt")})
       assert :ok = perform(page)
       %{page: page}
@@ -83,7 +91,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert %Page{
                status: :done,
                error: nil,
-               final_url: "http://127.0.0.1:8099/img-sem-alt.html",
+               final_url: "https://exemplo.com/img-sem-alt.html",
                http_status: 200,
                title: "Imagem sem texto alternativo",
                axe_version: "4.14.0"
@@ -109,7 +117,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   test "RF-RA003: limpa.html não gera achado com needs_review = false" do
-    page = page_fixture(%{url: "http://fixtures/limpa.html"})
+    page = page_fixture(%{url: "https://exemplo.com/limpa.html"})
     expect_scan(page, {:ok, scanner_response("limpa")})
 
     assert :ok = perform(page)
@@ -120,7 +128,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   test "incomplete do axe vira achado com needs_review = true" do
-    page = page_fixture(%{url: "http://fixtures/contraste-incerto.html"})
+    page = page_fixture(%{url: "https://exemplo.com/contraste-incerto.html"})
     expect_scan(page, {:ok, scanner_response("contraste-incerto")})
 
     assert :ok = perform(page)
@@ -291,7 +299,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
         end)
         |> Map.merge(%{
           "title" => "Tí\u0000tulo",
-          "final_url" => "http://127.0.0.1:8099/a\u0000b.html"
+          "final_url" => "https://exemplo.com/a\u0000b.html"
         })
         |> update_in(["axe", "violations"], fn [rule] ->
           [%{rule | "help" => "Images\u0000 must", "tags" => ["wcag2a", "wcag\u0000111"]}]
@@ -301,7 +309,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
       assert :ok = perform(page)
 
-      assert %Page{title: "Título", final_url: "http://127.0.0.1:8099/ab.html"} = reload(page)
+      assert %Page{title: "Título", final_url: "https://exemplo.com/ab.html"} = reload(page)
 
       assert [finding] = findings(page)
       assert finding.html_snippet == "<img src=x>"
@@ -326,7 +334,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros definitivos" do
-    for code <- [:blocked_address, :http_error, :invalid_request] do
+    for code <- [:blocked_address, :invalid_url, :resource_limit, :http_error, :invalid_request] do
       @tag :capture_log
       test "#{code} marca a página e a auditoria como falhas e cancela o job" do
         code = unquote(code)
@@ -466,6 +474,85 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
       assert %Page{status: :failed, error: "internal_error", axe_version: nil} = reload(page)
       assert findings(page) == []
+    end
+  end
+
+  describe "RF-RA002: URL revalidada antes do scanner" do
+    # Sem `expect` no ClientMock: se o scanner fosse chamado, o Mox falharia.
+    for {url, code} <- [
+          {"http://localhost:4000/", :blocked_address},
+          {"http://169.254.169.254/latest/meta-data/", :blocked_address},
+          {"http://postgres/", :blocked_address},
+          {"http://[::1]/", :blocked_address},
+          {"https://exemplo.com:8443/", :blocked_address},
+          {"ftp://exemplo.com/", :unsupported_scheme},
+          {"https://user:senha@exemplo.com/", :invalid_url}
+        ] do
+      @tag :capture_log
+      test "#{url} marca a página #{code} sem chamar o scanner" do
+        code = unquote(code)
+        page = page_fixture(%{url: unquote(url)})
+
+        assert {:cancel, ^code} = perform(page, attempt: 1)
+
+        error = Atom.to_string(code)
+        assert %Page{status: :failed, error: ^error} = reload(page)
+        assert %Audit{status: :failed, error: ^error, pages_failed: 1} = audit_of(page)
+        assert findings(page) == []
+      end
+    end
+
+    @tag :capture_log
+    test "domínio que passou a resolver para IP privado é bloqueado sem chamar o scanner" do
+      page = page_fixture(%{url: "https://rebind.exemplo.com/"})
+      expect(ResolverMock, :resolve, fn "rebind.exemplo.com" -> {:ok, [{10, 0, 0, 5}]} end)
+
+      assert {:cancel, :blocked_address} = perform(page, attempt: 1)
+      assert %Page{status: :failed, error: "blocked_address"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "nome sem registro no DNS é definitivo" do
+      page = page_fixture(%{url: "https://nao-existe.exemplo.com/"})
+      expect(ResolverMock, :resolve, fn _host -> {:error, :nxdomain} end)
+
+      assert {:cancel, :unresolvable} = perform(page, attempt: 1)
+      assert %Page{status: :failed, error: "unresolvable"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "falha do resolvedor tenta de novo e só marca falha na última tentativa" do
+      page = page_fixture(%{url: "https://instavel.exemplo.com/"})
+      expect(ResolverMock, :resolve, 2, fn _host -> {:error, :timeout} end)
+
+      assert {:error, :dns_error} = perform(page, attempt: 1)
+      assert %Page{status: :scanning, error: nil} = reload(page)
+
+      assert {:error, :dns_error} = perform(page, attempt: 2)
+      assert %Page{status: :failed, error: "dns_error"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "falha passageira do DNS seguida de sucesso varre a página" do
+      page = page_fixture(%{url: "https://instavel.exemplo.com/limpa.html"})
+      expect(ResolverMock, :resolve, fn _host -> {:error, :servfail} end)
+      assert {:error, :dns_error} = perform(page, attempt: 1)
+
+      expect(ResolverMock, :resolve, fn _host -> {:ok, [{93, 184, 215, 14}]} end)
+      expect_scan(page, {:ok, scanner_response("limpa")})
+      assert :ok = perform(page, attempt: 2)
+      assert %Page{status: :done} = reload(page)
+    end
+
+    test "o scanner recebe a URL normalizada" do
+      page = page_fixture(%{url: "https://Exemplo.COM/limpa.html#topo"})
+
+      expect(ClientMock, :scan, fn url ->
+        assert url == "https://exemplo.com/limpa.html"
+        {:ok, scanner_response("limpa")}
+      end)
+
+      assert :ok = perform(page)
     end
   end
 

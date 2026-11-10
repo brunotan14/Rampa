@@ -5,13 +5,24 @@ defmodule Rampa.Application do
 
   use Application
 
+  alias Rampa.Security.Allowlist
+
   @impl true
   def start(_type, _args) do
+    # Em produção, `SSRF_ALLOWLIST` preenchida impede a subida (RF-RA002).
+    with :ok <- Allowlist.check_startup(Application.fetch_env!(:rampa, :env), Allowlist.hosts()) do
+      start_children()
+    end
+  end
+
+  defp start_children do
     children = [
       RampaWeb.Telemetry,
       Rampa.Repo,
       {DNSCluster, query: Application.get_env(:rampa, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Rampa.PubSub},
+      # Tarefas sem link com quem chamou (ex.: consultas de DNS do `Resolver.Inet`).
+      {Task.Supervisor, name: Rampa.TaskSupervisor},
       {Oban, Application.fetch_env!(:rampa, Oban)},
       # Start to serve requests, typically the last entry
       RampaWeb.Endpoint

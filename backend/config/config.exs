@@ -38,6 +38,11 @@ config :rampa, Oban,
 
 config :rampa, :scanner_client, Rampa.Scanner.HTTP
 
+# Proteção contra SSRF (RF-RA002): DNS atrás de behaviour; `:env` permite a
+# `Rampa.Application` recusar a `SSRF_ALLOWLIST` em produção.
+config :rampa, :dns_resolver, Rampa.Security.Resolver.Inet
+config :rampa, :env, config_env()
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

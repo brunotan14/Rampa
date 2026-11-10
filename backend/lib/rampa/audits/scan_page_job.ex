@@ -3,12 +3,20 @@ defmodule Rampa.Audits.ScanPageJob do
   Varre uma página com o scanner e grava os fatos e os achados do axe (PRD §7, passo 2;
   RF-RA003). Args: `%{"page_id" => id}`.
 
+  Antes de chamar o scanner, a URL da página passa de novo pelo `Rampa.Security.URLGuard`
+  (RF-RA002): defesa em profundidade para as páginas que não vieram de `POST /api/audits`,
+  como os links descobertos no M5. URL recusada marca a página `failed` com o código da
+  recusa (`blocked_address`, `unsupported_scheme`, `invalid_url` ou `unresolvable`), sem
+  chamar o scanner. Falha do resolvedor de DNS (`dns_error`) é passageira e ganha nova
+  tentativa.
+
   Tentativas (`max_attempts: 2`):
 
-    * definitivos: `blocked_address`, `http_error` e `invalid_request` marcam a página
+    * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
+      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` marcam a página
       `failed` na hora e cancelam o job (`{:cancel, code}`);
-    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: os erros
-      `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
+    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
+      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
       gravação recusada (`invalid_scan_result`) e exceções (`internal_error`). Na última
       tentativa a página é marcada `failed` com o código e a auditoria é atualizada; o job
       devolve `{:error, code}` (ou relança a exceção) para o Oban registrar;
@@ -29,8 +37,17 @@ defmodule Rampa.Audits.ScanPageJob do
   alias Rampa.Audits
   alias Rampa.Audits.Page
   alias Rampa.Scanner.Client
+  alias Rampa.Security.URLGuard
 
-  @definitive [:blocked_address, :http_error, :invalid_request]
+  @definitive [
+    :blocked_address,
+    :unsupported_scheme,
+    :invalid_url,
+    :unresolvable,
+    :resource_limit,
+    :http_error,
+    :invalid_request
+  ]
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"page_id" => page_id}} = job) do
@@ -46,7 +63,8 @@ defmodule Rampa.Audits.ScanPageJob do
   defp run(%Page{} = page, job) do
     Logger.metadata(audit_id: page.audit_id)
 
-    with {:ok, result} <- scan(page),
+    with {:ok, url} <- guard(page),
+         {:ok, result} <- scan(url),
          {:ok, _page} <- record(page, result) do
       :ok
     else
@@ -59,8 +77,15 @@ defmodule Rampa.Audits.ScanPageJob do
       reraise exception, __STACKTRACE__
   end
 
-  defp scan(page) do
-    case Client.impl().scan(page.url) do
+  defp guard(page) do
+    case URLGuard.validate(page.url) do
+      {:ok, url} -> {:ok, url}
+      {:error, reason} -> {:error, reason, "URL recusada antes da varredura"}
+    end
+  end
+
+  defp scan(url) do
+    case Client.impl().scan(url) do
       {:ok, result} -> {:ok, result}
       {:error, %{code: code, detail: detail}} -> {:error, code, detail}
     end

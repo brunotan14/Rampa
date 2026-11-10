@@ -22,7 +22,9 @@ defmodule Rampa.Scanner.HTTPTest do
   end
 
   for {code, status} <- [
-        blocked_address: 403,
+        blocked_address: 422,
+        invalid_url: 422,
+        resource_limit: 422,
         timeout: 504,
         http_error: 502,
         navigation_failed: 502,
