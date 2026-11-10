@@ -1,0 +1,78 @@
+/* Estilos de base do Rampa. Só tokens de tokens.css (design/01-fundamentos.md). */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-padding-top: var(--space-20); }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+p { max-width: var(--measure); }
+
+a { color: var(--link); text-underline-offset: 0.15em; }
+a:visited { color: var(--link-visited); }
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Elementos que só recebem foco por script (h1, main) não mostram anel */
+[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
+
+.rp-container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: var(--space-4);
+}
+@media (min-width: 64em) {
+  .rp-container { padding-inline: var(--space-10); }
+}
+
+.rp-skip {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-4);
+  z-index: var(--z-skiplink);
+  background: var(--surface-inverse);
+  color: var(--ink-inverse);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  transform: translateY(-200%);
+}
+.rp-skip:visited { color: var(--ink-inverse); }
+.rp-skip:focus, .rp-skip:focus-visible { transform: none; }
+
+.rp-header { border-bottom: var(--border-1) solid var(--line); background: var(--surface-raised); }
+.rp-header .rp-container { display: flex; align-items: center; min-height: var(--space-16); }
+
+.rp-brand { display: inline-flex; align-items: center; min-height: var(--target-comfort); }
+.rp-brand img { display: block; height: 32px; width: auto; }
+
+.rp-main { padding-block: var(--space-12); }
+
+.rp-h1 {
+  font-size: 2.5rem;
+  line-height: 1.15;
+  font-weight: 700;
+  margin: 0 0 var(--space-6);
+}
+
+.rp-lead { font-size: 1.125rem; line-height: 1.6; margin: 0 0 var(--space-4); }
+.rp-caption { font-size: 0.875rem; line-height: 1.5; color: var(--ink-muted); margin: 0; }
+
+.rp-footer { border-top: var(--border-1) solid var(--line); padding-block: var(--space-6); color: var(--ink-muted); }
+.rp-footer p { margin: 0; font-size: 0.875rem; }
+
+@media (forced-colors: active) {
+  .rp-skip { border: 1px solid CanvasText; }
+}
