@@ -174,33 +174,4 @@ defmodule Rampa.Audits.AxeMapperTest do
       assert AxeMapper.selector([]) == nil
     end
   end
-
-  describe "truncate_bytes/2" do
-    test "texto curto fica igual" do
-      assert AxeMapper.truncate_bytes("<p>olá</p>", 2048) == "<p>olá</p>"
-      assert AxeMapper.truncate_bytes(nil, 2048) == nil
-    end
-
-    test "não quebra caractere acentuado (2 bytes)" do
-      # "a" + 1 023 × "é" (2 bytes cada) + "é" = 2 049 bytes; o último "é" não cabe inteiro.
-      text = "a" <> String.duplicate("é", 1_024)
-      result = AxeMapper.truncate_bytes(text, 2048)
-
-      assert String.valid?(result)
-      assert byte_size(result) == 2047
-      assert result == "a" <> String.duplicate("é", 1_023)
-    end
-
-    test "não quebra emoji (4 bytes)" do
-      text = "ab" <> String.duplicate("😀", 600)
-
-      for max <- 2046..2050 do
-        result = AxeMapper.truncate_bytes(text, max)
-        assert String.valid?(result)
-        assert byte_size(result) <= max
-        assert byte_size(result) > max - 4
-        assert String.starts_with?(text, result)
-      end
-    end
-  end
 end

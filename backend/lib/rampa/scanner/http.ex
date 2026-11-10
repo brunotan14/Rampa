@@ -3,15 +3,17 @@ defmodule Rampa.Scanner.HTTP do
 
   @behaviour Rampa.Scanner.Client
 
-  # A página tem 30 s para carregar e 90 s de análise no total (RF-RA002); a margem cobre o
-  # axe e a ida e volta da resposta.
+  # O scanner encerra toda análise em 90 s (`SCAN_TOTAL_TIMEOUT_MS`, RF-RA002) e responde
+  # `timeout`. Os 10 s a mais cobrem fechar o contexto do navegador e transferir a resposta:
+  # assim o erro chega com o código do scanner, e não como falta de resposta (`unavailable`).
   @scan_receive_timeout 100_000
 
   @error_codes %{
     "blocked_address" => :blocked_address,
     "timeout" => :timeout,
     "http_error" => :http_error,
-    "navigation_failed" => :navigation_failed
+    "navigation_failed" => :navigation_failed,
+    "analysis_failed" => :analysis_failed
   }
 
   @impl true
@@ -37,6 +39,9 @@ defmodule Rampa.Scanner.HTTP do
       {:ok, %Req.Response{status: status, body: %{"error" => code} = body}}
       when is_map_key(@error_codes, code) ->
         {:error, %{code: Map.fetch!(@error_codes, code), detail: detail(body, status)}}
+
+      {:ok, %Req.Response{status: status}} when status in 400..499 ->
+        {:error, %{code: :invalid_request, detail: "scanner recusou o pedido: HTTP #{status}"}}
 
       {:ok, %Req.Response{status: status}} ->
         unavailable("scanner respondeu HTTP #{status}")

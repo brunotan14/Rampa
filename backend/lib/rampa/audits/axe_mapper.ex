@@ -1,7 +1,8 @@
 defmodule Rampa.Audits.AxeMapper do
   @moduledoc """
   Converte o resultado do axe devolvido pelo scanner (campo `axe` do contrato, PRD §7) em
-  atributos de achado (RF-RA003). Módulo puro: não acessa banco nem rede.
+  atributos de achado (RF-RA003). Módulo puro: não acessa banco nem rede. Espera os dados
+  já saneados por `Rampa.Audits.PageData.sanitize/1` (sem NUL).
 
   Regras da conversão:
 
@@ -28,7 +29,7 @@ defmodule Rampa.Audits.AxeMapper do
   A versão do axe não vai no achado: fica em `pages.axe_version` (RNF-RA006).
   """
 
-  alias Rampa.Audits.Finding
+  alias Rampa.Audits.{Finding, PageData}
 
   @severities %{
     "critical" => :critical,
@@ -81,7 +82,7 @@ defmodule Rampa.Audits.AxeMapper do
       needs_review: needs_review,
       confidence: nil,
       selector: selector(node["target"]),
-      html_snippet: truncate_bytes(node["html"], Finding.html_snippet_max_bytes()),
+      html_snippet: PageData.truncate_bytes(node["html"], Finding.html_snippet_max_bytes()),
       message: node["failureSummary"] || rule["help"],
       raw: Map.take(rule, ["id", "tags", "help", "helpUrl", "impact"])
     }
@@ -117,20 +118,4 @@ defmodule Rampa.Audits.AxeMapper do
   end
 
   def selector(_target), do: nil
-
-  @doc """
-  Corta `text` em no máximo `max_bytes` bytes sem deixar um caractere UTF-8 pela metade.
-  """
-  @spec truncate_bytes(String.t() | nil, non_neg_integer()) :: String.t() | nil
-  def truncate_bytes(nil, _max_bytes), do: nil
-
-  def truncate_bytes(text, max_bytes) when byte_size(text) <= max_bytes, do: text
-
-  def truncate_bytes(text, max_bytes) do
-    # O corte pode deixar o último caractere pela metade (até 3 bytes soltos); a sequência
-    # incompleta é inválida e sai inteira. Nunca aumenta o tamanho.
-    text
-    |> binary_part(0, max_bytes)
-    |> String.replace_invalid("")
-  end
 end

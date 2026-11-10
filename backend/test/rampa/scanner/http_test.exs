@@ -25,7 +25,8 @@ defmodule Rampa.Scanner.HTTPTest do
         blocked_address: 403,
         timeout: 504,
         http_error: 502,
-        navigation_failed: 502
+        navigation_failed: 502,
+        analysis_failed: 502
       ] do
     test "scan/1 traduz o erro #{code} do contrato" do
       code = unquote(code)
@@ -47,7 +48,24 @@ defmodule Rampa.Scanner.HTTPTest do
     assert {:error, %{code: :unavailable}} = HTTP.scan("https://exemplo.com/")
   end
 
-  test "scan/1 devolve unavailable para erro fora do contrato" do
+  test "scan/1 devolve invalid_request quando o scanner recusa o pedido (4xx)" do
+    # Formato real do erro de validação do Fastify
+    stub(fn conn ->
+      conn
+      |> Plug.Conn.put_status(400)
+      |> Req.Test.json(%{
+        "statusCode" => 400,
+        "code" => "FST_ERR_VALIDATION",
+        "error" => "Bad Request",
+        "message" => "body/url must match pattern"
+      })
+    end)
+
+    assert HTTP.scan("https://exemplo.com/") ==
+             {:error, %{code: :invalid_request, detail: "scanner recusou o pedido: HTTP 400"}}
+  end
+
+  test "scan/1 devolve unavailable para 5xx fora do contrato" do
     stub(fn conn ->
       conn |> Plug.Conn.put_status(500) |> Req.Test.json(%{"error" => "outra_coisa"})
     end)

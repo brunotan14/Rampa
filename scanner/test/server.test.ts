@@ -27,9 +27,16 @@ let browser: Browser;
 let app: FastifyInstance;
 let fixtures: Server;
 let fixturesUrl: string;
+// Respostas que nunca terminam (rota `/__lento`), encerradas no fim dos testes.
+const hanging = new Set<import("node:http").ServerResponse>();
 
 beforeAll(async () => {
   fixtures = createServer(async (req, res) => {
+    if (req.url === "/__lento") {
+      // Documento que não chega: segura a navegação até o prazo total estourar.
+      hanging.add(res);
+      return;
+    }
     try {
       const body = await readFile(new URL(`.${req.url}`, fixturesDir));
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(body);
@@ -45,6 +52,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  for (const res of hanging) res.destroy();
   await app.close();
   await browser.close();
   fixtures.close();
@@ -143,5 +151,51 @@ describe("POST /scan", () => {
     const res = await scan("http://127.0.0.1:1/");
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe("navigation_failed");
+  });
+});
+
+describe("limite total da análise", () => {
+  it("devolve timeout e fecha o contexto quando a análise passa do limite", async () => {
+    const quick = buildServer(browser, { totalTimeoutMs: 500 });
+    try {
+      const started = Date.now();
+      const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/__lento` } });
+
+      expect(res.statusCode).toBe(504);
+      expect(res.json()).toEqual({ error: "timeout", detail: "análise passou de 500 ms" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      // O contexto foi fechado: a navegação pendente foi abortada.
+      expect(browser.contexts()).toHaveLength(0);
+    } finally {
+      await quick.close();
+    }
+  });
+
+  it("não interfere numa análise que termina dentro do prazo", async () => {
+    const quick = buildServer(browser, { totalTimeoutMs: 20_000 });
+    try {
+      const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await quick.close();
+    }
+  });
+});
+
+describe("falha depois da navegação", () => {
+  it("devolve analysis_failed quando a coleta quebra com a página já aberta", async () => {
+    const broken = buildServer(browser, {
+      analyze: async () => {
+        throw new Error("Execution context was destroyed");
+      },
+    });
+    try {
+      const res = await broken.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
+      expect(res.statusCode).toBe(502);
+      expect(res.json()).toEqual({ error: "analysis_failed", detail: "Execution context was destroyed" });
+      expect(browser.contexts()).toHaveLength(0);
+    } finally {
+      await broken.close();
+    }
   });
 });
