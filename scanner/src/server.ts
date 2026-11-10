@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { errors, type Browser } from "playwright";
+import { runAxe, type AxeFacts } from "./axe.js";
 
 // Serviço sem estado (PRD §7): recebe uma URL e devolve fatos sobre a página.
 // O bloqueio de endereços internos (RF-RA002) entra no M1; até lá o scanner só
@@ -15,6 +16,14 @@ export interface ScanResult {
   final_url: string;
   http_status: number | null;
   title: string;
+  axe: AxeFacts;
+}
+
+export type ScanErrorCode = "timeout" | "http_error" | "navigation_failed";
+
+export interface ScanError {
+  error: ScanErrorCode;
+  detail: string;
 }
 
 export function buildServer(browser: Browser): FastifyInstance {
@@ -42,18 +51,29 @@ export function buildServer(browser: Browser): FastifyInstance {
           waitUntil: "load",
           timeout: NAVIGATION_TIMEOUT_MS,
         });
+        const status = response?.status() ?? null;
+
+        // Página de erro não é auditada: o axe acharia problemas da página de erro, não do site.
+        if (status !== null && status >= 400) {
+          const body: ScanError = { error: "http_error", detail: `HTTP ${status}` };
+          return reply.code(502).send(body);
+        }
+
         const result: ScanResult = {
           final_url: page.url(),
-          http_status: response?.status() ?? null,
+          http_status: status,
           title: await page.title(),
+          axe: await runAxe(page),
         };
         return result;
       } catch (error) {
         if (error instanceof errors.TimeoutError) {
-          return reply.code(504).send({ error: "timeout", detail: error.message });
+          const body: ScanError = { error: "timeout", detail: error.message };
+          return reply.code(504).send(body);
         }
         const detail = error instanceof Error ? error.message : String(error);
-        return reply.code(502).send({ error: "navigation_failed", detail });
+        const body: ScanError = { error: "navigation_failed", detail };
+        return reply.code(502).send(body);
       } finally {
         await context.close();
       }

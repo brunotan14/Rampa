@@ -1,0 +1,43 @@
+{
+  "final_url": "http://127.0.0.1:8099/img-sem-alt.html",
+  "http_status": 200,
+  "title": "Imagem sem texto alternativo",
+  "axe": {
+    "version": "4.14.0",
+    "violations": [
+      {
+        "id": "image-alt",
+        "impact": "critical",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag111",
+          "section508",
+          "section508.22.a",
+          "TTv5",
+          "TT7.a",
+          "TT7.b",
+          "EN-301-549",
+          "EN-9.1.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-1.1.1"
+        ],
+        "description": "Ensure <img> elements have alternative text or a role of none or presentation",
+        "help": "Images must have alternative text",
+        "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/image-alt?application=playwright",
+        "nodes": [
+          {
+            "target": [
+              "img"
+            ],
+            "html": "<img src=\"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%2280%22%3E%3Crect%20width%3D%22120%22%20height%3D%2280%22%20fill%3D%22%23336699%22%2F%3E%3C%2Fsvg%3E\" width=\"120\" height=\"80\">",
+            "failureSummary": "Fix any of the following:\n  Element does not have an alt attribute\n  aria-label attribute does not exist or is empty\n  aria-labelledby attribute does not exist, references elements that do not exist or references elements that are empty\n  Element has no title attribute\n  Element's default semantics were not overridden with role=\"none\" or role=\"presentation\"",
+            "impact": "critical"
+          }
+        ]
+      }
+    ],
+    "incomplete": []
+  }
+}
