@@ -5,8 +5,9 @@ import { checkUrl, type BlockReason, type SsrfPolicy } from "./policy.js";
 // varredura (`proxy.ts`), que valida cada conexão. O route nunca atende a requisição
 // (`fulfill`): só deixa seguir (`continue`) ou recusa (`abort`).
 //
-//   * documento principal com URL recusada ou porta fora das permitidas: a varredura devolve
-//     o motivo (`blocked_address` ou `invalid_url`);
+// A política é a mesma para tudo (inclusive a porta, só 80 e 443); muda só a consequência:
+//   * documento principal recusado: a varredura devolve o motivo (`blocked_address` ou
+//     `invalid_url`);
 //   * sub-recurso recusado: `abort` e soma em `blockedRequests`. Ele não chega ao proxy,
 //     então não é contado duas vezes.
 //
@@ -41,7 +42,7 @@ export async function classifyRequests(
       if (url.startsWith("data:") || url.startsWith("blob:")) return await route.continue();
 
       const document = isMainDocument(request);
-      const check = checkUrl(url, policy, document ? "document" : "subresource");
+      const check = checkUrl(url, policy);
       if (check.ok) return await route.continue();
 
       if (document) state.documentBlocked ??= { reason: check.reason, detail: check.detail };

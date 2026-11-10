@@ -28,6 +28,7 @@ let servers: LocalServers;
 let port: number;
 let otherPort: number;
 let other: Server;
+const otherHits: string[] = [];
 let udp: Socket;
 let udpPackets = 0;
 let browser: Browser;
@@ -59,6 +60,17 @@ const pages = (): Record<string, (cookie: string | undefined) => Page_> => ({
     body: html("Navega para IP privado", `<script>setTimeout(() => { location.href = "http://10.0.0.5/"; }, 50);</script>`),
   }),
   "/img-privada.html": () => ({ body: html("Imagem em IP privado", '<img src="http://192.168.0.1/x.png">') }),
+  "/img-porta.html": () => ({
+    body: html("Imagem em outra porta", '<img alt="" src="http://publico.exemplo.com:8080/x.png">'),
+  }),
+  "/img-redireciona-porta.html": () => ({
+    body: html("Imagem que redireciona para outra porta", '<img alt="" src="/redireciona-img-porta">'),
+  }),
+  "/redireciona-img-porta": () => ({
+    status: 302,
+    headers: { location: `http://fixtures:${otherPort}/x.png` },
+    body: "",
+  }),
   "/img-redireciona-privada.html": () => ({
     body: html("Imagem que redireciona para IP privado", '<img alt="" src="/redireciona-img">'),
   }),
@@ -119,7 +131,9 @@ const pages = (): Record<string, (cookie: string | undefined) => Page_> => ({
       "WebSocket",
       `<script>
         const results = {};
-        const done = () => { if (Object.keys(results).length === 2) document.title = "ws:" + results.publico + "," + results.privado; };
+        const done = () => {
+          if (Object.keys(results).length === 3) document.title = "ws:" + results.publico + "," + results.privado + "," + results.porta;
+        };
         const open = (name, url) => {
           const ws = new WebSocket(url);
           ws.onopen = () => { results[name] = "aberto"; done(); ws.close(); };
@@ -127,6 +141,7 @@ const pages = (): Record<string, (cookie: string | undefined) => Page_> => ({
         };
         open("publico", "ws://fixtures:${port}/ws-aceita");
         open("privado", "ws://127.0.0.1:${port}/ws-aceita-privado");
+        open("porta", "ws://fixtures:${otherPort}/ws-aceita-porta");
       </script>`,
     ),
   }),
@@ -172,8 +187,15 @@ beforeAll(async () => {
   });
   port = servers.port;
 
-  // Servidor público numa porta que não é a do documento.
-  other = createServer((_req, res) => res.writeHead(200, { "content-type": "text/html" }).end(limpa));
+  // Servidor numa porta fora das permitidas: nada deve chegar a ele.
+  other = createServer((req, res) => {
+    otherHits.push(req.url ?? "");
+    res.writeHead(200, { "content-type": "text/html" }).end(limpa);
+  });
+  other.on("upgrade", (req, socket) => {
+    otherHits.push(req.url ?? "");
+    socket.destroy();
+  });
   await new Promise<void>((resolve) => other.listen(0, "127.0.0.1", resolve));
   otherPort = (other.address() as AddressInfo).port;
 
@@ -276,6 +298,8 @@ describe("documento principal", () => {
     const res = await scan(url("/redireciona-porta"));
     expect(res.statusCode).toBe(422);
     expect(res.json()).toEqual({ error: "blocked_address", detail: `porta não permitida: ${otherPort}` });
+    // O proxy recusou o salto: o servidor da outra porta não recebeu nada.
+    expect(otherHits).toEqual([]);
   });
 
   it("redirecionamento em laço devolve navigation_failed", async () => {
@@ -314,6 +338,19 @@ describe("sub-recursos", () => {
     const body = res.json<ScanResult>();
     expect(body.blocked_requests).toBe(1);
     expect(body.axe.violations.map((rule) => rule.id)).toContain("image-alt");
+  });
+
+  it("<img> em host público na porta 8080 é bloqueada e conta uma vez", async () => {
+    const res = await scan(url("/img-porta.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+  });
+
+  it("imagem que redireciona para porta não permitida: o proxy bloqueia o salto e conta", async () => {
+    const res = await scan(url("/img-redireciona-porta.html"));
+    expect(res.statusCode).toBe(200);
+    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(otherHits).toEqual([]);
   });
 
   it("imagem que redireciona para IP privado: o proxy bloqueia o salto e conta", async () => {
@@ -413,15 +450,16 @@ describe("DNS rebinding", () => {
 });
 
 describe("o que o route do Playwright não vê passa pelo proxy", () => {
-  it("WebSocket público funciona e WebSocket para IP privado é bloqueado", async () => {
+  it("WebSocket público funciona; para IP privado ou porta fora de 80/443 é bloqueado", async () => {
     const seen: { title?: string } = {};
     await withServer({ analyze: waitTitle("ws:", seen) }, async (server) => {
       const res = await scanWith(server, url("/websocket.html"));
       expect(res.statusCode).toBe(200);
-      expect(seen.title).toBe("ws:aberto,falhou");
+      expect(seen.title).toBe("ws:aberto,falhou,falhou");
       expect(servers.upgrades).toContain("/ws-aceita");
       expect(servers.upgrades).not.toContain("/ws-aceita-privado");
-      expect(res.json<ScanResult>().blocked_requests).toBe(1);
+      expect(otherHits).toEqual([]);
+      expect(res.json<ScanResult>().blocked_requests).toBe(2);
     });
   });
 

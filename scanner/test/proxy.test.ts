@@ -45,7 +45,13 @@ const resolveTest: Resolve = async (host) => {
 
 async function start(overrides: Partial<SsrfPolicy> = {}, limits: Partial<ProxyLimits> = {}) {
   proxy = await startScanProxy(
-    defaultPolicy({ allowlist: new Set(["fixtures"]), resolve: resolveTest, ...overrides }),
+    // A porta do servidor local entra na política de teste; nenhuma outra (ver `support/policy.ts`).
+    defaultPolicy({
+      allowlist: new Set(["fixtures"]),
+      ports: new Set([80, 443, servers.port]),
+      resolve: resolveTest,
+      ...overrides,
+    }),
     { ...DEFAULT_PROXY_LIMITS, ...limits },
   );
   return proxy;
@@ -145,6 +151,19 @@ describe("requisição absoluta (http://)", () => {
     expect(proxy!.blocks[0]?.detail).toBe("misto.exemplo.com resolve para endereço proibido: 10.0.0.5");
   });
 
+  it("porta fora de 80/443 é recusada, mesmo em host liberado e público", async () => {
+    let calls = 0;
+    await start({ resolve: async () => (calls++, [{ address: "93.184.215.14", family: 4 }]) });
+    const liberado = await viaProxy("http://fixtures:8080/imagem.png");
+    const publico = await viaProxy("http://cdn.exemplo.com:8080/imagem.png");
+    expect([liberado.status, publico.status]).toEqual([403, 403]);
+    expect(calls).toBe(0);
+    expect(proxy!.blocks).toEqual([
+      { target: "fixtures:8080", detail: "porta não permitida: 8080" },
+      { target: "cdn.exemplo.com:8080", detail: "porta não permitida: 8080" },
+    ]);
+  });
+
   it("nome interno é recusado sem consultar o DNS", async () => {
     let calls = 0;
     await start({ resolve: async () => (calls++, [{ address: "93.184.215.14", family: 4 }]) });
@@ -185,6 +204,9 @@ describe("CONNECT", () => {
     ["169.254.169.254:80", "endereço proibido: 169.254.169.254"],
     ["localhost:443", "nome interno: localhost"],
     ["interno.exemplo.com:443", "interno.exemplo.com resolve para endereço proibido: 127.0.0.1"],
+    ["cdn.exemplo.com:8443", "porta não permitida: 8443"],
+    ["fixtures:22", "porta não permitida: 22"],
+    ["[2606:4700:4700::1111]:8080", "porta não permitida: 8080"],
   ])("%s é recusado com 403", async (authority, detail) => {
     await start();
     const { status, socket } = await tunnel(authority);

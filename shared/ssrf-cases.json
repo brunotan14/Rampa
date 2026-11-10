@@ -1,5 +1,5 @@
 {
-  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL do documento principal e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso, interpretada pela mesma função que lê a variável de ambiente em cada lado.",
+  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL de qualquer requisição (documento, sub-recurso, salto de redirecionamento; a política é a mesma, inclusive a porta, só 80 e 443) e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso, interpretada pela mesma função que lê a variável de ambiente em cada lado.",
   "ips": [
     { "ip": "0.0.0.0", "blocked": true, "range": "0.0.0.0/8" },
     { "ip": "0.255.255.255", "blocked": true, "range": "0.0.0.0/8" },
@@ -97,6 +97,12 @@
     { "url": "https://exemplo.com:8443/", "expected": "blocked_address" },
     { "url": "http://exemplo.com:22/", "expected": "blocked_address" },
     { "url": "http://exemplo.com:4000/", "expected": "blocked_address" },
+    { "url": "http://cdn.exemplo.com:8080/imagem.png", "expected": "blocked_address" },
+    { "url": "https://cdn.exemplo.com:8443/script.js", "expected": "blocked_address" },
+    { "url": "http://8.8.8.8:8080/x.png", "expected": "blocked_address" },
+    { "url": "https://[2606:4700:4700::1111]:8443/", "expected": "blocked_address" },
+    { "url": "http://cdn.exemplo.com:80/imagem.png", "expected": "ok" },
+    { "url": "https://cdn.exemplo.com/script.js", "expected": "ok" },
 
     { "url": "http://169.254.169.254/", "expected": "blocked_address" },
     { "url": "http://10.0.0.5/", "expected": "blocked_address" },
@@ -135,6 +141,7 @@
     { "url": "http://FIXTURES./limpa.html", "allowlist": ["fixtures"], "expected": "ok" },
     { "url": "http://postgres/", "allowlist": ["fixtures"], "expected": "blocked_address" },
     { "url": "http://fixtures:8080/", "allowlist": ["fixtures"], "expected": "blocked_address" },
+    { "url": "http://fixtures:8080/imagem.png", "allowlist": ["fixtures"], "expected": "blocked_address" },
     { "url": "ftp://fixtures/", "allowlist": ["fixtures"], "expected": "unsupported_scheme" },
     { "url": "http://fixtures.local/", "allowlist": ["fixtures"], "expected": "blocked_address" },
     { "url": "http://[::1]/", "allowlist": ["::1"], "expected": "ok" },

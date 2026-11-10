@@ -6,7 +6,7 @@ import { checkUrl, normalizeHost, type ResolvedAddress, type SsrfPolicy } from "
 
 // Proxy de saída de uma varredura (RF-RA002). O contexto do Chromium usa este proxy para
 // tudo o que vai à rede: documento, sub-recursos, saltos de redirecionamento, WebSocket,
-// workers. Para cada conexão o proxy confere esquema, nome e IP (`checkUrl`), resolve o nome,
+// workers. Para cada conexão o proxy confere nome, porta e IP (`checkUrl`), resolve o nome,
 // recusa se **qualquer** IP for proibido e conecta no IP validado. Não há janela entre checar
 // e conectar: um DNS que alterna entre IP público e privado (rebinding) nunca leva a uma
 // conexão no privado.
@@ -159,7 +159,7 @@ export async function startScanProxy(policy: SsrfPolicy, limits: ProxyLimits = D
 
   // Confere o destino e devolve os IPs validados, na ordem do DNS.
   async function resolveTarget(scheme: string, host: string, port: number): Promise<ResolvedAddress[]> {
-    const check = checkUrl(`${scheme}//${host}:${port}/`, policy, "subresource");
+    const check = checkUrl(`${scheme}//${host}:${port}/`, policy);
     if (!check.ok) throw new BlockedError(check.detail);
     if (check.ip !== null) return [{ address: check.ip, family: check.ip.includes(":") ? 6 : 4 }];
 

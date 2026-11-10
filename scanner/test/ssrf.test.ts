@@ -19,11 +19,11 @@ describe("casos compartilhados com o backend: IPs", () => {
   });
 });
 
-describe("casos compartilhados com o backend: URLs do documento", () => {
+describe("casos compartilhados com o backend: URLs", () => {
   it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist }) => {
     // A lista passa pela mesma interpretação da variável de ambiente, como no backend.
     const hosts = parseAllowlist((allowlist ?? []).join(","));
-    const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }), "document");
+    const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }));
     expect(check.ok ? "ok" : check.reason).toBe(expected);
   });
 });
@@ -45,44 +45,51 @@ describe("isBlockedIp", () => {
 describe("checkUrl", () => {
   const policy = defaultPolicy();
 
-  it("aceita sub-recurso público em qualquer porta, mas não o documento", () => {
-    expect(checkUrl("https://cdn.exemplo.com:8443/a.png", policy, "subresource").ok).toBe(true);
-    expect(checkUrl("https://cdn.exemplo.com:8443/", policy, "document")).toMatchObject({
-      ok: false,
-      reason: "blocked_address",
-      detail: "porta não permitida: 8443",
-    });
+  it("só aceita as portas 80 e 443, em qualquer requisição", () => {
+    for (const url of ["https://cdn.exemplo.com:8443/a.png", "http://8.8.8.8:8080/x.png", "https://exemplo.com:22/"]) {
+      expect(checkUrl(url, policy), url).toMatchObject({ ok: false, reason: "blocked_address" });
+    }
+    expect(checkUrl("https://cdn.exemplo.com:8443/a.png", policy)).toMatchObject({ detail: "porta não permitida: 8443" });
+    expect(checkUrl("http://cdn.exemplo.com:80/a.png", policy).ok).toBe(true);
+    expect(checkUrl("https://cdn.exemplo.com/a.png", policy).ok).toBe(true);
   });
 
-  it("recusa sub-recurso com IP proibido em qualquer porta", () => {
-    expect(checkUrl("http://192.168.0.1/x.png", policy, "subresource")).toMatchObject({
+  it("a porta injetada vale só para a política que a recebeu", () => {
+    const local = defaultPolicy({ ports: new Set([80, 443, 4321]) });
+    expect(checkUrl("http://exemplo.com:4321/", local).ok).toBe(true);
+    expect(checkUrl("http://exemplo.com:8080/", local).ok).toBe(false);
+    expect(checkUrl("http://exemplo.com:4321/", defaultPolicy()).ok).toBe(false);
+  });
+
+  it("recusa IP proibido", () => {
+    expect(checkUrl("http://192.168.0.1/x.png", policy)).toMatchObject({
       ok: false,
       reason: "blocked_address",
       detail: "endereço proibido: 192.168.0.1",
     });
-    expect(checkUrl("http://[::1]:8080/", policy, "subresource").ok).toBe(false);
+    expect(checkUrl("http://[::1]/", policy).ok).toBe(false);
   });
 
   it("devolve o host normalizado e diz se é IP literal", () => {
-    expect(checkUrl("http://EXEMPLO.com./a", policy, "document")).toMatchObject({
+    expect(checkUrl("http://EXEMPLO.com./a", policy)).toMatchObject({
       ok: true,
       host: "exemplo.com",
       ip: null,
       allowlisted: false,
     });
-    expect(checkUrl("http://[2606:4700:4700::1111]/", policy, "document")).toMatchObject({
+    expect(checkUrl("http://[2606:4700:4700::1111]/", policy)).toMatchObject({
       ok: true,
       host: "2606:4700:4700::1111",
       ip: "2606:4700:4700::1111",
     });
   });
 
-  it("a allowlist libera o nome, não a porta do documento", () => {
+  it("a allowlist libera o nome, não a porta", () => {
     const allow = defaultPolicy({ allowlist: new Set(["fixtures"]) });
-    expect(checkUrl("http://fixtures/limpa.html", allow, "document")).toMatchObject({ ok: true, allowlisted: true });
-    expect(checkUrl("http://fixtures:8080/", allow, "document").ok).toBe(false);
-    expect(checkUrl("http://fixtures:8080/a.png", allow, "subresource").ok).toBe(true);
-    expect(checkUrl("http://postgres/", allow, "document").ok).toBe(false);
+    expect(checkUrl("http://fixtures/limpa.html", allow)).toMatchObject({ ok: true, allowlisted: true });
+    expect(checkUrl("http://fixtures:8080/", allow).ok).toBe(false);
+    expect(checkUrl("http://fixtures:8080/a.png", allow).ok).toBe(false);
+    expect(checkUrl("http://postgres/", allow).ok).toBe(false);
   });
 });
 

@@ -24,13 +24,14 @@ export interface ScanResult {
   http_status: number | null;
   title: string;
   axe: AxeFacts;
-  // Requisições recusadas pela proteção contra SSRF fora do documento principal: as que o
-  // route recusou e as que só o proxy viu (saltos de redirecionamento, WebSocket, workers).
+  // Requisições recusadas pela proteção contra SSRF fora do documento principal (endereço,
+  // nome ou porta): as que o route recusou e as que só o proxy viu (saltos de
+  // redirecionamento, WebSocket, workers), cada uma contada uma vez.
   blocked_requests: number;
 }
 
 // `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação
-// do documento principal vai para endereço proibido ou porta não permitida.
+// do documento principal vai para endereço proibido ou porta fora de 80/443.
 // `invalid_url` (422): URL com credenciais ou host inválido.
 // `resource_limit` (422): a página passou do teto de dados ou de conexões da varredura.
 // `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total.
@@ -56,7 +57,7 @@ export interface ServerOptions {
   // Coleta do axe; substituível nos testes.
   analyze?: (page: Page) => Promise<AxeFacts>;
   // Proteção contra SSRF. Em produção só a `allowlist` vem de fora (`SSRF_ALLOWLIST`); os
-  // testes trocam o DNS e as portas do documento para usar um servidor local.
+  // testes trocam o DNS e acrescentam às portas a do servidor local.
   ssrf?: Partial<SsrfPolicy>;
   // Teto de dados e de conexões do proxy de cada varredura.
   limits?: Partial<ProxyLimits>;
@@ -127,8 +128,9 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
       return fail(502, "navigation_failed", documentError() ?? "a navegação da página falhou depois de aberta");
     }
-    // O salto de um redirecionamento não passa pelo route: a porta do destino é conferida aqui.
-    const finalCheck = checkUrl(finalUrl, policy, "document");
+    // Defesa em profundidade: o proxy já recusou qualquer salto para porta ou endereço
+    // proibido, mas a URL final é conferida de novo antes da análise.
+    const finalCheck = checkUrl(finalUrl, policy);
     if (!finalCheck.ok) return refused(finalCheck.reason, finalCheck.detail);
 
     // Página de erro não é auditada: o axe acharia problemas da página de erro, não do site.
@@ -173,7 +175,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     },
     async (request, reply) => {
       // Recusa cedo, sem abrir o navegador; o route e o proxy conferem de novo cada conexão.
-      const check = checkUrl(request.body.url, policy, "document");
+      const check = checkUrl(request.body.url, policy);
       if (!check.ok) {
         const outcome = refused(check.reason, check.detail);
         return reply.code(outcome.code).send(outcome.body);

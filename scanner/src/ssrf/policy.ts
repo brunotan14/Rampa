@@ -2,9 +2,11 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { isBlockedIp } from "./ip.js";
 
-// Regras de esquema, nome e porta da proteção contra SSRF (RF-RA002), as mesmas do backend
-// (`Rampa.Security.URLGuard`). O scanner recebe URLs já validadas, mas confere de novo cada
-// requisição da página: documento, redirecionamentos e sub-recursos.
+// Regras de esquema, nome, porta e IP da proteção contra SSRF (RF-RA002), as mesmas do
+// backend (`Rampa.Security.URLGuard`). O scanner recebe URLs já validadas, mas confere de novo
+// cada requisição da página com a mesma política: documento, sub-recursos, saltos de
+// redirecionamento, WebSocket e CONNECT. Só as portas 80 e 443, para tudo: o scanner não
+// serve para sondar portas de terceiros.
 
 export type BlockReason = "blocked_address" | "unsupported_scheme" | "invalid_url";
 
@@ -18,16 +20,14 @@ export type Resolve = (hostname: string) => Promise<ResolvedAddress[]>;
 export interface SsrfPolicy {
   // `SSRF_ALLOWLIST`: hosts que pulam a checagem de nome e de IP, nunca a de esquema e porta.
   allowlist: ReadonlySet<string>;
-  // Portas aceitas para o documento principal. Sub-recurso em outra porta não é SSRF: o
-  // que importa nele é o IP.
-  documentPorts: ReadonlySet<number>;
+  // Portas aceitas em qualquer requisição. Os testes acrescentam a porta efêmera do servidor
+  // local; o padrão é só 80 e 443.
+  ports: ReadonlySet<number>;
   // DNS; substituível nos testes (simulação de rebinding).
   resolve: Resolve;
   // Faixas proibidas; substituível só nos testes, para tratar um endereço local como público.
   isBlockedIp: (ip: string) => boolean;
 }
-
-export type RequestKind = "document" | "subresource";
 
 export type UrlCheck =
   | { ok: true; url: URL; host: string; ip: string | null; allowlisted: boolean }
@@ -44,7 +44,7 @@ export const defaultResolve: Resolve = async (hostname) => {
 export function defaultPolicy(overrides: Partial<SsrfPolicy> = {}): SsrfPolicy {
   return {
     allowlist: new Set(),
-    documentPorts: new Set([80, 443]),
+    ports: new Set([80, 443]),
     resolve: defaultResolve,
     isBlockedIp,
     ...overrides,
@@ -96,9 +96,9 @@ export function isInternalName(host: string): boolean {
 
 const block = (reason: BlockReason, detail: string): UrlCheck => ({ ok: false, reason, detail });
 
-// Checagem sem DNS: esquema, credenciais, nome, IP literal e, para o documento, porta. O IP
-// dos nomes é conferido na conexão (`fetchResource`), com o endereço que vai ser usado.
-export function checkUrl(input: string | URL, policy: SsrfPolicy, kind: RequestKind): UrlCheck {
+// Checagem sem DNS: esquema, credenciais, nome, porta e IP literal. O IP dos nomes é
+// conferido na conexão (`proxy.ts`), com o endereço que vai ser usado.
+export function checkUrl(input: string | URL, policy: SsrfPolicy): UrlCheck {
   let url: URL;
   try {
     url = typeof input === "string" ? new URL(input) : input;
@@ -114,7 +114,7 @@ export function checkUrl(input: string | URL, policy: SsrfPolicy, kind: RequestK
   if (host === "") return block("invalid_url", "URL sem host");
 
   const port = url.port === "" ? defaultPort : Number(url.port);
-  if (kind === "document" && !policy.documentPorts.has(port)) {
+  if (!policy.ports.has(port)) {
     return block("blocked_address", `porta não permitida: ${port}`);
   }
 
