@@ -1,0 +1,6 @@
+{
+  "title": "Contraste incerto",
+  "http_status": 200,
+  "violations": [],
+  "incomplete": [{ "id": "color-contrast", "nodes": 1 }]
+}

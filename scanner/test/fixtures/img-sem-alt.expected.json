@@ -1,0 +1,6 @@
+{
+  "title": "Imagem sem texto alternativo",
+  "http_status": 200,
+  "violations": [{ "id": "image-alt", "impact": "critical", "nodes": 1 }],
+  "incomplete": []
+}

@@ -34,3 +34,6 @@ config :phoenix, :plug_init_mode, :runtime
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Testes do `Rampa.Scanner.HTTP` respondem por `Req.Test`, sem rede
+config :rampa, :scanner_req_options, plug: {Req.Test, Rampa.Scanner.HTTP}

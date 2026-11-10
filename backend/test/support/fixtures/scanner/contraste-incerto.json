@@ -1,0 +1,40 @@
+{
+  "final_url": "http://127.0.0.1:8099/contraste-incerto.html",
+  "http_status": 200,
+  "title": "Contraste incerto",
+  "axe": {
+    "version": "4.14.0",
+    "violations": [],
+    "incomplete": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "tags": [
+          "cat.color",
+          "wcag2aa",
+          "wcag143",
+          "TTv5",
+          "TT13.c",
+          "EN-301-549",
+          "EN-9.1.4.3",
+          "ACT",
+          "RGAAv4",
+          "RGAA-3.2.1"
+        ],
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=playwright",
+        "nodes": [
+          {
+            "target": [
+              "div > p"
+            ],
+            "html": "<p>Texto sobre imagem de fundo</p>",
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background image",
+            "impact": "serious"
+          }
+        ]
+      }
+    ]
+  }
+}

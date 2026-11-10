@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@axe-core/playwright": "4.14.0",
     "fastify": "5.12.8",
     "playwright": "1.65.0"
   },

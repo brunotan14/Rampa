@@ -1,0 +1,10 @@
+{
+  "final_url": "http://127.0.0.1:8099/limpa.html",
+  "http_status": 200,
+  "title": "Página limpa",
+  "axe": {
+    "version": "4.14.0",
+    "violations": [],
+    "incomplete": []
+  }
+}
