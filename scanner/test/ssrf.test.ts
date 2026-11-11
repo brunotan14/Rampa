@@ -6,7 +6,7 @@ import { checkStartup, checkUrl, defaultPolicy, normalizeHost, parseAllowlist } 
 // Casos compartilhados com o backend (`backend/test/rampa/security/url_guard_test.exs`).
 interface SharedCases {
   ips: { ip: string; blocked: boolean; range: string }[];
-  urls: { url: string; expected: string; allowlist?: string[]; normalized?: string }[];
+  urls: { url: string; expected: string; allowlist?: string[]; normalized?: string; backend_only?: string }[];
 }
 
 const cases = JSON.parse(
@@ -20,7 +20,7 @@ describe("casos compartilhados com o backend: IPs", () => {
 });
 
 describe("casos compartilhados com o backend: URLs", () => {
-  it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist, normalized }) => {
+  it.each(cases.urls.filter((c) => c.backend_only === undefined))("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist, normalized }) => {
     // A lista passa pela mesma interpretação da variável de ambiente, como no backend.
     const hosts = parseAllowlist((allowlist ?? []).join(","));
     const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }));
