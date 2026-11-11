@@ -40,6 +40,7 @@ make test    # unitários: ExUnit (backend), Vitest (frontend e scanner)
 make e2e     # telas do Rampa: Playwright + axe
 make e2e-integrado  # API, scanner e banco reais auditando o site de fixtures (Compose de teste)
 make lint    # formatação, lint e tipos
+make ci      # os passos do CI, na ordem do ci.yml (FULL=1 inclui os E2E; precisa de `make services`)
 make openapi # regenera o contrato da API em shared/openapi.json (o CI confere se está atualizado)
 make scanner-contract # regenera scanner/src/contract.gen.ts a partir de shared/scanner-contract.schema.json (o CI confere)
 ```

@@ -60,13 +60,10 @@ jobs:
       - run: mix credo --strict
       - run: mix test
       # Contrato OpenAPI versionado: regenera e falha se `shared/openapi.json` estiver
-      # desatualizado (rode `make openapi` e versione o arquivo).
+      # desatualizado (rode `make openapi` e versione o arquivo). O mesmo script do `make ci`.
       - name: Contrato OpenAPI atualizado
         working-directory: .
-        run: |
-          git ls-files --error-unmatch shared/openapi.json
-          make openapi
-          git diff --exit-code shared/openapi.json
+        run: infra/ci/check-contract.sh openapi
 
   frontend:
     name: Frontend (lint, tipos, Vitest)
@@ -112,13 +109,10 @@ jobs:
       - run: npm ci
       # Contrato do scanner: regenera os tipos a partir de `shared/scanner-contract.schema.json`
       # e falha se `scanner/src/contract.gen.ts` estiver desatualizado (rode
-      # `make scanner-contract` e versione o arquivo).
+      # `make scanner-contract` e versione o arquivo). O mesmo script do `make ci`.
       - name: Contrato do scanner atualizado
         working-directory: .
-        run: |
-          git ls-files --error-unmatch shared/scanner-contract.schema.json scanner/src/contract.gen.ts
-          npm --prefix scanner run contract
-          git diff --exit-code scanner/src/contract.gen.ts
+        run: infra/ci/check-contract.sh scanner
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
