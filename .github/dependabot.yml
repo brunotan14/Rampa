@@ -44,6 +44,15 @@ updates:
     ignore:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # eslint-plugin-jsx-a11y 6.10.2 (lint de acessibilidade do frontend) ainda não aceita o
+      # ESLint 10. Tirar estas duas regras quando o plugin aceitar; eslint e @eslint/js sobem juntos.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint 8.72 aceita só TypeScript < 6.1. Tirar quando ele aceitar versões novas.
+      - dependency-name: typescript
+        versions: [">=6.1.0"]
     commit-message:
       prefix: "Dependências (npm)"
 
@@ -61,6 +70,9 @@ updates:
       - dependency-name: playwright
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript-eslint 8.72 aceita só TypeScript < 6.1. Tirar quando ele aceitar versões novas.
+      - dependency-name: typescript
+        versions: [">=6.1.0"]
     commit-message:
       prefix: "Dependências (npm, scanner)"
 
