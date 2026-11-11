@@ -3,7 +3,9 @@ defmodule Rampa.ErrorCodes do
   Fonte única dos códigos de erro do Rampa. Cada conjunto é definido aqui e só aqui; quem
   precisa dele deriva desta lista:
 
-    * `Rampa.Scanner.HTTP`: os códigos do contrato do scanner (`scanner/0`);
+    * `Rampa.Scanner.HTTP`: os códigos do contrato do scanner (`scanner/0`), que por sua vez
+      vêm do `enum` `ScanErrorCode` do schema `shared/scanner-contract.schema.json`
+      (`Rampa.Scanner.Contract`);
     * `RampaWeb.ErrorMessages`: a mensagem em português de cada código (`all/0`);
     * `RampaWeb.FallbackController` e `RampaWeb.ErrorJSON`: o status HTTP (`status/1`,
       `http_code/1`);
@@ -13,19 +15,12 @@ defmodule Rampa.ErrorCodes do
   mensagem própria ou não aparece no `enum` da resposta certa.
   """
 
-  # Contrato do scanner (PRD §7): `{ "error": código }`.
-  @scanner [
-    :blocked_address,
-    :invalid_url,
-    :resource_limit,
-    :timeout,
-    :http_error,
-    :navigation_failed,
-    :analysis_failed
-  ]
+  # Contrato do scanner (PRD §7): `{ "error": código }`, do schema canônico.
+  @scanner Rampa.Scanner.Contract.error_codes()
 
   # Acrescentados por `Rampa.Scanner.Client.scan/1`.
-  @scanner_client @scanner ++ [:invalid_request, :unavailable]
+  @scanner_client @scanner ++
+                    [:invalid_request, :unavailable, :contract_mismatch, :invalid_scan_result]
 
   # Recusas de `Rampa.Security.URLGuard.validate/2`.
   @url_guard [:invalid_url, :unsupported_scheme, :blocked_address, :unresolvable, :dns_error]
@@ -34,7 +29,7 @@ defmodule Rampa.ErrorCodes do
   # os do `ScanPageJob` e os do ciclo de vida (`Rampa.Audits`).
   @page Enum.uniq(
           @url_guard ++
-            @scanner_client ++ [:invalid_scan_result, :internal_error, :stale, :scan_failed]
+            @scanner_client ++ [:internal_error, :stale, :scan_failed]
         )
 
   # Erros de cada operação da API, com o status HTTP.

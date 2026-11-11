@@ -203,6 +203,13 @@ defmodule RampaWeb.ErrorMessages do
   def message("invalid_scan_result", _bindings),
     do: dgettext("errors", "O resultado da análise veio incompleto.")
 
+  def message("contract_mismatch", _bindings) do
+    dgettext(
+      "errors",
+      "Não foi possível concluir a análise por uma incompatibilidade interna do Rampa. O problema ficou registrado para a equipe corrigir."
+    )
+  end
+
   def message("stale", _bindings) do
     dgettext(
       "errors",

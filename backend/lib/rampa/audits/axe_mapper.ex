@@ -19,12 +19,17 @@ defmodule Rampa.Audits.AxeMapper do
       (do documento principal para dentro). Um item que também é lista indica shadow DOM
       (do host para dentro). Os níveis de iframe são unidos por `" >>> "` e os de shadow DOM
       por `" >> "`: `[["#host", "button"]]` vira `"#host >> button"` e
-      `["iframe#a", "p"]` vira `"iframe#a >>> p"`;
+      `["iframe#a", "p"]` vira `"iframe#a >>> p"`. Nó com `target_truncated` (o scanner
+      cortou o `target` nos limites do contrato) fica com `selector` nulo: um seletor cortado
+      não aponta com segurança para o elemento, e o `html_snippet` continua ajudando a
+      encontrá-lo;
     * `html_snippet` é o `html` do nó cortado em no máximo 2048 bytes, sem quebrar um
       caractere UTF-8 no meio (RNF-RA005);
     * `message` é o `failureSummary` do nó; se faltar, o `help` da regra. O texto em PT-BR
       entra no M3;
-    * `raw` guarda só `id`, `tags`, `help`, `helpUrl` e `impact` da regra, sem HTML.
+    * `raw` guarda só `id`, `tags`, `help`, `helpUrl`, `impact` e `nodes_total` da regra, sem
+      HTML. `nodes_total` é quantos nós a regra tinha antes de o scanner cortar a lista
+      (contrato do scanner): a página pode ter mais ocorrências do que achados gravados.
 
   A versão do axe não vai no achado: fica em `pages.axe_version` (RNF-RA006).
   """
@@ -81,10 +86,10 @@ defmodule Rampa.Audits.AxeMapper do
       severity: severity(node["impact"], rule["impact"]),
       needs_review: needs_review,
       confidence: nil,
-      selector: selector(node["target"]),
+      selector: if(node["target_truncated"] == true, do: nil, else: selector(node["target"])),
       html_snippet: PageData.truncate_bytes(node["html"], Finding.html_snippet_max_bytes()),
       message: node["failureSummary"] || rule["help"],
-      raw: Map.take(rule, ["id", "tags", "help", "helpUrl", "impact"])
+      raw: Map.take(rule, ["id", "tags", "help", "helpUrl", "impact", "nodes_total"])
     }
   end
 

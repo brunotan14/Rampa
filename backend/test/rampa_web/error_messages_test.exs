@@ -41,4 +41,10 @@ defmodule RampaWeb.ErrorMessagesTest do
       refute ErrorMessages.message(code) =~ ~r/est[aá] conforme|[eé] acess[ií]vel/i, code
     end
   end
+
+  test "contract_mismatch não promete prazo curto" do
+    message = ErrorMessages.message(:contract_mismatch)
+    refute message =~ "minutos"
+    assert message =~ "incompatibilidade interna"
+  end
 end

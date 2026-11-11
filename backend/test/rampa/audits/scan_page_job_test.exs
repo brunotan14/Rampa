@@ -342,7 +342,14 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros definitivos" do
-    for code <- [:blocked_address, :invalid_url, :resource_limit, :http_error, :invalid_request] do
+    for code <- [
+          :blocked_address,
+          :invalid_url,
+          :resource_limit,
+          :http_error,
+          :invalid_request,
+          :invalid_scan_result
+        ] do
       @tag :capture_log
       test "#{code} marca a página e a auditoria como falhas e cancela o job" do
         code = unquote(code)
@@ -364,7 +371,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros passageiros do scanner" do
-    for code <- [:timeout, :navigation_failed, :analysis_failed, :unavailable] do
+    for code <- [:timeout, :navigation_failed, :analysis_failed, :unavailable, :contract_mismatch] do
       @tag :capture_log
       test "#{code} tenta de novo sem marcar falha na primeira tentativa" do
         code = unquote(code)
@@ -407,26 +414,19 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
   end
 
+  # Gravação recusada é definitiva: com o resultado já validado pelo contrato, o mesmo
+  # resultado seria recusado de novo.
   describe "gravação recusada" do
     @tag :capture_log
-    test "achado inválido não grava nada e tenta de novo" do
+    test "achado inválido não grava nada e marca a falha na primeira tentativa" do
       page = page_fixture()
       expect_scan(page, {:ok, invalid_response()})
 
-      assert {:error, :invalid_scan_result} = perform(page, attempt: 1)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1)
 
-      assert %Page{status: :scanning, axe_version: nil} = reload(page)
-      assert findings(page) == []
-    end
+      assert %Page{status: :failed, error: "invalid_scan_result", axe_version: nil} =
+               reload(page)
 
-    @tag :capture_log
-    test "na última tentativa marca a página e a auditoria como falhas" do
-      page = page_fixture()
-      expect_scan(page, {:ok, invalid_response()})
-
-      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
-
-      assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
       assert %Audit{status: :failed, error: "invalid_scan_result"} = audit_of(page)
       assert findings(page) == []
     end
@@ -436,7 +436,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       page = page_fixture()
       expect_scan(page, {:ok, Map.delete(scanner_response("limpa"), "axe")})
 
-      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1)
 
       assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
     end
@@ -446,6 +446,76 @@ defmodule Rampa.Audits.ScanPageJobTest do
       update_in(scanner_response("img-sem-alt"), ["axe", "violations"], fn [rule] ->
         [Map.delete(rule, "id")]
       end)
+    end
+  end
+
+  # Item do review: só a recusa causada pelos dados do scanner (achado inválido) é definitiva;
+  # os outros erros da gravação são do banco ou do ciclo de vida e ganham nova tentativa.
+  describe "outros erros da gravação" do
+    @tag :capture_log
+    test "erro da gravação que não vem dos achados é passageiro (internal_error)" do
+      page = page_fixture()
+      # `http_status` fora da faixa do changeset da página: a recusa é da página, não de um
+      # achado (o cliente real já recusaria; aqui o mock entrega direto à gravação).
+      expect_scan(page, {:ok, Map.put(scanner_response("limpa"), "http_status", 700)})
+
+      assert {:error, :internal_error} = perform(page, attempt: 1)
+
+      assert %Page{status: :scanning, error: nil} = reload(page)
+      assert %Audit{status: :running, pages_failed: 0} = audit_of(page)
+    end
+
+    @tag :capture_log
+    test "na última tentativa fecha a página com internal_error" do
+      page = page_fixture()
+      expect_scan(page, {:ok, Map.put(scanner_response("limpa"), "http_status", 700)})
+
+      assert {:cancel, :internal_error} = perform(page, attempt: 2)
+
+      assert %Page{status: :failed, error: "internal_error"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "tarefa scan apagada durante a varredura cancela sem marcar falha" do
+      page = page_fixture()
+
+      expect(ClientMock, :scan, fn _url ->
+        Repo.delete_all(from t in PageTask, where: t.page_id == ^page.id)
+        {:ok, scanner_response("limpa")}
+      end)
+
+      assert {:cancel, :task_not_found} = perform(page, attempt: 1)
+      assert %Page{error: nil} = reload(page)
+    end
+  end
+
+  describe "nodes_total" do
+    test "regra com 30 nós (20 enviados) gera 20 achados e o total 30 fica no raw" do
+      page = page_fixture()
+
+      response =
+        update_in(scanner_response("img-sem-alt"), ["axe", "violations"], fn [rule] ->
+          [node] = rule["nodes"]
+          [%{rule | "nodes" => List.duplicate(node, 20), "nodes_total" => 30}]
+        end)
+
+      expect_scan(page, {:ok, response})
+      assert :ok = perform(page)
+
+      found = findings(page)
+      assert length(found) == 20
+      assert Enum.all?(found, &(&1.raw["nodes_total"] == 30))
+    end
+  end
+
+  describe "target cortado pelo scanner" do
+    test "nó com target_truncated grava selector nulo e mantém o trecho de HTML" do
+      page = page_fixture()
+      expect_scan(page, {:ok, with_node(&Map.put(&1, "target_truncated", true))})
+
+      assert :ok = perform(page)
+
+      assert [%Finding{selector: nil, html_snippet: "<img" <> _}] = findings(page)
     end
   end
 

@@ -6,9 +6,10 @@ import { gzipSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { AxeFacts } from "../src/axe.js";
+import { CONTRACT_VERSION, type AxeFacts, type ScanResponse } from "../src/contract.gen.js";
 import { LAUNCH_OPTIONS, launchBrowser } from "../src/browser.js";
-import { buildServer, type ScanResult, type ServerOptions } from "../src/server.js";
+import { buildServer, type ServerOptions } from "../src/server.js";
+import { scanOn } from "./support/contract.js";
 import { isBlockedIp } from "../src/ssrf/ip.js";
 import type { Resolve } from "../src/ssrf/policy.js";
 import { fixturesPolicy, notFound } from "./support/policy.js";
@@ -238,7 +239,7 @@ const url = (path: string) => `http://fixtures:${port}${path}`;
 const hitsTo = (path: string) => servers.hits.filter((hit) => hit.url.startsWith(path));
 
 async function scanWith(server: FastifyInstance, target: string) {
-  return server.inject({ method: "POST", url: "/scan", payload: { url: target } });
+  return scanOn(server, target);
 }
 
 const scan = (target: string) => scanWith(app, target);
@@ -267,33 +268,33 @@ describe("documento principal", () => {
   it("URL de endereço proibido é recusada sem abrir o navegador", async () => {
     const res = await scan("http://169.254.169.254/latest/meta-data/");
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 169.254.169.254" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: "endereço proibido: 169.254.169.254" });
     expect(browser.contexts()).toHaveLength(0);
   });
 
   it("porta fora de 80/443 é recusada no documento", async () => {
     const res = await scanWith(buildServer(browser), "http://exemplo.com:8080/");
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: "porta não permitida: 8080" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: "porta não permitida: 8080" });
   });
 
   it("URL com credenciais é recusada como invalid_url", async () => {
     const res = await scan(`http://usuario:senha@fixtures:${port}/limpa.html`);
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "invalid_url", detail: "URL com credenciais" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "invalid_url", detail: "URL com credenciais" });
   });
 
   it("página que redireciona para http://127.0.0.1/ devolve blocked_address", async () => {
     const res = await scan(url("/redireciona-privado"));
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 127.0.0.1" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: "endereço proibido: 127.0.0.1" });
     expect(browser.contexts()).toHaveLength(0);
   });
 
   it("o bloqueio vale para qualquer salto da cadeia de redirecionamentos", async () => {
     const res = await scan(url("/redireciona-cadeia"));
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 127.0.0.1" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: "endereço proibido: 127.0.0.1" });
   });
 
   it("redirecionamento permitido é seguido e a página final é analisada", async () => {
@@ -305,7 +306,7 @@ describe("documento principal", () => {
   it("redirecionamento do documento para porta não permitida devolve blocked_address", async () => {
     const res = await scan(url("/redireciona-porta"));
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: `porta não permitida: ${otherPort}` });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: `porta não permitida: ${otherPort}` });
     // O proxy recusou o salto: o servidor da outra porta não recebeu nada.
     expect(otherHits).toEqual([]);
   });
@@ -344,13 +345,14 @@ describe("documento principal", () => {
   it("navegação do documento para IP proibido depois de aberto devolve blocked_address", async () => {
     const res = await scan(url("/navega-privado.html"));
     expect(res.statusCode).toBe(422);
-    expect(res.json()).toEqual({ error: "blocked_address", detail: "endereço proibido: 10.0.0.5" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "blocked_address", detail: "endereço proibido: 10.0.0.5" });
   });
 
   it("navegação para nome que resolve para IP proibido, vista só pelo proxy, devolve blocked_address", async () => {
     const res = await scan(url("/onload-navega-privado.html"));
     expect(res.statusCode).toBe(422);
     expect(res.json()).toEqual({
+      contract_version: CONTRACT_VERSION,
       error: "blocked_address",
       detail: "interno.exemplo.com resolve para endereço proibido: 127.0.0.1",
     });
@@ -361,7 +363,7 @@ describe("sub-recursos", () => {
   it('a página com <img src="http://192.168.0.1/x.png"> termina, conta o bloqueio e traz os achados do axe', async () => {
     const res = await scan(url("/img-privada.html"));
     expect(res.statusCode).toBe(200);
-    const body = res.json<ScanResult>();
+    const body = res.json<ScanResponse>();
     expect(body.blocked_requests).toBe(1);
     expect(body.axe.violations.map((rule) => rule.id)).toContain("image-alt");
   });
@@ -369,27 +371,27 @@ describe("sub-recursos", () => {
   it("<img> em host público na porta 8080 é bloqueada e conta uma vez", async () => {
     const res = await scan(url("/img-porta.html"));
     expect(res.statusCode).toBe(200);
-    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(res.json<ScanResponse>().blocked_requests).toBe(1);
   });
 
   it("imagem que redireciona para porta não permitida: o proxy bloqueia o salto e conta", async () => {
     const res = await scan(url("/img-redireciona-porta.html"));
     expect(res.statusCode).toBe(200);
-    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(res.json<ScanResponse>().blocked_requests).toBe(1);
     expect(otherHits).toEqual([]);
   });
 
   it("imagem que redireciona para IP privado: o proxy bloqueia o salto e conta", async () => {
     const res = await scan(url("/img-redireciona-privada.html"));
     expect(res.statusCode).toBe(200);
-    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(res.json<ScanResponse>().blocked_requests).toBe(1);
     expect(hitsTo("/segredo.png")).toEqual([]);
   });
 
   it("iframe para IP privado é bloqueado e a varredura continua", async () => {
     const res = await scan(url("/iframe-privado.html"));
     expect(res.statusCode).toBe(200);
-    expect(res.json<ScanResult>().blocked_requests).toBe(1);
+    expect(res.json<ScanResponse>().blocked_requests).toBe(1);
   });
 
   it("fetch por script para IP privado, literal ou resolvido, é bloqueado e contado uma vez", async () => {
@@ -399,7 +401,7 @@ describe("sub-recursos", () => {
       expect(res.statusCode).toBe(200);
       expect(seen.title).toBe("fetch:bloqueado-ip,bloqueado-nome");
       // O IP literal o route recusa; o nome só o proxy vê. Cada um conta uma vez.
-      expect(res.json<ScanResult>().blocked_requests).toBe(2);
+      expect(res.json<ScanResponse>().blocked_requests).toBe(2);
       // O servidor local é acessível: se a requisição tivesse escapado, ele a teria recebido.
       expect(hitsTo("/segredo")).toEqual([]);
     });
@@ -436,7 +438,7 @@ describe("limites da varredura", () => {
     await withServer({ limits: { maxBytes: 128 * 1024 } }, async (server) => {
       const res = await scanWith(server, url("/pesada.html"));
       expect(res.statusCode).toBe(422);
-      expect(res.json()).toEqual({ error: "resource_limit", detail: `a página passou de ${128 * 1024} bytes trafegados` });
+      expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "resource_limit", detail: `a página passou de ${128 * 1024} bytes trafegados` });
     });
   });
 
@@ -444,7 +446,7 @@ describe("limites da varredura", () => {
     await withServer({ limits: { maxConnections: 2 } }, async (server) => {
       const res = await scanWith(server, url("/muitas-imagens.html"));
       expect(res.statusCode).toBe(422);
-      expect(res.json()).toEqual({ error: "resource_limit", detail: "a página abriu mais de 2 conexões simultâneas" });
+      expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "resource_limit", detail: "a página abriu mais de 2 conexões simultâneas" });
     });
   });
 });
@@ -467,7 +469,7 @@ describe("DNS rebinding", () => {
       const res = await scanWith(server, `http://rebind.exemplo.com:${port}/rebind.html`);
       expect(res.statusCode).toBe(200);
       expect(calls).toBeGreaterThanOrEqual(7);
-      expect(res.json<ScanResult>().blocked_requests).toBeGreaterThanOrEqual(3);
+      expect(res.json<ScanResponse>().blocked_requests).toBeGreaterThanOrEqual(3);
       expect(servers.ipv6Hits).toEqual([]);
     } finally {
       await server.close();
@@ -485,7 +487,7 @@ describe("o que o route do Playwright não vê passa pelo proxy", () => {
       expect(servers.upgrades).toContain("/ws-aceita");
       expect(servers.upgrades).not.toContain("/ws-aceita-privado");
       expect(otherHits).toEqual([]);
-      expect(res.json<ScanResult>().blocked_requests).toBe(2);
+      expect(res.json<ScanResponse>().blocked_requests).toBe(2);
     });
   });
 
@@ -502,7 +504,7 @@ describe("o que o route do Playwright não vê passa pelo proxy", () => {
         expect(res.statusCode).toBe(200);
         expect(hitsTo("/shared-publico")).not.toEqual([]);
         expect(hitsTo("/shared-privado")).toEqual([]);
-        expect(res.json<ScanResult>().blocked_requests).toBe(1);
+        expect(res.json<ScanResponse>().blocked_requests).toBe(1);
       },
     );
   });

@@ -12,7 +12,8 @@
     "start": "node dist/main.js",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "contract": "tsx scripts/generate-contract.ts"
   },
   "dependencies": {
     "@axe-core/playwright": "4.14.0",
@@ -22,7 +23,9 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.2",
+    "ajv": "8.20.0",
     "eslint": "10.14.0",
+    "json-schema-to-typescript": "16.0.0",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.2",

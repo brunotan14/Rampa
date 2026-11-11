@@ -1,4 +1,5 @@
 {
+  "contract_version": "1",
   "final_url": "https://exemplo.com/limpa.html",
   "http_status": 200,
   "title": "Página limpa",

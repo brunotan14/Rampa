@@ -98,6 +98,24 @@ defmodule Rampa.Audits.AxeMapperTest do
       assert finding.message == "Images must have alternative text"
     end
 
+    test "raw guarda o nodes_total da regra (quantos nós havia antes do corte do scanner)" do
+      nodes = List.duplicate(node_result(%{}), 20)
+      findings = AxeMapper.to_findings(axe([rule(%{"nodes" => nodes, "nodes_total" => 30})]))
+
+      assert length(findings) == 20
+      assert Enum.all?(findings, &(&1.raw["nodes_total"] == 30))
+    end
+
+    test "nó com target_truncated não vira seletor" do
+      [finding] =
+        AxeMapper.to_findings(
+          axe([rule(%{"nodes" => [node_result(%{"target_truncated" => true})]})])
+        )
+
+      assert finding.selector == nil
+      assert finding.html_snippet == ~s(<img src="a.png">)
+    end
+
     test "raw guarda só id, tags, help, helpUrl e impact da regra" do
       [finding] = AxeMapper.to_findings(axe([rule(%{})]))
 

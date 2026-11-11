@@ -18,19 +18,27 @@ defmodule Rampa.Audits.ScanPageJob do
   Tentativas (`max_attempts: 2`):
 
     * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
-      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` fecham a tarefa
-      `failed` na hora;
+      `invalid_url`, `resource_limit`, `http_error`, `invalid_request` e
+      `invalid_scan_result` fecham a tarefa `failed` na hora. `invalid_scan_result` é uma
+      resposta 200 com a versão certa do contrato, mas fora do schema, ou um achado que o
+      changeset recusa na gravação (os dados do scanner): o mesmo scanner devolveria o
+      mesmo resultado;
     * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
-      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
-      gravação recusada (`invalid_scan_result`), o prazo da varredura estourado (`timeout`) e
-      exceções ou `exit` (`internal_error`). A tarefa fica `running` entre as tentativas. Na
+      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner,
+      `contract_mismatch` (versão do contrato diferente, como durante um deploy em que o
+      scanner e o app trocam em momentos diferentes; uma nova tentativa só, e a divergência
+      fica no log como erro), o prazo da varredura estourado (`timeout`), os erros da
+      gravação que não vêm dos dados do scanner (trava, changeset da tarefa, da página ou da
+      auditoria, erro do banco) e exceções ou `exit` (`internal_error`). A tarefa fica
+      `running` entre as tentativas. Na
       última (do job, ou da tarefa, que continua contando depois de um reenfileiramento pela
       reconciliação) a tarefa fecha `failed` com o código;
     * sempre que a tarefa é fechada `failed`, o job devolve `{:cancel, code}`: não há o que
       tentar de novo. Enquanto ainda há tentativa, devolve `{:error, code}` (ou relança a
       exceção ou o `exit`) para o Oban tentar de novo;
     * tarefa já terminada, página sem tarefa `scan` ou auditoria encerrada (`completed`,
-      `failed`, `cancelled`) não é varrida: `{:cancel, reason}`. Cancelar, em vez de devolver
+      `failed`, `cancelled`) não é varrida: `{:cancel, reason}`. Se a tarefa ou a página
+      some, ou a tarefa termina, durante a varredura, a gravação também cancela. Cancelar, em vez de devolver
       `:ok`, deixa visível no Oban que o job não fez nada.
 
   Prazo: a varredura roda num processo filho (`Rampa.TaskSupervisor`) com o prazo de
@@ -65,8 +73,13 @@ defmodule Rampa.Audits.ScanPageJob do
     :unresolvable,
     :resource_limit,
     :http_error,
-    :invalid_request
+    :invalid_request,
+    :invalid_scan_result
   ]
+
+  # Na gravação: nada a gravar (tarefa ou página sumiu, ou a tarefa já terminou). O job é
+  # cancelado sem marcar falha, como quando `start_task/3` devolve o mesmo.
+  @nothing_to_record [:already_finished, :task_not_found, :page_not_found]
 
   @impl Oban.Worker
   def timeout(_job), do: @timeout_ms
@@ -100,7 +113,7 @@ defmodule Rampa.Audits.ScanPageJob do
 
     case Task.yield(child, deadline_ms()) || Task.shutdown(child, :brutal_kill) do
       {:ok, :ok} -> :ok
-      {:ok, {:error, :already_finished}} -> {:cancel, :already_finished}
+      {:ok, {:error, reason}} when reason in @nothing_to_record -> {:cancel, reason}
       {:ok, {:error, code, detail}} -> fail(task, job, code, detail)
       {:exit, reason} -> crashed(task, job, reason)
       nil -> fail(task, job, :timeout, "a varredura passou de #{deadline_ms()} ms")
@@ -153,12 +166,26 @@ defmodule Rampa.Audits.ScanPageJob do
     end
   end
 
+  # Só a recusa causada pelos dados do scanner é `invalid_scan_result` (definitivo). Tarefa
+  # ou página que sumiu, ou tarefa já fechada, cancelam como no início do job. O resto (trava,
+  # changeset da tarefa, da página ou da auditoria, erro do banco) é `internal_error`, que
+  # ganha nova tentativa.
   defp record(page, result) do
     case Audits.record_scan_result(page, result) do
-      {:ok, page} -> {:ok, page}
-      {:error, :already_finished} -> {:error, :already_finished}
-      {:error, :invalid_scan_result} -> {:error, :invalid_scan_result, "resultado sem axe"}
-      {:error, reason} -> {:error, :invalid_scan_result, inspect(reason)}
+      {:ok, page} ->
+        {:ok, page}
+
+      {:error, reason} when reason in @nothing_to_record ->
+        {:error, reason}
+
+      {:error, :invalid_scan_result} ->
+        {:error, :invalid_scan_result, "resultado sem axe"}
+
+      {:error, {:invalid_finding, changeset}} ->
+        {:error, :invalid_scan_result, "achado recusado: #{inspect(changeset.errors)}"}
+
+      {:error, reason} ->
+        {:error, :internal_error, "gravação do resultado falhou: #{inspect(reason)}"}
     end
   end
 
