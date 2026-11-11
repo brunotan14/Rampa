@@ -1,33 +1,68 @@
 # Atualizações automáticas de dependências (repositório público: cadeia de suprimentos).
-# Uma vez por semana, um PR agrupado por ecossistema, com poucos PRs abertos ao mesmo tempo.
-# A tag da imagem do Playwright (docker) e o pacote `playwright` (npm) precisam subir juntos:
-# `scanner/test/toolchain.test.ts` falha se divergirem, e o Node da imagem tem de bater com o `.nvmrc`.
+#
+# Regras:
+# - Uma vez por semana. Em cada ecossistema, minor e patch chegam juntas num PR agrupado;
+#   cada major chega num PR próprio, para uma falha na CI apontar qual atualização quebrou.
+# - `@types/node` não sobe de major sozinho: ele acompanha a major do Node, que é decidida pela
+#   imagem do scanner (`.nvmrc`).
+# - A imagem do Playwright não é atualizada aqui (sem ecossistema `docker`) e o pacote
+#   `playwright` é ignorado no scanner: os dois sobem juntos, à mão, porque
+#   `scanner/test/toolchain.test.ts` falha se divergirem.
+#
+# Para subir o Playwright (um PR só):
+# 1. Troque a tag em `scanner/Dockerfile` e o `playwright` em `scanner/package.json`
+#    (`npm install --prefix scanner playwright@<versão> --save-exact`).
+# 2. Confira o Node da imagem: `docker run --rm <imagem> node --version`.
+# 3. Atualize a linha `# Node da imagem:` do Dockerfile e o `.nvmrc` com essa versão.
+# 4. Se a major do Node mudar, suba junto o `@types/node` e o `engines` de frontend, scanner e e2e.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    # 1 PR agrupado + até 4 majors separadas.
+    open-pull-requests-limit: 5
     groups:
-      github-actions:
+      actions-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "Dependências (actions)"
 
   - package-ecosystem: npm
     directories:
       - /frontend
-      - /scanner
       - /e2e
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     groups:
-      npm:
+      npm-frontend-e2e-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "Dependências (npm)"
+
+  - package-ecosystem: npm
+    directory: /scanner
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-scanner-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Sobe junto com a imagem do Playwright, à mão (ver o topo deste arquivo).
+      - dependency-name: playwright
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "Dependências (npm, scanner)"
 
   - package-ecosystem: mix
     directory: /backend
@@ -35,18 +70,8 @@ updates:
       interval: weekly
     open-pull-requests-limit: 3
     groups:
-      mix:
+      mix-minor-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "Dependências (mix)"
-
-  - package-ecosystem: docker
-    directory: /scanner
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
-    groups:
-      docker:
-        patterns: ["*"]
-    commit-message:
-      prefix: "Dependências (docker)"
