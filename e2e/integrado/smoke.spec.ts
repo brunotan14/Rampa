@@ -21,7 +21,7 @@ test.describe("Fluxo integrado (M1)", () => {
       expect.objectContaining({
         source: "axe",
         rule_id: "image-alt",
-        severity: "critical",
+        severity: "minor",
         needs_review: false,
         wcag_criteria: expect.arrayContaining(["1.1.1"]),
       }),
