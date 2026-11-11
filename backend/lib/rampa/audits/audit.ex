@@ -57,5 +57,22 @@ defmodule Rampa.Audits.Audit do
     |> validate_number(:pages_found, greater_than_or_equal_to: 0)
     |> validate_number(:pages_scanned, greater_than_or_equal_to: 0)
     |> validate_number(:pages_failed, greater_than_or_equal_to: 0)
+    |> validate_finished_at()
+    |> check_constraint(:status, name: :status_valid)
+    |> check_constraint(:pages_found, name: :counters_non_negative)
+    |> check_constraint(:finished_at, name: :finished_requires_finished_at)
+  end
+
+  @doc "Estados em que a auditoria não aceita mais mudança."
+  @spec final_statuses() :: [status()]
+  def final_statuses, do: [:completed, :failed, :cancelled]
+
+  # `completed` e `failed` exigem `finished_at` (o banco também confere).
+  defp validate_finished_at(changeset) do
+    if get_field(changeset, :status) in [:completed, :failed] do
+      validate_required(changeset, [:finished_at])
+    else
+      changeset
+    end
   end
 end

@@ -10,19 +10,36 @@ defmodule Rampa.Audits.ScanPageJob do
   chamar o scanner. Falha do resolvedor de DNS (`dns_error`) é passageira e ganha nova
   tentativa.
 
+  Opera sobre a tarefa `scan` da página (`Rampa.Audits.PageTask`;
+  ciclo de vida em `Rampa.Audits.Rules`): marca a tarefa `running` com o `attempt`,
+  grava o resultado e fecha a tarefa `done`, ou `failed` na falha definitiva ou na última
+  tentativa. Fechar a tarefa roda a regra de conclusão da auditoria na mesma transação.
+
   Tentativas (`max_attempts: 2`):
 
     * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
-      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` marcam a página
-      `failed` na hora e cancelam o job (`{:cancel, code}`);
+      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` fecham a tarefa
+      `failed` na hora;
     * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
       erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
-      gravação recusada (`invalid_scan_result`) e exceções (`internal_error`). Na última
-      tentativa a página é marcada `failed` com o código e a auditoria é atualizada; o job
-      devolve `{:error, code}` (ou relança a exceção) para o Oban registrar;
-    * página que já terminou (`done`/`failed`) ou de auditoria encerrada (`completed`,
-      `failed`, `cancelled`) não é varrida: `{:cancel, :already_finished}`. Cancelar, em vez
-      de devolver `:ok`, deixa visível no Oban que o job não fez nada.
+      gravação recusada (`invalid_scan_result`), o prazo da varredura estourado (`timeout`) e
+      exceções ou `exit` (`internal_error`). A tarefa fica `running` entre as tentativas. Na
+      última (do job, ou da tarefa, que continua contando depois de um reenfileiramento pela
+      reconciliação) a tarefa fecha `failed` com o código;
+    * sempre que a tarefa é fechada `failed`, o job devolve `{:cancel, code}`: não há o que
+      tentar de novo. Enquanto ainda há tentativa, devolve `{:error, code}` (ou relança a
+      exceção ou o `exit`) para o Oban tentar de novo;
+    * tarefa já terminada, página sem tarefa `scan` ou auditoria encerrada (`completed`,
+      `failed`, `cancelled`) não é varrida: `{:cancel, reason}`. Cancelar, em vez de devolver
+      `:ok`, deixa visível no Oban que o job não fez nada.
+
+  Prazo: a varredura roda num processo filho (`Rampa.TaskSupervisor`) com o prazo de
+  `config :rampa, :scan_deadline_ms` (150 s: DNS de 5 s, cliente do scanner de 100 s e a
+  gravação). Estourado, o filho é encerrado e a falha é tratada como `timeout`. O `timeout` do
+  Oban (3 min) fica de reserva: ele encerra o processo do job de fora, sem chance de gravar a
+  falha, e aí quem fecha a tarefa é a reconciliação, assim que o job deixa de estar vivo e o
+  prazo de `running` (timeout + folga) passa. O `timeout` fica abaixo do `rescue_after` do
+  `Oban.Lifeline`: um job vivo nunca é resgatado.
 
   Um job por página por vez: `unique` em `page_id` nos estados não finais do Oban.
   """
@@ -35,9 +52,11 @@ defmodule Rampa.Audits.ScanPageJob do
   require Logger
 
   alias Rampa.Audits
-  alias Rampa.Audits.Page
+  alias Rampa.Audits.PageTask
   alias Rampa.Scanner.Client
   alias Rampa.Security.URLGuard
+
+  @timeout_ms :timer.minutes(3)
 
   @definitive [
     :blocked_address,
@@ -50,32 +69,75 @@ defmodule Rampa.Audits.ScanPageJob do
   ]
 
   @impl Oban.Worker
+  def timeout(_job), do: @timeout_ms
+
+  @impl Oban.Worker
   def perform(%Oban.Job{args: %{"page_id" => page_id}} = job) do
     Logger.metadata(page_id: page_id)
 
-    case Audits.start_page_scan(page_id) do
-      {:ok, page} -> run(page, job)
-      {:error, reason} when reason in [:page_not_found, :already_finished] -> {:cancel, reason}
-      {:error, reason} -> {:error, reason}
+    case Audits.start_task(page_id, :scan, job.attempt) do
+      {:ok, task} ->
+        supervise(task, job)
+
+      {:error, reason} when reason in [:page_not_found, :task_not_found, :already_finished] ->
+        {:cancel, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp run(%Page{} = page, job) do
+  # A varredura roda num processo filho com prazo; este processo só decide o desfecho.
+  defp supervise(%PageTask{page: page} = task, job) do
     Logger.metadata(audit_id: page.audit_id)
+    metadata = Logger.metadata()
 
+    child =
+      Task.Supervisor.async_nolink(Rampa.TaskSupervisor, fn ->
+        Logger.metadata(metadata)
+        scan_page(page)
+      end)
+
+    case Task.yield(child, deadline_ms()) || Task.shutdown(child, :brutal_kill) do
+      {:ok, :ok} -> :ok
+      {:ok, {:error, :already_finished}} -> {:cancel, :already_finished}
+      {:ok, {:error, code, detail}} -> fail(task, job, code, detail)
+      {:exit, reason} -> crashed(task, job, reason)
+      nil -> fail(task, job, :timeout, "a varredura passou de #{deadline_ms()} ms")
+    end
+  end
+
+  defp scan_page(page) do
     with {:ok, url} <- guard(page),
          {:ok, result} <- scan(url),
          {:ok, _page} <- record(page, result) do
       :ok
-    else
-      {:error, :already_finished} -> {:cancel, :already_finished}
-      {:error, code, detail} -> fail(page, job, code, detail)
     end
-  rescue
-    exception ->
-      fail(page, job, :internal_error, Exception.message(exception))
-      reraise exception, __STACKTRACE__
   end
+
+  defp deadline_ms, do: Application.fetch_env!(:rampa, :scan_deadline_ms)
+
+  # Exceção ou `exit` no filho. Na última tentativa, a tarefa fecha `internal_error` e o job é
+  # cancelado; antes disso, a falha original volta ao Oban para uma nova tentativa.
+  defp crashed(task, job, reason) do
+    {kind, error, stacktrace} =
+      case reason do
+        {exception, stack} when is_exception(exception) and is_list(stack) ->
+          {:error, exception, stack}
+
+        other ->
+          {:exit, other, []}
+      end
+
+    case fail(task, job, :internal_error, Exception.format_banner(kind, error, stacktrace)) do
+      {:cancel, _code} = cancel -> cancel
+      {:error, _code} -> reraise_crash(kind, error, stacktrace)
+    end
+  end
+
+  # A exceção volta com a stacktrace do filho; o `exit`, como um `exit` deste processo.
+  defp reraise_crash(:error, exception, stacktrace), do: reraise(exception, stacktrace)
+  defp reraise_crash(:exit, reason, _stacktrace), do: exit(reason)
 
   defp guard(page) do
     case URLGuard.validate(page.url) do
@@ -100,31 +162,42 @@ defmodule Rampa.Audits.ScanPageJob do
     end
   end
 
-  # Caminho único de falha: definitiva ou na última tentativa, a página é marcada `failed`.
-  defp fail(page, job, code, detail) do
+  # Caminho único de falha: definitiva ou na última tentativa, a tarefa fecha `failed` e o job
+  # é cancelado. A última tentativa conta também as da tarefa (depois de um reenfileiramento
+  # pela reconciliação, o `attempt` do Oban recomeça do 1).
+  defp fail(task, job, code, detail) do
     definitive? = code in @definitive
-    last_attempt? = job.attempt >= job.max_attempts
+    last_attempt? = max(job.attempt, task.attempt) >= job.max_attempts
 
     Logger.warning(
-      "scan: tentativa #{job.attempt}/#{job.max_attempts} falhou: #{code}: #{detail}"
+      "scan: tentativa #{task.attempt}/#{job.max_attempts} falhou: #{code}: #{detail}"
     )
 
-    if definitive? or last_attempt?, do: mark_failed(page, code)
+    closed? = (definitive? or last_attempt?) and mark_failed(task, code)
 
-    if definitive?, do: {:cancel, code}, else: {:error, code}
+    if closed? or definitive?, do: {:cancel, code}, else: {:error, code}
   end
 
-  # Não pode esconder a falha original: um erro aqui só é registrado no log.
-  defp mark_failed(page, code) do
-    case Audits.record_scan_failure(page, code) do
-      {:ok, _page} -> :ok
-      {:error, :already_finished} -> :ok
-      {:error, reason} -> log_mark_failed(reason)
+  # Devolve se a tarefa foi fechada. Não pode esconder a falha original: um erro aqui só é
+  # registrado no log, e a tarefa que ficar `running` é fechada pela reconciliação.
+  defp mark_failed(task, code) do
+    case Audits.fail_task(task.page_id, :scan, code) do
+      {:ok, _page} ->
+        true
+
+      {:error, :already_finished} ->
+        false
+
+      {:error, reason} ->
+        log_mark_failed(reason)
+        false
     end
   rescue
-    exception -> log_mark_failed(exception)
+    exception ->
+      log_mark_failed(exception)
+      false
   end
 
   defp log_mark_failed(reason),
-    do: Logger.error("scan: não consegui marcar a página como falha: #{inspect(reason)}")
+    do: Logger.error("scan: não consegui fechar a tarefa como falha: #{inspect(reason)}")
 end

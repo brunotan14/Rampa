@@ -82,6 +82,9 @@ defmodule Rampa.Audits.Finding do
     |> validate_number(:confidence, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
     |> check_constraint(:html_snippet, name: :html_snippet_max_2kb)
     |> check_constraint(:confidence, name: :confidence_range)
+    |> check_constraint(:source, name: :source_valid)
+    |> check_constraint(:severity, name: :severity_valid)
+    # Chave composta (page_id, audit_id): o achado é da auditoria da página.
     |> foreign_key_constraint(:page_id)
     |> foreign_key_constraint(:audit_id)
   end
