@@ -402,6 +402,8 @@ defmodule Rampa.Audits do
     with {:ok, decoded} <- Base.url_decode64(cursor, padding: false),
          [unix, id] <- String.split(decoded, ":"),
          {unix, ""} <- Integer.parse(unix),
+         # Nenhum achado é anterior a 1970; antes do mínimo do `timestamptz` a consulta levantaria exceção.
+         true <- unix >= 0,
          {:ok, inserted_at} <- DateTime.from_unix(unix, :microsecond),
          {:ok, id} <- Ecto.UUID.cast(id) do
       {:ok, {inserted_at, id}}

@@ -136,13 +136,8 @@ defmodule Rampa.Audits.FindingsCursorPropertyTest do
       end
     end
 
-    # CONTRAEXEMPLO (refactor/qualidade): instante antes do mínimo do PostgreSQL e dentro da
-    # faixa do `DateTime` (anos -9999 a -4714) passa pelo `decode_cursor/1` e a consulta
-    # levanta `Postgrex.Error` (22008, timestamp out of range). Mínimo:
-    # `Base.url_encode64("-210866803200000001:" <> Ecto.UUID.generate(), padding: false)`.
-    # Pela API, `GET /api/audits/:id/findings?cursor=...` vira HTTP 500 em vez de 422
-    # `invalid_cursor`. Correção pendente de decisão; reative o teste junto com ela.
-    @tag :skip
+    # Achado pela propriedade em refactor/qualidade: antes do `true <- unix >= 0` no
+    # `decode_cursor/1`, a consulta levantava `Postgrex.Error` (22008) e a API dava HTTP 500.
     property "cursor com instante antes do mínimo do PostgreSQL é inválido, sem exceção",
              %{audit_id: audit_id} do
       unix =
