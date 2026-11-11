@@ -175,6 +175,18 @@ defmodule Rampa.AuditsTest do
       assert {:ok, %PageTask{attempt: 3}} = Audits.start_task(page.id, :scan, 3)
     end
 
+    for scan_status <- [:queued, :scanning] do
+      test "análise não começa com o scan #{scan_status}" do
+        page = page_fixture(%{status: unquote(scan_status)})
+        task_fixture(page, %{kind: :alt_text})
+
+        assert {:error, :scan_not_finished} = Audits.start_task(page.id, :alt_text, 1)
+
+        assert %PageTask{status: :pending, attempt: 0} = task(page, :alt_text)
+        assert %Page{status: unquote(scan_status)} = reload(page)
+      end
+    end
+
     test "recusa tarefa inexistente ou terminada e auditoria encerrada" do
       page = page_fixture()
       assert {:error, :task_not_found} = Audits.start_task(page.id, :links, 1)

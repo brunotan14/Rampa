@@ -383,7 +383,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
         page = page_fixture()
         expect_scan(page, {:error, %{code: code, detail: "detalhe"}})
 
-        assert {:error, ^code} = perform(page, attempt: 2)
+        assert {:cancel, ^code} = perform(page, attempt: 2)
 
         error = Atom.to_string(code)
         assert %Page{status: :failed, error: ^error} = reload(page)
@@ -424,7 +424,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       page = page_fixture()
       expect_scan(page, {:ok, invalid_response()})
 
-      assert {:error, :invalid_scan_result} = perform(page, attempt: 2)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
 
       assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
       assert %Audit{status: :failed, error: "invalid_scan_result"} = audit_of(page)
@@ -436,7 +436,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       page = page_fixture()
       expect_scan(page, {:ok, Map.delete(scanner_response("limpa"), "axe")})
 
-      assert {:error, :invalid_scan_result} = perform(page, attempt: 2)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
 
       assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
     end
@@ -462,11 +462,11 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
 
     @tag :capture_log
-    test "na última tentativa marca falha e relança" do
+    test "na última tentativa fecha a tarefa e cancela o job, sem nova tentativa" do
       page = page_fixture()
       expect(ClientMock, :scan, fn _url -> raise "scanner quebrou" end)
 
-      assert_raise RuntimeError, fn -> perform(page, attempt: 2) end
+      assert {:cancel, :internal_error} = perform(page, attempt: 2)
 
       assert %Page{status: :failed, error: "internal_error"} = reload(page)
       assert %Audit{status: :failed, error: "internal_error", pages_failed: 1} = audit_of(page)
@@ -478,10 +478,37 @@ defmodule Rampa.Audits.ScanPageJobTest do
       # Seletor num formato que o axe não produz: a conversão levanta exceção na transação.
       expect_scan(page, {:ok, with_node(&Map.put(&1, "target", [%{"x" => 1}]))})
 
-      assert_raise Protocol.UndefinedError, fn -> perform(page, attempt: 2) end
+      assert {:cancel, :internal_error} = perform(page, attempt: 2)
 
       assert %Page{status: :failed, error: "internal_error", axe_version: nil} = reload(page)
       assert findings(page) == []
+    end
+  end
+
+  describe "exit e prazo" do
+    @tag :capture_log
+    test "exit na primeira tentativa volta ao Oban sem marcar falha" do
+      page = page_fixture()
+      expect(ClientMock, :scan, fn _url -> exit(:scanner_caiu) end)
+
+      # O Oban registra o `exit` como `Oban.CrashError` e tenta de novo.
+      assert_raise Oban.CrashError, ~r/scanner_caiu/, fn -> perform(page, attempt: 1) end
+      assert %PageTask{status: :running} = scan_task(page)
+    end
+
+    @tag :capture_log
+    test "exit na última tentativa fecha a tarefa internal_error e cancela o job" do
+      page = page_fixture()
+
+      expect(ClientMock, :scan, fn _url ->
+        GenServer.call(:processo_que_nao_existe, :scan)
+      end)
+
+      assert {:cancel, :internal_error} = perform(page, attempt: 2)
+
+      assert %PageTask{status: :failed, error: "internal_error"} = scan_task(page)
+      assert %Page{status: :failed, error: "internal_error"} = reload(page)
+      assert %Audit{status: :failed} = audit_of(page)
     end
   end
 
@@ -536,7 +563,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert {:error, :dns_error} = perform(page, attempt: 1)
       assert %Page{status: :scanning, error: nil} = reload(page)
 
-      assert {:error, :dns_error} = perform(page, attempt: 2)
+      assert {:cancel, :dns_error} = perform(page, attempt: 2)
       assert %Page{status: :failed, error: "dns_error"} = reload(page)
     end
 
@@ -596,7 +623,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert %PageTask{status: :running, attempt: 1, finished_at: nil} = scan_task(page)
 
       expect_scan(page, {:error, %{code: :timeout, detail: "detalhe"}})
-      assert {:error, :timeout} = perform(page, attempt: 2)
+      assert {:cancel, :timeout} = perform(page, attempt: 2)
 
       assert %PageTask{status: :failed, error: "timeout", attempt: 2, finished_at: %DateTime{}} =
                scan_task(page)
@@ -608,7 +635,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       page = page_fixture(%{task: %{status: :pending, attempt: 1}})
       expect_scan(page, {:error, %{code: :timeout, detail: "detalhe"}})
 
-      assert {:error, :timeout} = perform(page, attempt: 1)
+      assert {:cancel, :timeout} = perform(page, attempt: 1)
 
       assert %PageTask{status: :failed, attempt: 2, error: "timeout"} = scan_task(page)
       assert %Audit{status: :failed, pages_failed: 1} = audit_of(page)

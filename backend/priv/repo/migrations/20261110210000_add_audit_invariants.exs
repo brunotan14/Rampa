@@ -1,7 +1,7 @@
 defmodule Rampa.Repo.Migrations.AddAuditInvariants do
   use Ecto.Migration
 
-  # Invariantes do modelo de dados (PRD §8; docs/adr/0001-ciclo-de-vida-da-auditoria.md).
+  # Invariantes do modelo de dados (PRD §8; ciclo de vida em `Rampa.Audits.Rules`).
   # Os valores repetem os `Ecto.Enum` dos schemas de propósito: a migration não depende do
   # código da aplicação, que muda depois dela.
   def change do

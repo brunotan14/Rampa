@@ -40,10 +40,15 @@ defmodule Rampa.Audits do
   # O título vem da página: guardar só o necessário para identificá-la.
   @title_max_bytes 512
 
-  @open_task_statuses [:pending, :running]
-  @open_audit_statuses [:queued, :running]
+  # Tipo de tarefa → job que a executa (args: `%{"page_id" => id}`). As análises de IA ganham
+  # job no M4; até lá, uma tarefa delas presa é fechada como falha pela reconciliação.
+  @task_workers %{scan: ScanPageJob}
 
-  @type transition_error :: :page_not_found | :task_not_found | :already_finished
+  # Estados do Oban em que o job ainda vai rodar ou está rodando: os mesmos da chave única.
+  @live_job_states Enum.map(Oban.Job.unique_states(:incomplete), &Atom.to_string/1)
+
+  @type transition_error ::
+          :page_not_found | :task_not_found | :already_finished | :scan_not_finished
   @type add_page_error ::
           URLGuard.reason()
           | :audit_not_found
@@ -73,7 +78,7 @@ defmodule Rampa.Audits do
   end
 
   defp insert_page(audit_id, url) do
-    with {:ok, audit} <- lock_open_audit(audit_id),
+    with {:ok, audit} <- lock_audit(audit_id),
          :ok <- check_new_page(audit, url),
          {:ok, page} <- Repo.insert(Page.create_changeset(audit, url)),
          {:ok, _task} <- Repo.insert(PageTask.create_changeset(page, %{kind: :scan})),
@@ -116,6 +121,8 @@ defmodule Rampa.Audits do
   Começa a tarefa `kind` da página: `running`, com `started_at` e o `attempt` (o maior entre
   o anterior + 1 e o do Oban). A página passa ao estado derivado e a auditoria a `running`
   (com `started_at`, se ainda nulo). Aceita tarefa `pending` ou `running` (nova tentativa).
+  Tarefa que não é `scan` só começa depois de o `scan` da página terminar
+  (`{:error, :scan_not_finished}`): as análises dependem dos dados dele.
 
   Devolve a tarefa com a página em `page`.
   """
@@ -127,6 +134,7 @@ defmodule Rampa.Audits do
 
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
            {:ok, task} <- fetch_open_task(tasks, kind),
+           :ok <- check_scan_finished(tasks, kind),
            {:ok, task} <-
              update_task(task, %{
                status: :running,
@@ -190,21 +198,29 @@ defmodule Rampa.Audits do
   ## Reconciliação
 
   @doc """
-  Reconcilia tarefas presas de auditorias abertas (`queued`, `running`). Critérios em
+  Reconcilia tarefas presas de auditorias abertas. Critérios em
   `config :rampa, :task_reconciliation` (segundos), sobrescritos por `opts`:
 
-    * `:stale_running_after`: tarefa `running` com `started_at` mais antigo que isso. Se o
-      tipo tem job e ainda há tentativa (`attempt < max_attempts` do job), volta a `pending`
-      e o job é reenfileirado; senão, fecha `failed` com `"stale"` e roda a regra de conclusão;
-    * `:stale_pending_after`: tarefa `pending` com `updated_at` mais antigo que isso. Se o
-      tipo tem job, reenfileira (a chave única do job faz a inserção não ter efeito se ele
-      ainda existe); senão, fecha `failed` com `"stale"`;
+    * tarefa `running` sem job vivo no Oban, com `started_at` mais antigo que o `timeout` do
+      job + `:running_grace` (tipos com job) ou que `:stale_running_after` (tipos sem job).
+      Sem job vivo, o job terminou sem fechar a tarefa (descartado, morto pelo timeout,
+      falha ao gravar). Se ainda há tentativa (`attempt < max_attempts`) e reenfileiramento
+      (`requeues < :max_requeues`), um job novo é inserido e a tarefa volta a `pending`;
+      senão, fecha `failed` com `"stale"` e a regra de conclusão roda;
+    * tarefa `pending` sem job vivo, parada há mais de `:stale_pending_after`. Uma tarefa que
+      não é `scan` só conta a partir do fim do `scan` da página (antes disso ela espera de
+      propósito). Reenfileira enquanto `requeues < :max_requeues`; depois, ou se o tipo não
+      tem job, fecha `failed` com `"stale"`;
     * `:batch_size`: no máximo tantas tarefas por rodada;
     * `:now`: o instante de referência (testes).
 
+  Tarefa com job vivo nunca é candidata: o Oban (e o `Oban.Lifeline`) ainda vai rodá-la.
+  Assim o lote só traz tarefas que pedem ação, e uma fila cheia não ocupa o lote para sempre.
+  Consultar o Oban aqui é aceitável porque a reconciliação não decide o fim da auditoria.
+
   Cada tarefa é tratada na sua transação, com as travas de sempre e o critério conferido de
-  novo depois de travar. Consultar o Oban aqui é aceitável (a reconciliação não decide o fim
-  da auditoria) e acontece só na checagem de unicidade do `Oban.insert/1`.
+  novo depois de travar. Se o `Oban.insert/1` encontra um job vivo (corrida com a consulta),
+  nada muda e a tarefa conta como `:unchanged`.
 
   Devolve quantas tarefas foram reenfileiradas, fechadas como falha, deixadas como estavam e
   quantas deram erro.
@@ -221,8 +237,10 @@ defmodule Rampa.Audits do
 
     criteria = %{
       now: now,
-      running_before: DateTime.add(now, -Keyword.fetch!(config, :stale_running_after)),
-      pending_before: DateTime.add(now, -Keyword.fetch!(config, :stale_pending_after))
+      running_before:
+        Map.new(PageTask.kinds(), &{&1, DateTime.add(now, -running_after(&1, config))}),
+      pending_before: DateTime.add(now, -Keyword.fetch!(config, :stale_pending_after)),
+      max_requeues: Keyword.fetch!(config, :max_requeues)
     }
 
     criteria
@@ -233,25 +251,78 @@ defmodule Rampa.Audits do
     |> then(&Map.merge(%{requeued: 0, failed: 0, unchanged: 0, error: 0}, &1))
   end
 
+  # Prazo de uma tarefa `running`, em segundos: o `timeout` do job mais uma folga. Tipo sem job
+  # usa o prazo fixo.
+  defp running_after(kind, config) do
+    case Map.fetch(@task_workers, kind) do
+      {:ok, worker} ->
+        div(worker.timeout(%Oban.Job{}), 1_000) + Keyword.fetch!(config, :running_grace)
+
+      :error ->
+        Keyword.fetch!(config, :stale_running_after)
+    end
+  end
+
   defp stale_tasks_query(criteria, batch_size) do
     from t in PageTask,
+      as: :task,
       join: a in Audit,
       on: a.id == t.audit_id,
-      where: a.status in ^@open_audit_statuses,
-      where:
-        (t.status == :running and t.started_at < ^criteria.running_before) or
-          (t.status == :pending and t.updated_at < ^criteria.pending_before),
+      join: s in PageTask,
+      as: :scan,
+      on: s.page_id == t.page_id and s.kind == :scan,
+      where: a.status not in ^Audit.final_statuses(),
+      where: ^dynamic(^stale_running(criteria) or ^stale_pending(criteria)),
+      where: not exists(live_jobs_query()),
       order_by: [asc: t.updated_at, asc: t.id],
       limit: ^batch_size,
       select: {t.id, t.page_id}
+  end
+
+  defp stale_running(criteria) do
+    Enum.reduce(criteria.running_before, dynamic(false), fn {kind, before}, acc ->
+      dynamic(
+        [task: t],
+        ^acc or (t.status == :running and t.kind == ^kind and t.started_at < ^before)
+      )
+    end)
+  end
+
+  defp stale_pending(%{pending_before: before}) do
+    dynamic(
+      [task: t, scan: s],
+      t.status == :pending and t.updated_at < ^before and
+        (t.kind == :scan or
+           (s.status not in ^Rules.open_statuses() and s.finished_at < ^before))
+    )
+  end
+
+  # Job vivo da tarefa: mesmo worker do tipo, `page_id` nos args e estado não final.
+  defp live_jobs_query do
+    worker_match =
+      Enum.reduce(@task_workers, dynamic(false), fn {kind, worker}, acc ->
+        name = Oban.Worker.to_string(worker)
+        dynamic([j], ^acc or (j.worker == ^name and parent_as(:task).kind == ^kind))
+      end)
+
+    from j in Oban.Job,
+      where: j.state in ^@live_job_states,
+      where: ^worker_match,
+      where:
+        fragment(
+          "? @> jsonb_build_object('page_id', ?::text)",
+          j.args,
+          parent_as(:task).page_id
+        ),
+      select: 1
   end
 
   defp reconcile_task({task_id, page_id}, criteria) do
     Repo.transact(fn ->
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
            %PageTask{} = task <- Enum.find(tasks, &(&1.id == task_id)),
-           true <- stale?(task, criteria) do
-        resolve_stale(audit, page, tasks, task, criteria.now)
+           true <- stale?(task, tasks, criteria) do
+        resolve_stale(audit, page, tasks, task, criteria)
       else
         _not_stale -> {:ok, :unchanged}
       end
@@ -266,45 +337,61 @@ defmodule Rampa.Audits do
     end
   end
 
-  defp stale?(%PageTask{status: :running, started_at: started_at}, criteria),
-    do: DateTime.before?(started_at, criteria.running_before)
+  defp stale?(%PageTask{status: :running} = task, _tasks, criteria),
+    do: DateTime.before?(task.started_at, Map.fetch!(criteria.running_before, task.kind))
 
-  defp stale?(%PageTask{status: :pending, updated_at: updated_at}, criteria),
-    do: DateTime.before?(updated_at, criteria.pending_before)
+  defp stale?(%PageTask{status: :pending, kind: :scan} = task, _tasks, criteria),
+    do: DateTime.before?(task.updated_at, criteria.pending_before)
 
-  defp stale?(_finished, _criteria), do: false
+  defp stale?(%PageTask{status: :pending} = task, tasks, criteria) do
+    scan = Enum.find(tasks, &(&1.kind == :scan))
 
-  defp resolve_stale(audit, page, tasks, task, now) do
-    case {task, task_job(task)} do
-      {%PageTask{status: :running, attempt: attempt}, {:ok, job}} ->
-        if attempt < Ecto.Changeset.get_field(job, :max_attempts) do
-          requeue_running(page, tasks, task, job)
-        else
-          fail_stale(audit, page, tasks, task, now)
+    not Rules.open?(scan) and DateTime.before?(scan.finished_at, criteria.pending_before) and
+      DateTime.before?(task.updated_at, criteria.pending_before)
+  end
+
+  defp stale?(_finished, _tasks, _criteria), do: false
+
+  defp resolve_stale(audit, page, tasks, task, criteria) do
+    with {:ok, worker} <- Map.fetch(@task_workers, task.kind),
+         job = worker.new(%{"page_id" => task.page_id}),
+         true <- requeue_allowed?(task, job, criteria) do
+      requeue(page, tasks, task, job)
+    else
+      _no_job_or_exhausted -> fail_stale(audit, page, tasks, task, criteria.now)
+    end
+  end
+
+  defp requeue_allowed?(%PageTask{requeues: requeues}, _job, %{max_requeues: max})
+       when requeues >= max,
+       do: false
+
+  defp requeue_allowed?(%PageTask{status: :running, attempt: attempt}, job, _criteria),
+    do: attempt < Ecto.Changeset.get_field(job, :max_attempts)
+
+  defp requeue_allowed?(%PageTask{status: :pending}, _job, _criteria), do: true
+
+  # O job entra antes de a tarefa mudar: se já existe um vivo (a chave única acusa conflito),
+  # nada muda. A página só volta a `queued` com um job novo de fato.
+  defp requeue(page, tasks, task, job) do
+    case Oban.insert(job) do
+      {:ok, %Oban.Job{conflict?: true}} ->
+        {:ok, :unchanged}
+
+      {:ok, _job} ->
+        with {:ok, task} <-
+               update_task(task, %{status: :pending, requeues: task.requeues + 1}),
+             {:ok, _page} <- refresh_page(page, replace(tasks, task)) do
+          Logger.warning(
+            "reconciliação: tarefa #{task.kind} da página #{page.id} reenfileirada " <>
+              "(#{task.requeues}ª vez)"
+          )
+
+          {:ok, :requeued}
         end
 
-      {%PageTask{status: :pending}, {:ok, job}} ->
-        requeue_pending(job)
-
-      {_task, :none} ->
-        fail_stale(audit, page, tasks, task, now)
-    end
-  end
-
-  defp requeue_running(page, tasks, task, job) do
-    with {:ok, task} <- update_task(task, %{status: :pending}),
-         {:ok, _page} <- refresh_page(page, replace(tasks, task)),
-         {:ok, _job} <- Oban.insert(job) do
-      Logger.warning("reconciliação: tarefa #{task.kind} da página #{page.id} reenfileirada")
-      {:ok, :requeued}
-    end
-  end
-
-  defp requeue_pending(job) do
-    case Oban.insert(job) do
-      {:ok, %Oban.Job{conflict?: true}} -> {:ok, :unchanged}
-      {:ok, _job} -> {:ok, :requeued}
-      {:error, reason} -> {:error, reason}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -314,13 +401,6 @@ defmodule Rampa.Audits do
       {:ok, :failed}
     end
   end
-
-  # Job que executa cada tipo de tarefa. As análises de IA ganham job no M4; até lá, uma tarefa
-  # delas presa é fechada como falha.
-  defp task_job(%PageTask{kind: :scan, page_id: page_id}),
-    do: {:ok, ScanPageJob.new(%{"page_id" => page_id})}
-
-  defp task_job(%PageTask{}), do: :none
 
   ## Gravação do scan
 
@@ -397,7 +477,8 @@ defmodule Rampa.Audits do
 
   # O `scan` que falha leva junto as tarefas abertas da página: elas dependem dos dados dele.
   defp close_failed(tasks, failed, error, now) do
-    Enum.reduce_while(tasks, {:ok, []}, fn task, {:ok, acc} ->
+    tasks
+    |> Enum.reduce_while({:ok, []}, fn task, {:ok, acc} ->
       result =
         cond do
           task.id == failed.id -> close_as_failed(task, error, now)
@@ -406,10 +487,14 @@ defmodule Rampa.Audits do
         end
 
       case result do
-        {:ok, task} -> {:cont, {:ok, acc ++ [task]}}
+        {:ok, task} -> {:cont, {:ok, [task | acc]}}
         error -> {:halt, error}
       end
     end)
+    |> case do
+      {:ok, closed} -> {:ok, Enum.reverse(closed)}
+      error -> error
+    end
   end
 
   defp close_as_failed(task, error, now),
@@ -437,7 +522,7 @@ defmodule Rampa.Audits do
     open_tasks =
       Repo.aggregate(
         from(t in PageTask,
-          where: t.audit_id == ^audit.id and t.status in ^@open_task_statuses
+          where: t.audit_id == ^audit.id and t.status in ^Rules.open_statuses()
         ),
         :count
       )
@@ -491,25 +576,22 @@ defmodule Rampa.Audits do
     with {:ok, uuid} <- Ecto.UUID.cast(page_id),
          audit_id when is_binary(audit_id) <-
            Repo.one(from p in Page, where: p.id == ^uuid, select: p.audit_id),
-         %Audit{} = audit <-
-           Repo.one(from a in Audit, where: a.id == ^audit_id, lock: "FOR UPDATE"),
+         {:ok, audit} <- lock_audit(audit_id),
          %Page{} = page <- Repo.one(from p in Page, where: p.id == ^uuid, lock: "FOR UPDATE") do
       tasks =
         Repo.all(
           from t in PageTask, where: t.page_id == ^uuid, order_by: t.id, lock: "FOR UPDATE"
         )
 
-      if audit.status in Audit.final_statuses() do
-        {:error, :already_finished}
-      else
-        {:ok, audit, page, tasks}
-      end
+      {:ok, audit, page, tasks}
     else
+      {:error, :already_finished} -> {:error, :already_finished}
       _not_found -> {:error, :page_not_found}
     end
   end
 
-  defp lock_open_audit(audit_id) do
+  # A única trava de auditoria: `FOR UPDATE` e recusa de estado final.
+  defp lock_audit(audit_id) do
     with {:ok, uuid} <- Ecto.UUID.cast(audit_id),
          %Audit{} = audit <- Repo.one(from a in Audit, where: a.id == ^uuid, lock: "FOR UPDATE") do
       if audit.status in Audit.final_statuses(),
@@ -531,10 +613,16 @@ defmodule Rampa.Audits do
     end
   end
 
-  defp check_page_open(%Page{status: status}) when status in [:done, :failed],
-    do: {:error, :already_finished}
+  defp check_page_open(%Page{} = page),
+    do: if(Rules.page_finished?(page), do: {:error, :already_finished}, else: :ok)
 
-  defp check_page_open(%Page{}), do: :ok
+  defp check_scan_finished(_tasks, :scan), do: :ok
+
+  defp check_scan_finished(tasks, _kind) do
+    if tasks |> Enum.find(&(&1.kind == :scan)) |> Rules.open?(),
+      do: {:error, :scan_not_finished},
+      else: :ok
+  end
 
   defp check_new_kind(tasks, kind) do
     if Enum.any?(tasks, &(&1.kind == kind)), do: {:error, :duplicate_task}, else: :ok
@@ -542,9 +630,11 @@ defmodule Rampa.Audits do
 
   defp fetch_open_task(tasks, kind) do
     case Enum.find(tasks, &(&1.kind == kind)) do
-      nil -> {:error, :task_not_found}
-      %PageTask{status: status} = task when status in @open_task_statuses -> {:ok, task}
-      %PageTask{} -> {:error, :already_finished}
+      nil ->
+        {:error, :task_not_found}
+
+      %PageTask{} = task ->
+        if Rules.open?(task), do: {:ok, task}, else: {:error, :already_finished}
     end
   end
 

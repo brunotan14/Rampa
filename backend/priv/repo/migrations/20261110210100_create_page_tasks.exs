@@ -1,7 +1,7 @@
 defmodule Rampa.Repo.Migrations.CreatePageTasks do
   use Ecto.Migration
 
-  # Tarefas persistidas por página (docs/adr/0001-ciclo-de-vida-da-auditoria.md). O fim da
+  # Tarefas persistidas por página (ciclo de vida em `Rampa.Audits.Rules`). O fim da
   # página e o da auditoria são decididos por elas, nunca pela fila do Oban.
   def change do
     create table(:page_tasks, primary_key: false) do

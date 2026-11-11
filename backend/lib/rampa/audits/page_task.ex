@@ -11,6 +11,7 @@ defmodule Rampa.Audits.PageTask do
 
   `attempt` conta as vezes que a tarefa começou. Normalmente é o `attempt` do Oban; depois
   de um reenfileiramento pela reconciliação, continua contando a partir do anterior.
+  `requeues` conta os reenfileiramentos pela reconciliação, que têm limite próprio.
   """
 
   use Ecto.Schema
@@ -33,6 +34,7 @@ defmodule Rampa.Audits.PageTask do
     field :kind, Ecto.Enum, values: @kinds
     field :status, Ecto.Enum, values: @statuses, default: :pending
     field :attempt, :integer, default: 0
+    field :requeues, :integer, default: 0
     field :error, :string
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
@@ -60,9 +62,10 @@ defmodule Rampa.Audits.PageTask do
   @spec transition_changeset(t(), map()) :: Ecto.Changeset.t()
   def transition_changeset(task, attrs) do
     task
-    |> cast(attrs, [:status, :attempt, :error, :started_at, :finished_at])
-    |> validate_required([:status, :attempt])
+    |> cast(attrs, [:status, :attempt, :requeues, :error, :started_at, :finished_at])
+    |> validate_required([:status, :attempt, :requeues])
     |> validate_number(:attempt, greater_than_or_equal_to: 0)
+    |> validate_number(:requeues, greater_than_or_equal_to: 0)
     |> db_constraints()
   end
 
@@ -71,6 +74,7 @@ defmodule Rampa.Audits.PageTask do
     |> check_constraint(:kind, name: :kind_valid)
     |> check_constraint(:status, name: :status_valid)
     |> check_constraint(:attempt, name: :attempt_non_negative)
+    |> check_constraint(:requeues, name: :requeues_non_negative)
     |> check_constraint(:started_at, name: :running_requires_started_at)
     |> check_constraint(:finished_at, name: :finished_requires_finished_at)
     |> check_constraint(:error, name: :failed_requires_error)

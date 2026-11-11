@@ -34,13 +34,22 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
 
   defp scan_jobs, do: all_enqueued(worker: ScanPageJob)
 
+  # Job da tarefa num estado do Oban (vivo: available, retryable...; morto: discarded...).
+  defp scan_job(page, state) do
+    {:ok, job} = Oban.insert(ScanPageJob.new(%{"page_id" => page.id}))
+    Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: state])
+    job
+  end
+
+  defp kill_jobs, do: Repo.update_all(Oban.Job, set: [state: "discarded"])
+
   describe "tarefa running presa" do
     test "com tentativa sobrando volta a pending e o job é reenfileirado" do
       page = page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(20)}})
 
       assert %{requeued: 1, failed: 0} = Audits.reconcile_stale_tasks()
 
-      assert %PageTask{status: :pending, attempt: 1} = task(page)
+      assert %PageTask{status: :pending, attempt: 1, requeues: 1} = task(page)
       assert %Page{status: :queued} = reload(page)
       assert %Audit{status: :queued, finished_at: nil} = audit_of(page)
       assert [%Oban.Job{args: %{"page_id" => page_id}}] = scan_jobs()
@@ -64,40 +73,49 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
       assert_idempotent([])
     end
 
-    test "o job antigo que ainda existe não é duplicado" do
-      page = page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(20)}})
-      {:ok, existing} = Oban.insert(ScanPageJob.new(%{"page_id" => page.id}))
+    for state <- ~w(available scheduled executing retryable) do
+      test "com job #{state} no Oban não é tocada: a página não volta a queued" do
+        page = page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(60)}})
+        scan_job(page, unquote(state))
 
-      assert %{requeued: 1} = Audits.reconcile_stale_tasks()
-
-      assert %PageTask{status: :pending} = task(page)
-      assert [%Oban.Job{id: id}] = scan_jobs()
-      assert id == existing.id
+        assert_idempotent([])
+        assert %PageTask{status: :running, requeues: 0} = task(page)
+        assert %Page{status: :scanning} = reload(page)
+      end
     end
 
-    test "dentro do prazo não é tocada" do
-      page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(5)}})
+    test "com o job já morto, é reconciliada logo depois do timeout do job" do
+      # timeout do ScanPageJob (3 min) + folga (1 min): 5 min já passou, sem esperar 10.
+      page = page_fixture(%{status: :scanning, task: %{attempt: 2, started_at: ago(5)}})
+      scan_job(page, "discarded")
+
+      assert %{failed: 1} = Audits.reconcile_stale_tasks()
+      assert %PageTask{status: :failed, error: "stale"} = task(page)
+    end
+
+    test "dentro do timeout do job não é tocada, mesmo sem job vivo" do
+      page_fixture(%{status: :scanning, task: %{attempt: 2, started_at: ago(3)}})
 
       assert_idempotent([])
     end
 
-    test "o prazo é configurável" do
+    test "a folga é configurável" do
       page = page_fixture(%{status: :scanning, task: %{attempt: 2, started_at: ago(5)}})
 
-      assert_idempotent(stale_running_after: 600)
-      assert %{failed: 1} = Audits.reconcile_stale_tasks(stale_running_after: 60)
+      assert_idempotent(running_grace: 600)
+      assert %{failed: 1} = Audits.reconcile_stale_tasks(running_grace: 60)
       assert %PageTask{status: :failed} = task(page)
     end
   end
 
   describe "tarefa pending presa" do
-    test "sem job correspondente é reenfileirada uma vez só" do
+    test "sem job vivo é reenfileirada uma vez só" do
       page = page_fixture()
 
       assert %{requeued: 1} = Audits.reconcile_stale_tasks(now: later(20))
 
       assert [%Oban.Job{}] = scan_jobs()
-      assert %PageTask{status: :pending, attempt: 0} = task(page)
+      assert %PageTask{status: :pending, attempt: 0, requeues: 1} = task(page)
 
       assert_idempotent(now: later(20))
       assert [%Oban.Job{}] = scan_jobs()
@@ -105,9 +123,9 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
 
     test "com o job ainda na fila não muda nada" do
       page = page_fixture()
-      {:ok, _job} = Oban.insert(ScanPageJob.new(%{"page_id" => page.id}))
+      scan_job(page, "available")
 
-      assert %{unchanged: 1} = Audits.reconcile_stale_tasks(now: later(20))
+      assert_idempotent(now: later(20))
       assert [%Oban.Job{}] = scan_jobs()
     end
 
@@ -118,8 +136,35 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
       assert scan_jobs() == []
     end
 
+    test "cujo job morre sempre antes de começar fecha stale depois do limite de reenfileiramentos" do
+      page = page_fixture()
+
+      for requeues <- 1..3 do
+        assert %{requeued: 1} = Audits.reconcile_stale_tasks(now: later(20))
+        assert %PageTask{status: :pending, requeues: ^requeues} = task(page)
+        kill_jobs()
+      end
+
+      assert %{failed: 1, requeued: 0} = Audits.reconcile_stale_tasks(now: later(20))
+
+      assert %PageTask{status: :failed, error: "stale", requeues: 3} = task(page)
+      assert %Audit{status: :failed, error: "stale"} = audit_of(page)
+      assert_idempotent(now: later(20))
+    end
+
+    test "o limite de reenfileiramentos vale também para a tarefa running" do
+      page =
+        page_fixture(%{
+          status: :scanning,
+          task: %{attempt: 1, requeues: 3, started_at: ago(20)}
+        })
+
+      assert %{failed: 1} = Audits.reconcile_stale_tasks()
+      assert %PageTask{status: :failed, error: "stale"} = task(page)
+    end
+
     test "tipo sem job (análise antes do M4) fecha failed e a página termina done" do
-      page = page_fixture(%{status: :analyzing})
+      page = page_fixture(%{status: :analyzing, task: %{finished_at: ago(30)}})
       task_fixture(page, %{kind: :alt_text})
 
       assert %{failed: 1} = Audits.reconcile_stale_tasks(now: later(20))
@@ -129,6 +174,25 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
       assert %Audit{status: :completed, pages_scanned: 1} = audit_of(page)
 
       assert_idempotent(now: later(20))
+    end
+
+    test "análise não é reconciliada enquanto o scan da página está aberto" do
+      page = page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(1)}})
+      scan_job(page, "executing")
+      task_fixture(page, %{kind: :alt_text, updated_at: ago(60), inserted_at: ago(60)})
+
+      assert_idempotent(now: later(60))
+      assert %PageTask{status: :pending} = task(page, :alt_text)
+    end
+
+    test "o prazo da análise só começa quando o scan termina" do
+      page = page_fixture(%{status: :analyzing, task: %{finished_at: ago(5)}})
+      task_fixture(page, %{kind: :alt_text, updated_at: ago(60), inserted_at: ago(60)})
+
+      assert_idempotent([])
+      assert %PageTask{status: :pending} = task(page, :alt_text)
+
+      assert %{failed: 1} = Audits.reconcile_stale_tasks(now: later(6))
     end
   end
 
@@ -141,16 +205,44 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
     end
   end
 
-  test "o lote limita quantas tarefas são tratadas por rodada" do
-    audit = audit_fixture(%{page_limit: 3})
+  describe "lote" do
+    test "limita quantas tarefas são tratadas por rodada" do
+      audit = audit_fixture(%{page_limit: 3})
 
-    for path <- ~w(a b c) do
-      page_fixture(%{audit: audit, url: "https://exemplo.com/#{path}"})
+      for path <- ~w(a b c) do
+        page_fixture(%{audit: audit, url: "https://exemplo.com/#{path}"})
+      end
+
+      assert %{requeued: 2} = Audits.reconcile_stale_tasks(now: later(20), batch_size: 2)
+      assert %{requeued: 1, unchanged: 0} = Audits.reconcile_stale_tasks(now: later(20))
+      assert length(scan_jobs()) == 3
     end
 
-    assert %{requeued: 2} = Audits.reconcile_stale_tasks(now: later(20), batch_size: 2)
-    assert %{requeued: 1, unchanged: 2} = Audits.reconcile_stale_tasks(now: later(20))
-    assert length(scan_jobs()) == 3
+    test "tarefas antigas com job vivo não ocupam o lote" do
+      audit = audit_fixture(%{page_limit: 3})
+
+      # As mais antigas esperam na fila cheia, com job vivo.
+      for path <- ~w(a b) do
+        page =
+          page_fixture(%{
+            audit: audit,
+            url: "https://exemplo.com/#{path}",
+            task: %{updated_at: ago(120), inserted_at: ago(120)}
+          })
+
+        scan_job(page, "available")
+      end
+
+      stuck =
+        page_fixture(%{
+          audit: audit,
+          url: "https://exemplo.com/presa",
+          task: %{updated_at: ago(60), inserted_at: ago(60)}
+        })
+
+      assert %{requeued: 1, unchanged: 0} = Audits.reconcile_stale_tasks(batch_size: 1)
+      assert %PageTask{requeues: 1} = task(stuck)
+    end
   end
 
   describe "ReconcileTasksJob" do
@@ -178,8 +270,7 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
   describe "configuração (ciclo de vida)" do
     setup do
       %{
-        oban: Application.fetch_env!(:rampa, Oban),
-        reconciliation: Application.fetch_env!(:rampa, :task_reconciliation)
+        oban: Application.fetch_env!(:rampa, Oban)
       }
     end
 
@@ -188,18 +279,16 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
                Enum.find(oban[:cron][:crontab], &match?({_, ReconcileTasksJob}, &1))
     end
 
-    test "o Lifeline nunca resgata um ScanPageJob vivo e age antes do reconciliador",
-         %{oban: oban, reconciliation: reconciliation} do
+    test "o Lifeline nunca resgata um ScanPageJob vivo e o prazo interno vem antes do timeout",
+         %{oban: oban} do
       rescue_after = Oban.Period.to_milliseconds(oban[:lifeline][:rescue_after])
       job_timeout = ScanPageJob.timeout(%Oban.Job{})
-      lifeline_interval = :timer.minutes(1)
+      deadline = Application.fetch_env!(:rampa, :scan_deadline_ms)
 
-      # Uma tentativa: DNS (5 s) + cliente do scanner (100 s), com folga.
-      assert job_timeout > :timer.seconds(105)
+      # Uma varredura: DNS (5 s) + cliente do scanner (100 s), com folga para gravar.
+      assert deadline > :timer.seconds(105)
+      assert job_timeout > deadline
       assert rescue_after > job_timeout
-
-      assert :timer.seconds(reconciliation[:stale_running_after]) >
-               rescue_after + lifeline_interval + job_timeout
     end
   end
 end

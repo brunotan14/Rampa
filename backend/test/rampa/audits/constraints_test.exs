@@ -202,6 +202,14 @@ defmodule Rampa.Audits.ConstraintsTest do
       end)
     end
 
+    test "requeues negativo" do
+      page = page_fixture()
+
+      assert_violates(:requeues_non_negative, fn ->
+        update_raw("page_tasks", scan(page).id, requeues: -1)
+      end)
+    end
+
     test "running sem started_at" do
       page = page_fixture()
 

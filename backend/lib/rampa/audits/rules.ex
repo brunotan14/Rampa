@@ -15,6 +15,7 @@ defmodule Rampa.Audits.Rules do
   @type outcome :: :open | :completed | :failed
 
   @open_task_statuses [:pending, :running]
+  @final_page_statuses [:done, :failed]
 
   @doc """
   Estado da página. Depende do `scan`, porque as análises dependem dos dados dele:
@@ -46,7 +47,19 @@ defmodule Rampa.Audits.Rules do
   def audit_outcome(%{open_tasks: 0, pages_done: done}) when done > 0, do: :completed
   def audit_outcome(%{open_tasks: 0, pages_done: 0}), do: :failed
 
+  @doc "Estados de tarefa que ainda não terminou. A única definição do projeto."
+  @spec open_statuses() :: [:pending | :running]
+  def open_statuses, do: @open_task_statuses
+
   @doc "Tarefa ainda não terminou."
   @spec open?(task()) :: boolean()
   def open?(%{status: status}), do: status in @open_task_statuses
+
+  @doc "Estados de página encerrada: não ganha tarefa nova."
+  @spec final_page_statuses() :: [Page.status()]
+  def final_page_statuses, do: @final_page_statuses
+
+  @doc "Página encerrada."
+  @spec page_finished?(Page.t() | %{status: Page.status()}) :: boolean()
+  def page_finished?(%{status: status}), do: status in @final_page_statuses
 end
