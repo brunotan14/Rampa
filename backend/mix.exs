@@ -57,6 +57,7 @@ defmodule Rampa.MixProject do
       {:open_api_spex, "~> 3.22"},
       {:ex_json_schema, "~> 0.11.5"},
       {:mox, "~> 1.3", only: :test},
+      {:stream_data, "~> 1.4", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
