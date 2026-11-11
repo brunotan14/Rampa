@@ -5,7 +5,7 @@ defmodule Rampa.Audits.Page do
 
   import Ecto.Changeset
 
-  alias Rampa.Audits.{Audit, Finding}
+  alias Rampa.Audits.{Audit, Finding, PageTask}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -27,24 +27,54 @@ defmodule Rampa.Audits.Page do
 
     belongs_to :audit, Audit
     has_many :findings, Finding
+    has_many :tasks, PageTask
 
     timestamps(type: :utc_datetime)
   end
 
-  @doc "Status da página durante a varredura (`scanning`, `failed`...), com o código de erro."
-  @spec status_changeset(t(), map()) :: Ecto.Changeset.t()
-  def status_changeset(page, attrs) do
-    page
-    |> cast(attrs, [:status, :error])
-    |> validate_required([:status])
+  @doc "Página nova de uma auditoria, sempre `queued`. A URL já passou pelo `URLGuard`."
+  @spec create_changeset(Audit.t(), String.t()) :: Ecto.Changeset.t()
+  def create_changeset(%Audit{} = audit, url) do
+    %__MODULE__{audit_id: audit.id, status: :queued}
+    |> change(url: url)
+    |> validate_required([:url, :audit_id])
+    |> unique_constraint([:audit_id, :url])
+    |> db_constraints()
   end
 
-  @doc "Fatos devolvidos pelo scanner para a página."
-  @spec scan_changeset(t(), map()) :: Ecto.Changeset.t()
-  def scan_changeset(page, attrs) do
+  @doc """
+  Estado derivado das tarefas (`Rampa.Audits.Rules.page_status/1`) e, ao fim do scan, os
+  fatos devolvidos pelo scanner. `analyzing` e `done` exigem `scanned_at` e `axe_version`;
+  `failed` exige `error`.
+  """
+  @spec progress_changeset(t(), map()) :: Ecto.Changeset.t()
+  def progress_changeset(page, attrs) do
     page
     |> cast(attrs, [:status, :error, :final_url, :http_status, :title, :axe_version, :scanned_at])
-    |> validate_required([:status, :final_url, :axe_version, :scanned_at])
+    |> validate_required([:status])
     |> validate_number(:http_status, greater_than_or_equal_to: 100, less_than: 600)
+    |> validate_by_status()
+    |> db_constraints()
+  end
+
+  defp validate_by_status(changeset) do
+    case get_field(changeset, :status) do
+      status when status in [:analyzing, :done] ->
+        validate_required(changeset, [:final_url, :axe_version, :scanned_at])
+
+      :failed ->
+        validate_required(changeset, [:error])
+
+      _open ->
+        changeset
+    end
+  end
+
+  defp db_constraints(changeset) do
+    changeset
+    |> check_constraint(:status, name: :status_valid)
+    |> check_constraint(:http_status, name: :http_status_range)
+    |> check_constraint(:scanned_at, name: :scanned_requires_scan_data)
+    |> check_constraint(:error, name: :failed_requires_error)
   end
 end

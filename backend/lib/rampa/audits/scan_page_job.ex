@@ -10,21 +10,29 @@ defmodule Rampa.Audits.ScanPageJob do
   chamar o scanner. Falha do resolvedor de DNS (`dns_error`) é passageira e ganha nova
   tentativa.
 
+  Opera sobre a tarefa `scan` da página (`Rampa.Audits.PageTask`;
+  ciclo de vida em `Rampa.Audits.Rules`): marca a tarefa `running` com o `attempt`,
+  grava o resultado e fecha a tarefa `done`, ou `failed` na falha definitiva ou na última
+  tentativa. Fechar a tarefa roda a regra de conclusão da auditoria na mesma transação.
+
   Tentativas (`max_attempts: 2`):
 
     * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
-      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` marcam a página
+      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` fecham a tarefa
       `failed` na hora e cancelam o job (`{:cancel, code}`);
     * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
       erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
-      gravação recusada (`invalid_scan_result`) e exceções (`internal_error`). Na última
-      tentativa a página é marcada `failed` com o código e a auditoria é atualizada; o job
-      devolve `{:error, code}` (ou relança a exceção) para o Oban registrar;
-    * página que já terminou (`done`/`failed`) ou de auditoria encerrada (`completed`,
-      `failed`, `cancelled`) não é varrida: `{:cancel, :already_finished}`. Cancelar, em vez
-      de devolver `:ok`, deixa visível no Oban que o job não fez nada.
+      gravação recusada (`invalid_scan_result`) e exceções (`internal_error`). A tarefa fica
+      `running` entre as tentativas. Na última (do job, ou da tarefa, que continua contando
+      depois de um reenfileiramento pela reconciliação) a tarefa fecha `failed` com o código;
+      o job devolve `{:error, code}` (ou relança a exceção) para o Oban registrar;
+    * tarefa já terminada, página sem tarefa `scan` ou auditoria encerrada (`completed`,
+      `failed`, `cancelled`) não é varrida: `{:cancel, reason}`. Cancelar, em vez de devolver
+      `:ok`, deixa visível no Oban que o job não fez nada.
 
-  Um job por página por vez: `unique` em `page_id` nos estados não finais do Oban.
+  Um job por página por vez: `unique` em `page_id` nos estados não finais do Oban. O
+  `timeout` de 3 min cobre o DNS (5 s) e o cliente do scanner (100 s)
+  e fica abaixo do `rescue_after` do `Oban.Lifeline`: um job vivo nunca é resgatado.
   """
 
   use Oban.Worker,
@@ -35,9 +43,11 @@ defmodule Rampa.Audits.ScanPageJob do
   require Logger
 
   alias Rampa.Audits
-  alias Rampa.Audits.Page
+  alias Rampa.Audits.PageTask
   alias Rampa.Scanner.Client
   alias Rampa.Security.URLGuard
+
+  @timeout_ms :timer.minutes(3)
 
   @definitive [
     :blocked_address,
@@ -50,17 +60,25 @@ defmodule Rampa.Audits.ScanPageJob do
   ]
 
   @impl Oban.Worker
+  def timeout(_job), do: @timeout_ms
+
+  @impl Oban.Worker
   def perform(%Oban.Job{args: %{"page_id" => page_id}} = job) do
     Logger.metadata(page_id: page_id)
 
-    case Audits.start_page_scan(page_id) do
-      {:ok, page} -> run(page, job)
-      {:error, reason} when reason in [:page_not_found, :already_finished] -> {:cancel, reason}
-      {:error, reason} -> {:error, reason}
+    case Audits.start_task(page_id, :scan, job.attempt) do
+      {:ok, task} ->
+        run(task, job)
+
+      {:error, reason} when reason in [:page_not_found, :task_not_found, :already_finished] ->
+        {:cancel, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp run(%Page{} = page, job) do
+  defp run(%PageTask{page: page} = task, job) do
     Logger.metadata(audit_id: page.audit_id)
 
     with {:ok, url} <- guard(page),
@@ -69,11 +87,11 @@ defmodule Rampa.Audits.ScanPageJob do
       :ok
     else
       {:error, :already_finished} -> {:cancel, :already_finished}
-      {:error, code, detail} -> fail(page, job, code, detail)
+      {:error, code, detail} -> fail(task, job, code, detail)
     end
   rescue
     exception ->
-      fail(page, job, :internal_error, Exception.message(exception))
+      fail(task, job, :internal_error, Exception.message(exception))
       reraise exception, __STACKTRACE__
   end
 
@@ -100,23 +118,26 @@ defmodule Rampa.Audits.ScanPageJob do
     end
   end
 
-  # Caminho único de falha: definitiva ou na última tentativa, a página é marcada `failed`.
-  defp fail(page, job, code, detail) do
+  # Caminho único de falha: definitiva ou na última tentativa, a tarefa fecha `failed`. A
+  # última tentativa conta também as da tarefa (depois de um reenfileiramento pela
+  # reconciliação, o `attempt` do Oban recomeça do 1).
+  defp fail(task, job, code, detail) do
     definitive? = code in @definitive
-    last_attempt? = job.attempt >= job.max_attempts
+    last_attempt? = max(job.attempt, task.attempt) >= job.max_attempts
 
     Logger.warning(
-      "scan: tentativa #{job.attempt}/#{job.max_attempts} falhou: #{code}: #{detail}"
+      "scan: tentativa #{task.attempt}/#{job.max_attempts} falhou: #{code}: #{detail}"
     )
 
-    if definitive? or last_attempt?, do: mark_failed(page, code)
+    if definitive? or last_attempt?, do: mark_failed(task, code)
 
     if definitive?, do: {:cancel, code}, else: {:error, code}
   end
 
-  # Não pode esconder a falha original: um erro aqui só é registrado no log.
-  defp mark_failed(page, code) do
-    case Audits.record_scan_failure(page, code) do
+  # Não pode esconder a falha original: um erro aqui só é registrado no log. Se a tarefa ficar
+  # `running`, a reconciliação a fecha depois do prazo.
+  defp mark_failed(task, code) do
+    case Audits.fail_task(task.page_id, :scan, code) do
       {:ok, _page} -> :ok
       {:error, :already_finished} -> :ok
       {:error, reason} -> log_mark_failed(reason)
@@ -126,5 +147,5 @@ defmodule Rampa.Audits.ScanPageJob do
   end
 
   defp log_mark_failed(reason),
-    do: Logger.error("scan: não consegui marcar a página como falha: #{inspect(reason)}")
+    do: Logger.error("scan: não consegui fechar a tarefa como falha: #{inspect(reason)}")
 end

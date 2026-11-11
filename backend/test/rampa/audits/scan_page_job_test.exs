@@ -5,7 +5,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   import Mox
   import Rampa.AuditsFixtures
 
-  alias Rampa.Audits.{Audit, Finding, Page, ScanPageJob}
+  alias Rampa.Audits.{Audit, Finding, Page, PageTask, ScanPageJob}
   alias Rampa.Scanner.ClientMock
   alias Rampa.Security.ResolverMock
 
@@ -34,6 +34,8 @@ defmodule Rampa.Audits.ScanPageJobTest do
   defp reload(%Audit{} = audit), do: Repo.get!(Audit, audit.id)
 
   defp audit_of(page), do: Repo.get!(Audit, page.audit_id)
+
+  defp scan_task(page), do: Repo.get_by!(PageTask, page_id: page.id, kind: :scan)
 
   # Resposta real de img-sem-alt com o único nó trocado.
   defp with_node(fun) do
@@ -174,6 +176,11 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
       # Como se a página voltasse a ficar pendente (ex.: o job caiu depois de gravar).
       Repo.update_all(from(p in Page, where: p.id == ^page.id), set: [status: :scanning])
+
+      Repo.update_all(from(t in PageTask, where: t.page_id == ^page.id),
+        set: [status: :running, finished_at: nil]
+      )
+
       Repo.update_all(from(a in Audit, where: a.id == ^page.audit_id), set: [status: :running])
       assert :ok = perform(page)
 
@@ -194,8 +201,9 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
         assert {:cancel, :already_finished} = perform(page)
 
-        assert %Audit{status: ^status, started_at: nil, finished_at: nil} = reload(audit)
+        assert reload(audit) == audit
         assert %Page{status: :queued} = reload(page)
+        assert %PageTask{status: :pending, attempt: 0} = scan_task(page)
       end
     end
 
@@ -553,6 +561,92 @@ defmodule Rampa.Audits.ScanPageJobTest do
       end)
 
       assert :ok = perform(page)
+    end
+  end
+
+  describe "tarefa scan" do
+    test "fica running com o attempt do Oban enquanto o scanner trabalha" do
+      page = page_fixture()
+
+      expect(ClientMock, :scan, fn _url ->
+        assert %PageTask{status: :running, attempt: 1, started_at: %DateTime{}} =
+                 scan_task(page)
+
+        {:ok, scanner_response("limpa")}
+      end)
+
+      assert :ok = perform(page)
+    end
+
+    test "fecha done com finished_at quando a varredura dá certo" do
+      page = page_fixture()
+      expect_scan(page, {:ok, scanner_response("limpa")})
+
+      assert :ok = perform(page)
+
+      assert %PageTask{status: :done, error: nil, attempt: 1, finished_at: %DateTime{}} =
+               scan_task(page)
+    end
+
+    @tag :capture_log
+    test "fica running entre as tentativas e fecha failed na última" do
+      page = page_fixture()
+      expect_scan(page, {:error, %{code: :timeout, detail: "detalhe"}})
+      assert {:error, :timeout} = perform(page, attempt: 1)
+      assert %PageTask{status: :running, attempt: 1, finished_at: nil} = scan_task(page)
+
+      expect_scan(page, {:error, %{code: :timeout, detail: "detalhe"}})
+      assert {:error, :timeout} = perform(page, attempt: 2)
+
+      assert %PageTask{status: :failed, error: "timeout", attempt: 2, finished_at: %DateTime{}} =
+               scan_task(page)
+    end
+
+    @tag :capture_log
+    test "job reenfileirado pela reconciliação continua contando as tentativas da tarefa" do
+      # A tarefa já começou uma vez; o job novo começa do attempt 1 no Oban.
+      page = page_fixture(%{task: %{status: :pending, attempt: 1}})
+      expect_scan(page, {:error, %{code: :timeout, detail: "detalhe"}})
+
+      assert {:error, :timeout} = perform(page, attempt: 1)
+
+      assert %PageTask{status: :failed, attempt: 2, error: "timeout"} = scan_task(page)
+      assert %Audit{status: :failed, pages_failed: 1} = audit_of(page)
+    end
+
+    test "página sem tarefa scan cancela o job sem chamar o scanner" do
+      page = page_fixture()
+      Repo.delete_all(from t in PageTask, where: t.page_id == ^page.id)
+
+      assert {:cancel, :task_not_found} = perform(page)
+      assert %Page{status: :queued} = reload(page)
+    end
+
+    test "uma página entre várias não encerra a auditoria enquanto outra tem tarefa aberta" do
+      audit = audit_fixture(%{page_limit: 2})
+      page = page_fixture(%{audit: audit, url: "https://exemplo.com/a"})
+      _other = page_fixture(%{audit: audit, url: "https://exemplo.com/b"})
+      expect_scan(page, {:ok, scanner_response("img-sem-alt")})
+
+      assert :ok = perform(page)
+
+      assert %Audit{status: :running, pages_found: 2, pages_scanned: 1, finished_at: nil} =
+               reload(audit)
+    end
+
+    @tag :capture_log
+    test "falha definitiva do scan fecha as outras tarefas abertas da página" do
+      page = page_fixture()
+      task_fixture(page, %{kind: :alt_text})
+      expect_scan(page, {:error, %{code: :http_error, detail: "HTTP 404"}})
+
+      assert {:cancel, :http_error} = perform(page)
+
+      assert %PageTask{status: :failed, error: "scan_failed"} =
+               Repo.get_by!(PageTask, page_id: page.id, kind: :alt_text)
+
+      assert %Page{status: :failed, error: "http_error"} = reload(page)
+      assert %Audit{status: :failed, error: "http_error"} = audit_of(page)
     end
   end
 

@@ -31,10 +31,24 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, Jason
 
 # Filas de trabalho em segundo plano (PRD §7). O limite de `scan` vem de SCAN_CONCURRENCY em runtime.exs.
+#
+# Reconciliação de trabalho preso (ciclo de vida em Rampa.Audits.Rules):
+#   * Lifeline: devolve à fila o job que ficou `executing` depois de o nó cair. `rescue_after`
+#     acima do `timeout` do ScanPageJob (3 min), para nunca resgatar um job vivo;
+#   * Cron: `ReconcileTasksJob` a cada 5 min, com os prazos de `:task_reconciliation`.
 config :rampa, Oban,
   engine: Oban.Engines.Basic,
   repo: Rampa.Repo,
-  queues: [scan: 2, ai: 5, maintenance: 1]
+  queues: [scan: 2, ai: 5, maintenance: 1],
+  lifeline: [rescue_after: {5, :minutes}],
+  cron: [crontab: [{"*/5 * * * *", Rampa.Audits.ReconcileTasksJob}]]
+
+# Prazos da reconciliação, em segundos (`Rampa.Audits.reconcile_stale_tasks/1`). Acima de
+# `rescue_after` + intervalo do Lifeline (1 min) + uma tentativa (3 min): o Lifeline age primeiro.
+config :rampa, :task_reconciliation,
+  stale_running_after: 600,
+  stale_pending_after: 600,
+  batch_size: 500
 
 config :rampa, :scanner_client, Rampa.Scanner.HTTP
 

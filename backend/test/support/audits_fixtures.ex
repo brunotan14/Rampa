@@ -3,22 +3,75 @@ defmodule Rampa.AuditsFixtures do
   Dados de teste para auditorias, inseridos direto no banco.
 
   Só para testes: em produção a auditoria nasce em `POST /api/audits`, depois da validação
-  de URL e da proteção contra SSRF.
+  de URL e da proteção contra SSRF, e a página em `Rampa.Audits.add_page/2`.
   """
 
-  alias Rampa.Audits.{Audit, Page}
+  alias Rampa.Audits.{Audit, Page, PageTask}
   alias Rampa.Repo
 
   @scanner_fixtures Path.expand("fixtures/scanner", __DIR__)
 
+  @doc "Auditoria; `completed` e `failed` ganham `finished_at`, que o banco exige."
   def audit_fixture(attrs \\ %{}) do
-    Repo.insert!(struct!(Audit, Map.merge(%{start_url: "https://exemplo.com/"}, attrs)))
+    attrs = Map.merge(%{start_url: "https://exemplo.com/"}, attrs)
+
+    attrs =
+      if attrs[:status] in [:completed, :failed],
+        do: Map.put_new(attrs, :finished_at, now()),
+        else: attrs
+
+    Repo.insert!(struct!(Audit, attrs))
   end
 
+  @doc """
+  Página com a tarefa `scan` no estado equivalente ao da página (`queued` → `pending`,
+  `scanning` → `running`, `analyzing`/`done` → `done`, `failed` → `failed`). Os campos que
+  o banco exige em cada estado ganham valores padrão. `:task` sobrescreve campos da tarefa.
+  """
   def page_fixture(attrs \\ %{}) do
     {audit, attrs} = Map.pop_lazy(attrs, :audit, fn -> audit_fixture() end)
-    Repo.insert!(struct!(Page, Map.merge(%{audit_id: audit.id, url: audit.start_url}, attrs)))
+    {task_attrs, attrs} = Map.pop(attrs, :task, %{})
+    attrs = Map.merge(%{audit_id: audit.id, url: audit.start_url}, attrs)
+    status = Map.get(attrs, :status, :queued)
+
+    page = Repo.insert!(struct!(Page, Map.merge(page_defaults(status), attrs)))
+
+    Repo.insert!(
+      struct!(
+        PageTask,
+        Map.merge(
+          %{page_id: page.id, audit_id: page.audit_id, kind: :scan},
+          Map.merge(scan_task_defaults(status, page.error), task_attrs)
+        )
+      )
+    )
+
+    page
   end
+
+  @doc "Tarefa extra de uma página (análise do M4), inserida direto."
+  def task_fixture(%Page{} = page, attrs) do
+    Repo.insert!(
+      struct!(PageTask, Map.merge(%{page_id: page.id, audit_id: page.audit_id}, attrs))
+    )
+  end
+
+  defp page_defaults(status) when status in [:analyzing, :done],
+    do: %{scanned_at: now(), axe_version: "4.14.0", final_url: "https://exemplo.com/"}
+
+  defp page_defaults(:failed), do: %{error: "timeout"}
+  defp page_defaults(_open), do: %{}
+
+  defp scan_task_defaults(:queued, _error), do: %{status: :pending}
+
+  defp scan_task_defaults(:scanning, _error),
+    do: %{status: :running, attempt: 1, started_at: now()}
+
+  defp scan_task_defaults(:failed, error),
+    do: %{status: :failed, attempt: 1, error: error, started_at: now(), finished_at: now()}
+
+  defp scan_task_defaults(_scanned, _error),
+    do: %{status: :done, attempt: 1, started_at: now(), finished_at: now()}
 
   @doc """
   Resposta real do scanner para uma fixture (`img-sem-alt`, `limpa`, `contraste-incerto`),
@@ -27,4 +80,6 @@ defmodule Rampa.AuditsFixtures do
   def scanner_response(name) do
     @scanner_fixtures |> Path.join("#{name}.json") |> File.read!() |> Jason.decode!()
   end
+
+  defp now, do: DateTime.utc_now(:second)
 end
