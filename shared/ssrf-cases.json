@@ -138,7 +138,7 @@
     { "url": "http://ｌｏｃａｌｈｏｓｔ/", "expected": "blocked_address" },
     { "url": "http://①②⑦.0.0.1/", "expected": "blocked_address" },
     { "url": "http://ação.local/", "expected": "blocked_address" },
-    { "url": "https://xn--zz.com/", "expected": "invalid_url", "backend_only": "o WHATWG URL do Node aceita ou recusa rótulo punycode inválido conforme a versão (24.12 recusa, 24.22 aceita); a URL inicial é validada pelo backend, e no scanner o que protege é a checagem de IP" },
+    { "url": "https://xn--zz.com/", "expected": "invalid_url", "backend_only": "o WHATWG URL do Node 26.13 (versão do `.nvmrc` e da imagem) aceita esse rótulo; o 24.12 recusava. A URL inicial é validada pelo backend, e no scanner o que protege é a checagem de IP" },
 
     { "url": "ftp://exemplo.com/", "expected": "unsupported_scheme" },
     { "url": "file:///etc/passwd", "expected": "unsupported_scheme" },

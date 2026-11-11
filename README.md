@@ -22,7 +22,7 @@ A interface do Rampa segue a WCAG 2.2 nível AA, e o CI falha com qualquer viola
 
 ## Rodando localmente
 
-Pré-requisitos: Elixir 1.20 com OTP 29, Node 24 e Docker.
+Pré-requisitos: Elixir 1.20 com OTP 29, Node 26 (versão exata no `.nvmrc`; com o nvm, `nvm use` na raiz) e Docker.
 
 ```sh
 make setup   # dependências, banco e navegador do Playwright
