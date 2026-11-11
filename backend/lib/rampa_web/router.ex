@@ -3,12 +3,24 @@ defmodule RampaWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug OpenApiSpex.Plug.PutApiSpec, module: RampaWeb.ApiSpec
   end
 
   scope "/api", RampaWeb do
     pipe_through :api
 
     get "/health", HealthController, :show
+
+    post "/audits", AuditController, :create
+    get "/audits/:id", AuditController, :show
+    get "/audits/:audit_id/findings", FindingController, :index
+  end
+
+  # Especificação OpenAPI (`RampaWeb.ApiSpec`), em todos os ambientes.
+  scope "/api" do
+    pipe_through :api
+
+    get "/openapi.json", OpenApiSpex.Plug.RenderSpec, []
   end
 
   # Enable LiveDashboard in development
@@ -24,6 +36,10 @@ defmodule RampaWeb.Router do
       pipe_through [:fetch_session, :protect_from_forgery]
 
       live_dashboard "/dashboard", metrics: RampaWeb.Telemetry
+
+      # Swagger UI só em dev: carrega os assets da CDN cdnjs (não é nosso, não passa pelo
+      # axe e buscaria arquivos de terceiros na interface pública).
+      get "/swagger", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi.json"
     end
   end
 end

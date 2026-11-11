@@ -11,7 +11,8 @@ config :rampa, Rampa.Repo,
   hostname: "localhost",
   database: "rampa_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # Mínimo de 20: o teste de concorrência da criação de auditorias usa conexões reais em paralelo.
+  pool_size: max(System.schedulers_online() * 2, 20)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -22,6 +23,9 @@ config :rampa, RampaWeb.Endpoint,
 
 # Jobs não rodam sozinhos nos testes; use Oban.Testing
 config :rampa, Oban, testing: :manual
+
+# Segredo do hash do IP (RF-RA002) fixo nos testes.
+config :rampa, :ip_hash_secret, "test-ip-hash-secret-nao-usar-em-producao"
 
 config :rampa, :scanner_client, Rampa.Scanner.ClientMock
 config :rampa, :dns_resolver, Rampa.Security.ResolverMock

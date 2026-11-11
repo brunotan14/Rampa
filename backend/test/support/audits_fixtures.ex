@@ -2,11 +2,12 @@ defmodule Rampa.AuditsFixtures do
   @moduledoc """
   Dados de teste para auditorias, inseridos direto no banco.
 
-  Só para testes: em produção a auditoria nasce em `POST /api/audits`, depois da validação
-  de URL e da proteção contra SSRF, e a página em `Rampa.Audits.add_page/2`.
+  Só para testes: em produção a auditoria nasce em `Rampa.Audits.create_audit/3`
+  (`POST /api/audits`), depois da validação de URL e da proteção contra SSRF, e a página em
+  `Rampa.Audits.add_page/2`.
   """
 
-  alias Rampa.Audits.{Audit, Page, PageTask}
+  alias Rampa.Audits.{Audit, Finding, Page, PageTask}
   alias Rampa.Repo
 
   @scanner_fixtures Path.expand("fixtures/scanner", __DIR__)
@@ -74,12 +75,54 @@ defmodule Rampa.AuditsFixtures do
     do: %{status: :done, attempt: 1, started_at: now(), finished_at: now()}
 
   @doc """
+  Achado de uma página, inserido direto. Padrão: `image-alt` do axe, crítico, confirmado.
+  `inserted_at` e `updated_at` informados em segundos ganham a precisão de microssegundos
+  da coluna.
+  """
+  def finding_fixture(%Page{} = page, attrs \\ %{}) do
+    attrs =
+      Map.new(attrs, fn
+        {key, %DateTime{} = value} when key in [:inserted_at, :updated_at] ->
+          {key, usec(value)}
+
+        pair ->
+          pair
+      end)
+
+    Repo.insert!(
+      struct!(
+        Finding,
+        Map.merge(
+          %{
+            page_id: page.id,
+            audit_id: page.audit_id,
+            source: :axe,
+            rule_id: "image-alt",
+            wcag_criteria: ["1.1.1"],
+            severity: :critical,
+            needs_review: false,
+            selector: "img",
+            html_snippet: ~s(<img src="a.png">),
+            message: "Imagens precisam de texto alternativo",
+            raw: %{"segredo" => "não sai na API"},
+            crop_path: "recortes/a.png"
+          },
+          attrs
+        )
+      )
+    )
+  end
+
+  @doc """
   Resposta real do scanner para uma fixture (`img-sem-alt`, `limpa`, `contraste-incerto`),
   gerada rodando `POST /scan` contra `scanner/test/fixtures/<nome>.html`.
   """
   def scanner_response(name) do
     @scanner_fixtures |> Path.join("#{name}.json") |> File.read!() |> Jason.decode!()
   end
+
+  defp usec(%DateTime{microsecond: {value, _precision}} = datetime),
+    do: %{datetime | microsecond: {value, 6}}
 
   defp now, do: DateTime.utc_now(:second)
 end

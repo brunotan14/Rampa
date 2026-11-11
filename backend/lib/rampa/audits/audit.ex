@@ -2,8 +2,12 @@ defmodule Rampa.Audits.Audit do
   @moduledoc """
   Uma auditoria: a URL inicial e o andamento da varredura (PRD §8).
 
-  Não há changeset de criação neste marco: a auditoria só pode nascer depois da validação de
-  URL e da proteção contra SSRF (RF-RA001, RF-RA002), que entram em `POST /api/audits`.
+  A auditoria só nasce por `Rampa.Audits.create_audit/3`, que passa a URL pelo
+  `Rampa.Security.URLGuard` (RF-RA001, RF-RA002) antes de usar `create_changeset/1`.
+
+  `requester_ip_hash` (HMAC do IP, `Rampa.Security.IPHash`) e `idempotency_key` (cabeçalho
+  `Idempotency-Key`) servem ao limite de taxa e à idempotência do `POST /api/audits`; nunca
+  saem pela API.
   """
 
   use Ecto.Schema
@@ -29,6 +33,7 @@ defmodule Rampa.Audits.Audit do
     field :pages_scanned, :integer, default: 0
     field :pages_failed, :integer, default: 0
     field :requester_ip_hash, :string
+    field :idempotency_key, :string
     field :error, :string
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
@@ -38,6 +43,22 @@ defmodule Rampa.Audits.Audit do
     has_many :findings, Finding
 
     timestamps(type: :utc_datetime)
+  end
+
+  @doc """
+  Auditoria nova, sempre `queued`. A URL já passou pelo `URLGuard` e o `page_limit` já foi
+  conferido por `Rampa.Audits.create_audit/3`.
+  """
+  @spec create_changeset(map()) :: Ecto.Changeset.t()
+  def create_changeset(attrs) do
+    %__MODULE__{status: :queued}
+    |> cast(attrs, [:start_url, :page_limit, :requester_ip_hash, :idempotency_key])
+    |> validate_required([:start_url, :page_limit, :requester_ip_hash])
+    |> validate_number(:page_limit, greater_than_or_equal_to: 1, less_than_or_equal_to: 25)
+    |> validate_length(:idempotency_key, min: 1, max: 128)
+    |> check_constraint(:page_limit, name: :page_limit_range)
+    |> check_constraint(:idempotency_key, name: :idempotency_key_length)
+    |> unique_constraint(:idempotency_key, name: :audits_requester_idempotency_key_index)
   end
 
   @doc "Mudança de andamento feita pelos jobs: status, contadores, erro e horários."

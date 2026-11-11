@@ -48,6 +48,14 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
       - run: mix test
+      # Contrato OpenAPI versionado: regenera e falha se `shared/openapi.json` estiver
+      # desatualizado (rode `make openapi` e versione o arquivo).
+      - name: Contrato OpenAPI atualizado
+        working-directory: .
+        run: |
+          git ls-files --error-unmatch shared/openapi.json
+          make openapi
+          git diff --exit-code shared/openapi.json
 
   frontend:
     name: Frontend (lint, tipos, Vitest)

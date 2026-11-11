@@ -31,12 +31,15 @@ make dev     # banco e scanner no Docker, Phoenix em :4000, interface em http://
 
 Verificar se tudo está de pé: `curl localhost:4000/api/health`.
 
+Documentação da API: a especificação OpenAPI fica em `http://localhost:4000/api/openapi.json` e o Swagger UI, só em dev, em `http://localhost:4000/dev/swagger`.
+
 ## Testes
 
 ```sh
 make test    # unitários: ExUnit (backend), Vitest (frontend e scanner)
 make e2e     # Playwright + axe
 make lint    # formatação, lint e tipos
+make openapi # regenera o contrato da API em shared/openapi.json (o CI confere se está atualizado)
 ```
 
 ## Licença

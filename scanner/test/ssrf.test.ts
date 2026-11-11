@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isBlockedIp } from "../src/ssrf/ip.js";
-import { checkStartup, checkUrl, defaultPolicy, parseAllowlist } from "../src/ssrf/policy.js";
+import { checkStartup, checkUrl, defaultPolicy, normalizeHost, parseAllowlist } from "../src/ssrf/policy.js";
 
 // Casos compartilhados com o backend (`backend/test/rampa/security/url_guard_test.exs`).
 interface SharedCases {
   ips: { ip: string; blocked: boolean; range: string }[];
-  urls: { url: string; expected: string; allowlist?: string[] }[];
+  urls: { url: string; expected: string; allowlist?: string[]; normalized?: string; backend_only?: string }[];
 }
 
 const cases = JSON.parse(
@@ -20,11 +20,18 @@ describe("casos compartilhados com o backend: IPs", () => {
 });
 
 describe("casos compartilhados com o backend: URLs", () => {
-  it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist }) => {
+  it.each(cases.urls.filter((c) => c.backend_only === undefined))("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist, normalized }) => {
     // A lista passa pela mesma interpretação da variável de ambiente, como no backend.
     const hosts = parseAllowlist((allowlist ?? []).join(","));
     const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }));
     expect(check.ok ? "ok" : check.reason).toBe(expected);
+    // IDN: o WHATWG URL e o URLGuard do backend precisam chegar à mesma URL. O backend tira
+    // o ponto final do host (RF-RA001); aqui ele sai pelo `normalizeHost` do scanner.
+    if (normalized !== undefined && check.ok) {
+      const url = new URL(check.url.href);
+      url.hostname = normalizeHost(url.hostname);
+      expect(url.href).toBe(normalized);
+    }
   });
 });
 

@@ -8,15 +8,8 @@ defmodule Rampa.Scanner.HTTP do
   # assim o erro chega com o código do scanner, e não como falta de resposta (`unavailable`).
   @scan_receive_timeout 100_000
 
-  @error_codes %{
-    "blocked_address" => :blocked_address,
-    "invalid_url" => :invalid_url,
-    "resource_limit" => :resource_limit,
-    "timeout" => :timeout,
-    "http_error" => :http_error,
-    "navigation_failed" => :navigation_failed,
-    "analysis_failed" => :analysis_failed
-  }
+  # Códigos do contrato do scanner, da fonte única (`Rampa.ErrorCodes`).
+  @error_codes Map.new(Rampa.ErrorCodes.scanner(), &{Atom.to_string(&1), &1})
 
   @impl true
   def health do

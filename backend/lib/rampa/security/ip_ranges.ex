@@ -97,6 +97,56 @@ defmodule Rampa.Security.IPRanges do
   end
 
   @doc """
+  Converte uma faixa em notação CIDR (`10.0.0.0/8`, `fd00::/8`) ou um IP solto (vira /32 ou
+  /128) em `{ip, prefixo}`. Usada pelo `TRUSTED_PROXIES` (`Rampa.Security.TrustedProxies`).
+  """
+  @spec parse_cidr(String.t()) :: {:ok, {:inet.ip_address(), non_neg_integer()}} | :error
+  def parse_cidr(text) when is_binary(text) do
+    {address, prefix} =
+      case String.split(String.trim(text), "/") do
+        [address] -> {address, nil}
+        [address, prefix] -> {address, prefix}
+        _invalid -> {"", nil}
+      end
+
+    with {:ok, ip} <- parse(address),
+         bits = bits(ip),
+         {:ok, prefix} <- parse_prefix(prefix, bits) do
+      {:ok, {ip, prefix}}
+    end
+  end
+
+  defp parse_prefix(nil, bits), do: {:ok, bits}
+
+  defp parse_prefix(text, bits) do
+    case Integer.parse(text) do
+      {prefix, ""} when prefix in 0..bits//1 -> {:ok, prefix}
+      _invalid -> :error
+    end
+  end
+
+  @doc "Diz se o IP está na faixa `{rede, prefixo}`. Famílias diferentes nunca casam."
+  @spec in_cidr?(:inet.ip_address(), {:inet.ip_address(), non_neg_integer()}) :: boolean()
+  def in_cidr?(ip, {net, prefix}) do
+    bits = bits(ip)
+
+    bits == bits(net) and in_range?(to_integer(ip), to_integer(net), prefix, bits)
+  end
+
+  @doc """
+  IPv4 mapeado em IPv6 (`::ffff:a.b.c.d`) vira o IPv4. Com o Phoenix escutando em `::`,
+  conexões IPv4 chegam nessa forma.
+  """
+  @spec unmap(:inet.ip_address()) :: :inet.ip_address()
+  def unmap({0, 0, 0, 0, 0, 0xFFFF, high, low}),
+    do: {high >>> 8, high &&& 255, low >>> 8, low &&& 255}
+
+  def unmap(ip), do: ip
+
+  defp bits({_, _, _, _}), do: 32
+  defp bits({_, _, _, _, _, _, _, _}), do: 128
+
+  @doc """
   Interpreta um host de URL como IPv4, seguindo o WHATWG URL Standard.
 
     * `:not_ipv4`: o último rótulo não é numérico, então o host é um nome;

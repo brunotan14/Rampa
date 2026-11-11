@@ -36,6 +36,33 @@ if config_env() != :test do
       ai: 5,
       maintenance: 1
     ]
+
+  # Limites de criação de auditorias (RF-RA002). Nos testes, cada teste escolhe os seus.
+  positive_integer = fn name, default ->
+    case Integer.parse(System.get_env(name, default)) do
+      {value, ""} when value > 0 -> value
+      _invalid -> raise "#{name} precisa ser um número inteiro maior que zero"
+    end
+  end
+
+  config :rampa, :audit_limits,
+    per_ip_per_hour: positive_integer.("AUDITS_PER_IP_PER_HOUR", "5"),
+    daily: positive_integer.("AUDITS_DAILY_LIMIT", "50")
+
+  # Faixas CIDR do proxy reverso (o Traefik), separadas por vírgula; só delas o
+  # `X-Forwarded-For` é considerado (`RampaWeb.Plugs.ClientIP`). Valor inválido impede a
+  # subida; vazia em produção gera um aviso (`Rampa.Security.TrustedProxies`).
+  config :rampa, :trusted_proxies, System.get_env("TRUSTED_PROXIES", "")
+end
+
+# Segredo do HMAC do IP de quem pede auditorias (`Rampa.Security.IPHash`). Obrigatório em
+# produção: sem ele o app não sobe. Dev e test têm valor fixo, que a variável sobrescreve
+# em dev.
+case {config_env(), System.get_env("IP_HASH_SECRET")} do
+  {:test, _secret} -> :ok
+  {:prod, secret} -> config :rampa, :ip_hash_secret, secret
+  {_dev, nil} -> :ok
+  {_dev, secret} -> config :rampa, :ip_hash_secret, secret
 end
 
 if config_env() == :prod do
