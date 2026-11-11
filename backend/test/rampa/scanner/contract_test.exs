@@ -1,6 +1,7 @@
 defmodule Rampa.Scanner.ContractTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
   import Rampa.AuditsFixtures, only: [scanner_response: 1]
 
   alias Rampa.ErrorCodes
@@ -35,7 +36,7 @@ defmodule Rampa.Scanner.ContractTest do
     for file <- fixtures do
       test "#{file} cumpre o contrato" do
         body = scanner_response(Path.rootname(unquote(file)))
-        assert Contract.check_response(body) == :ok
+        assert Contract.check_response(body) == {:ok, body}
       end
     end
   end
@@ -72,23 +73,68 @@ defmodule Rampa.Scanner.ContractTest do
       assert {:error, %{code: :contract_mismatch}} = Contract.check_response(body)
     end
 
-    test "campo desconhecido é recusado" do
-      body = Map.put(scanner_response("limpa"), "extra", 1)
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(body)
+    @tag :capture_log
+    test "campo desconhecido na raiz é descartado" do
+      body = scanner_response("limpa")
+      assert Contract.check_response(Map.put(body, "extra", 1)) == {:ok, body}
+    end
+
+    test "campo desconhecido em axe (scanner à frente do backend) é aceito e descartado" do
+      body = scanner_response("img-sem-alt")
+      passes = [%{"id" => "document-title", "nodes" => []}]
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert Contract.check_response(put_in(body, ["axe", "passes"], passes)) ==
+                   {:ok, body}
+        end)
+
+      assert log =~ "#/axe/passes"
+      assert log =~ "atualize o backend"
+    end
+
+    @tag :capture_log
+    test "campos desconhecidos em regras e nós são descartados" do
+      body = scanner_response("img-sem-alt")
+
+      extra =
+        update_in(body, ["axe", "violations"], fn [rule] ->
+          [
+            rule
+            |> Map.put("pt_br", %{"help" => "Imagens precisam de texto alternativo"})
+            |> update_in(["nodes"], fn [node] -> [Map.put(node, "xpath", "/html/body/img")] end)
+          ]
+        end)
+
+      assert Contract.check_response(extra) == {:ok, body}
+    end
+
+    @tag :capture_log
+    test "com campo desconhecido, os campos conhecidos continuam validados" do
+      body =
+        scanner_response("limpa")
+        |> Map.put("extra", 1)
+        |> put_in(["axe", "version"], "")
+
+      assert {:error, %{code: :invalid_scan_result, detail: detail}} =
+               Contract.check_response(body)
+
+      assert detail =~ "#/axe/version"
+      refute detail =~ "extra"
     end
 
     test "status de erro numa resposta de sucesso é recusado" do
       body = Map.put(scanner_response("limpa"), "http_status", 404)
       assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(body)
 
-      assert :ok =
+      assert {:ok, _body} =
                Contract.check_response(Map.put(scanner_response("limpa"), "http_status", nil))
     end
 
     test "título acima do limite é recusado" do
       max = get_in(@schema, ["definitions", "ScanResponse", "properties", "title", "maxLength"])
       ok = Map.put(scanner_response("limpa"), "title", String.duplicate("é", max))
-      assert :ok = Contract.check_response(ok)
+      assert {:ok, _body} = Contract.check_response(ok)
 
       long = Map.put(ok, "title", String.duplicate("é", max + 1))
       assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(long)

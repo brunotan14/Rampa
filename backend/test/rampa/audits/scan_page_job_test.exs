@@ -2,11 +2,13 @@ defmodule Rampa.Audits.ScanPageJobTest do
   use Rampa.DataCase, async: true
   use Oban.Testing, repo: Rampa.Repo
 
+  import ExUnit.CaptureLog
   import Mox
   import Rampa.AuditsFixtures
 
   alias Rampa.Audits.{Audit, Finding, Page, PageTask, ScanPageJob}
   alias Rampa.Scanner.ClientMock
+  alias Rampa.Scanner.HTTP
   alias Rampa.Security.ResolverMock
 
   setup :verify_on_exit!
@@ -116,6 +118,34 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert %DateTime{} = audit.started_at
       assert %DateTime{} = audit.finished_at
     end
+  end
+
+  # Ordem de deploy: o scanner sobe antes do backend com um campo opcional novo (ex.: o
+  # `axe.passes` do RF-RA017). A resposta passa pelo cliente HTTP real.
+  test "resposta da mesma versão com campo desconhecido é gravada sem ele" do
+    page = page_fixture(%{url: "https://exemplo.com/img-sem-alt.html"})
+
+    body =
+      scanner_response("img-sem-alt")
+      |> put_in(["axe", "passes"], [%{"id" => "document-title", "nodes" => []}])
+      |> update_in(["axe", "violations"], fn [rule] ->
+        [
+          rule
+          |> Map.put("extra_rule_field", 1)
+          |> update_in(["nodes"], fn [node] -> [Map.put(node, "xpath", "/html/body/img")] end)
+        ]
+      end)
+
+    Req.Test.stub(HTTP, &Req.Test.json(&1, body))
+    expect(ClientMock, :scan, &HTTP.scan/1)
+
+    log = capture_log([level: :warning], fn -> assert :ok = perform(page) end)
+    assert log =~ "#/axe/passes"
+
+    assert %Page{status: :done, error: nil, axe_version: "4.14.0"} = reload(page)
+    assert [%Finding{rule_id: "image-alt", severity: :critical} = finding] = findings(page)
+    refute Map.has_key?(finding.raw, "extra_rule_field")
+    assert %Audit{status: :completed} = audit_of(page)
   end
 
   test "RF-RA003: limpa.html não gera achado com needs_review = false" do

@@ -78,6 +78,14 @@ defmodule Rampa.Scanner.HTTPTest do
              {:error, %{code: :unavailable, detail: "scanner respondeu HTTP 500"}}
   end
 
+  test "scan/1 descarta campos que a versão do contrato não conhece" do
+    response = scanner_response("img-sem-alt")
+    stub(&Req.Test.json(&1, put_in(response, ["axe", "passes"], [%{"id" => "x"}])))
+
+    assert capture_log(fn -> assert HTTP.scan("https://exemplo.com/") == {:ok, response} end) =~
+             "#/axe/passes"
+  end
+
   describe "respostas fora do contrato" do
     test "200 sem um campo obrigatório é invalid_scan_result" do
       stub(&Req.Test.json(&1, Map.delete(scanner_response("limpa"), "axe")))

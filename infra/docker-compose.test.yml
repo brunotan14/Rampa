@@ -35,8 +35,10 @@ x-app-env: &app-env
   # Fictícios, só de teste.
   SECRET_KEY_BASE: teste-e2e-secret-key-base-ficticio-nao-usar-em-producao-0123456789abcdef
   IP_HASH_SECRET: teste-e2e-ip-hash-secret-ficticio-nao-usar-em-producao
-  # RF-RA002: só o container de fixtures pula a checagem de nome e de IP.
+  # RF-RA002: só o container de fixtures pula a checagem de nome e de IP. A release `e2e` só
+  # aceita a allowlist com o marcador RAMPA_E2E=1; sem ele, segue as regras de produção.
   SSRF_ALLOWLIST: fixtures
+  RAMPA_E2E: "1"
   # Só a rede `proxy` é confiável (ver `networks.proxy`).
   TRUSTED_PROXIES: 172.29.250.0/24
   # O limite por IP é o do PRD (5/h); cada teste usa IPs simulados próprios.

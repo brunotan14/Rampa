@@ -29,6 +29,10 @@ config :rampa, :scanner_url, System.get_env("SCANNER_URL", "http://localhost:410
 # (`Rampa.Security.Allowlist.check_startup/2`, chamada em `Rampa.Application.start/2`).
 config :rampa, :ssrf_allowlist, System.get_env("SSRF_ALLOWLIST", "")
 
+# Marcador do Compose de teste: só com `RAMPA_E2E=1` a release `:e2e` aceita a allowlist; sem
+# ele, ela segue as regras de produção (`Rampa.Security.RuntimeEnv`).
+config :rampa, :e2e_marker, System.get_env("RAMPA_E2E")
+
 if config_env() != :test do
   config :rampa, Oban,
     queues: [

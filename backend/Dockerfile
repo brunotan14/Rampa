@@ -24,16 +24,20 @@ FROM ${CERTS_IMAGE} AS certs
 FROM ${BUILDER_IMAGE} AS build
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
+WORKDIR /app/backend
+RUN mix local.hex --force && mix local.rebar --force
+
+# Dependências primeiro: mudam pouco e ficam em camadas próprias no cache. O download vem
+# antes do `MIX_ENV` e baixa as de todos os ambientes (as de dev e test só ocupam o
+# `deps/` do build, não entram na release): assim as releases `prod` e `e2e` dividem as
+# camadas do Hex e do `deps.get`, e só a compilação é separada por ambiente.
+COPY backend/mix.exs backend/mix.lock ./
+RUN mix deps.get
+
 # `prod` para o deploy; `e2e` só para o Compose de teste (config/e2e.exs).
 ARG MIX_ENV=prod
 ENV MIX_ENV=${MIX_ENV}
 
-WORKDIR /app/backend
-RUN mix local.hex --force && mix local.rebar --force
-
-# Dependências primeiro: mudam pouco e ficam em camadas próprias no cache.
-COPY backend/mix.exs backend/mix.lock ./
-RUN mix deps.get --only ${MIX_ENV}
 COPY backend/config/config.exs backend/config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 

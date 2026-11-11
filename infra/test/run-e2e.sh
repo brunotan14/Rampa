@@ -45,7 +45,6 @@ up() {
 run_specs() {
   local status=0
   step "Rodando os specs de e2e/integrado"
-  "${COMPOSE[@]}" --profile e2e build e2e >/dev/null
   "${COMPOSE[@]}" run --name "$RUNNER" e2e "$@" || status=$?
   mkdir -p "$OUT"
   rm -rf "$OUT/report" "$OUT/artifacts"
@@ -96,6 +95,8 @@ case "${1:-}" in
     ;;
   run)
     shift
+    # Só o runner: os specs entram na imagem dele, e o resto já está de pé.
+    "${COMPOSE[@]}" --profile e2e build e2e
     run_specs "$@"
     ;;
   down)
