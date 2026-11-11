@@ -87,7 +87,12 @@ defmodule RampaWeb.FindingControllerTest do
           {%{limit: 0}, "invalid_limit"},
           {%{limit: 101}, "invalid_limit"},
           {%{limit: "x"}, "invalid_limit"},
-          {%{cursor: "nao-e-cursor"}, "invalid_cursor"}
+          {%{cursor: "nao-e-cursor"}, "invalid_cursor"},
+          # Instante antes do mínimo do PostgreSQL: dava HTTP 500 (Postgrex 22008).
+          {%{
+             cursor:
+               Base.url_encode64("-210866803200000001:#{Ecto.UUID.generate()}", padding: false)
+           }, "invalid_cursor"}
         ] do
       assert %{"error" => %{"code" => ^code, "message" => message}} =
                conn |> index(audit_id, params) |> json_response(422)

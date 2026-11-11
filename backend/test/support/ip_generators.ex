@@ -90,10 +90,20 @@ defmodule Rampa.IPGenerators do
   def public_ips, do: [{93, 184, 215, 14}, {0x2606, 0x2800, 0x21F, 0, 0, 0, 0, 1}]
 
   @doc """
-  Texto do IP, sem o sufixo de zona: o `:inet.ntoa/1` escreve `fe80:0:1::1%01` para endereços
-  de enlace local cujo segundo grupo não é zero, e a zona não é parte do IP que se quer testar.
+  Texto do IP que volta à mesma tupla. O `:inet.ntoa/1` escreve o 2º grupo de um IPv6 de enlace
+  local (`fe80::/10`, `ff02::/16`...) como zona (`fe80::2%1`), que não é parte do IP; nesse caso
+  os 8 grupos saem por extenso.
   """
-  def to_text(ip), do: ip |> :inet.ntoa() |> to_string() |> String.split("%") |> hd()
+  def to_text(ip) do
+    text = ip |> :inet.ntoa() |> to_string()
+
+    if String.contains?(text, "%"),
+      do:
+        ip
+        |> Tuple.to_list()
+        |> Enum.map_join(":", &(&1 |> Integer.to_string(16) |> String.downcase())),
+      else: text
+  end
 
   defp in_ranges(ranges, width, bits) do
     ranges

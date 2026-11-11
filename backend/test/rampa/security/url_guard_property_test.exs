@@ -248,12 +248,8 @@ defmodule Rampa.Security.URLGuardPropertyTest do
       end
     end
 
-    # CONTRAEXEMPLO (refactor/qualidade): `<<255>>` (ou `"https://exemplo.com/" <> <<0xC3>>`)
-    # levanta `ArgumentError` em `to_ascii/1` (`Regex.run(@authority, ...)` com a flag `u`,
-    # url_guard.ex:115) em vez de devolver `{:error, :invalid_url}`. Hoje não chega pela
-    # API: o `Plug.Parsers` (JSON, urlencoded e multipart) recusa corpo fora do UTF-8, e a
-    # URL do job vem do banco. Correção pendente de decisão; reative o teste junto com ela.
-    @tag :skip
+    # Achado pela propriedade em refactor/qualidade: `<<255>>` levantava `ArgumentError` nas
+    # regex com a flag `u`, em vez de devolver `{:error, :invalid_url}`.
     property "binário fora do UTF-8 nunca levanta exceção" do
       check all url <- SD.binary(max_length: 40), max_runs: 300 do
         assert_result(validate(url))

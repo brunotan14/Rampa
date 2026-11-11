@@ -95,10 +95,11 @@ defmodule Rampa.Security.URLGuard do
 
   def normalize(_url), do: {:error, :invalid_url}
 
+  # Texto fora do UTF-8 é recusado antes de tudo: as regex com `u` levantariam exceção.
   defp parse(url) do
-    url = String.trim(url)
-
-    with true <- url != "" and byte_size(url) <= @max_length,
+    with true <- String.valid?(url),
+         url = String.trim(url),
+         true <- url != "" and byte_size(url) <= @max_length,
          {:ok, url} <- url |> with_scheme() |> to_ascii(),
          true <- byte_size(url) <= @max_length,
          {:ok, %URI{userinfo: nil} = uri} <- URI.new(url) do
