@@ -1,4 +1,4 @@
-# Comandos do Rampa. Pré-requisitos: Elixir 1.20 / OTP 29, Node 24, Docker.
+# Comandos do Rampa. Pré-requisitos: Elixir 1.20 / OTP 29, Node 26 (versão exata no `.nvmrc`), Docker.
 COMPOSE = docker compose -f infra/docker-compose.yml
 
 .PHONY: setup services down dev test test-backend test-frontend test-scanner e2e lint openapi scanner-contract

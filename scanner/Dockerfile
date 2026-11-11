@@ -1,4 +1,9 @@
-# Imagem oficial do Playwright, na mesma versão do pacote em package.json
+# Imagem oficial do Playwright, na mesma versão do pacote `playwright` do package.json.
+# Essa tag traz o Node abaixo, que é a referência do projeto: o `.nvmrc` da raiz (usado na
+# máquina local e na CI) precisa ter a mesma versão. Ao trocar a tag, confira com
+# `docker run --rm <imagem> node --version` e atualize esta linha e o `.nvmrc` juntos;
+# `scanner/test/toolchain.test.ts` falha se eles divergirem.
+# Node da imagem: 26.13.0
 FROM mcr.microsoft.com/playwright:v1.65.0-noble
 
 WORKDIR /app
