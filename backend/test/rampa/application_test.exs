@@ -4,6 +4,8 @@ defmodule Rampa.ApplicationTest do
 
   import ExUnit.CaptureLog
 
+  alias Rampa.Security.TrustedProxies
+
   @keys [:env, :ip_hash_secret, :trusted_proxies, :ssrf_allowlist]
 
   setup do
@@ -11,6 +13,8 @@ defmodule Rampa.ApplicationTest do
 
     on_exit(fn ->
       Enum.each(previous, fn {key, value} -> Application.put_env(:rampa, key, value) end)
+      # `start/2` pode ter guardado outras faixas de `TRUSTED_PROXIES`.
+      :ok = TrustedProxies.load(:test, previous.trusted_proxies)
     end)
   end
 

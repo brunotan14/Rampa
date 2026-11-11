@@ -95,6 +95,17 @@ defmodule RampaWeb.AuditControllerTest do
       assert %Audit{page_limit: 1} = Repo.get!(Audit, id)
     end
 
+    test "url só no corpo: na query string, com corpo vazio, é 400", %{conn: conn} do
+      stub_public_dns()
+
+      assert {"invalid_body", _} =
+               conn
+               |> post("/api/audits?url=https://exemplo.com/&page_limit=1")
+               |> error_body(400)
+
+      assert count_audits() == 0
+    end
+
     test "corpo sem url, ou com url que não é texto: 400", %{conn: conn} do
       for body <- [%{}, %{url: 123}, %{endereco: "https://exemplo.com/"}] do
         assert {"invalid_body", _} = conn |> create(body) |> error_body(400)
@@ -228,6 +239,19 @@ defmodule RampaWeb.AuditControllerTest do
       %{"id" => again} = conn |> create(%{url: "https://exemplo.com/"}) |> json_response(202)
 
       assert again == first
+      assert count_audits() == 1
+    end
+
+    test "a mesma chave com outra URL: 422 idempotency_key_reused", %{conn: conn} do
+      stub_public_dns()
+      conn = put_req_header(conn, "idempotency-key", "tentativa-2")
+
+      conn |> create(%{url: "https://exemplo.com/a"}) |> json_response(202)
+
+      assert {"idempotency_key_reused", %{"message" => message}} =
+               conn |> create(%{url: "https://exemplo.com/b"}) |> error_body(422)
+
+      assert message =~ "Idempotency-Key"
       assert count_audits() == 1
     end
 

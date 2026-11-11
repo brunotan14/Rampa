@@ -61,8 +61,9 @@ defmodule RampaWeb.Plugs.ClientIPTest do
 
   describe "plug" do
     setup do
-      previous = Application.get_env(:rampa, :trusted_proxies)
-      on_exit(fn -> Application.put_env(:rampa, :trusted_proxies, previous) end)
+      on_exit(fn ->
+        :ok = TrustedProxies.load(:test, Application.get_env(:rampa, :trusted_proxies))
+      end)
     end
 
     defp call(remote_ip, forwarded_for) do
@@ -82,15 +83,20 @@ defmodule RampaWeb.Plugs.ClientIPTest do
       assert Map.keys(conn.assigns) == [:requester_ip_hash]
     end
 
+    test "conexão IPv4 mapeada em IPv6 tem o mesmo hash do IPv4" do
+      assert call({0, 0, 0, 0, 0, 0xFFFF, 0xCB00, 0x7109}, []).assigns.requester_ip_hash ==
+               IPHash.hash({203, 0, 113, 9})
+    end
+
     test "X-Forwarded-For forjado de IP não confiável não muda o hash" do
-      Application.put_env(:rampa, :trusted_proxies, "")
+      :ok = TrustedProxies.load(:test, "")
 
       assert call({203, 0, 113, 9}, ["1.1.1.1"]).assigns.requester_ip_hash ==
                call({203, 0, 113, 9}, ["8.8.8.8"]).assigns.requester_ip_hash
     end
 
     test "atrás do Traefik configurado, vale o cliente do X-Forwarded-For" do
-      Application.put_env(:rampa, :trusted_proxies, "172.18.0.0/16")
+      :ok = TrustedProxies.load(:test, "172.18.0.0/16")
 
       assert call(@traefik, ["203.0.113.9"]).assigns.requester_ip_hash ==
                IPHash.hash({203, 0, 113, 9})

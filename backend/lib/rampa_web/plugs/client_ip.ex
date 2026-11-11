@@ -40,7 +40,7 @@ defmodule RampaWeb.Plugs.ClientIP do
   @spec client_ip(:inet.ip_address(), [String.t()], [TrustedProxies.range()]) ::
           :inet.ip_address()
   def client_ip(remote_ip, forwarded_for, ranges) do
-    remote_ip = IPRanges.unmap(remote_ip)
+    remote_ip = normalize(remote_ip)
 
     if TrustedProxies.trusted?(remote_ip, ranges) do
       forwarded_for
@@ -57,12 +57,17 @@ defmodule RampaWeb.Plugs.ClientIP do
 
   defp walk([entry | rest], last_trusted, ranges) do
     case IPRanges.parse(entry) do
-      {:ok, ip} ->
-        ip = IPRanges.unmap(ip)
-        if TrustedProxies.trusted?(ip, ranges), do: walk(rest, ip, ranges), else: ip
-
-      :error ->
-        last_trusted
+      {:ok, ip} -> walk_ip(normalize(ip), rest, ranges)
+      :error -> last_trusted
     end
   end
+
+  defp walk_ip(ip, rest, ranges) do
+    if TrustedProxies.trusted?(ip, ranges), do: walk(rest, ip, ranges), else: ip
+  end
+
+  # O único lugar que normaliza o IP: IPv4 mapeado em IPv6 (`::ffff:a.b.c.d`, como chegam as
+  # conexões IPv4 com o Phoenix escutando em `::`) vira o IPv4. `TrustedProxies` e `IPHash`
+  # recebem o IP já normalizado.
+  defp normalize(ip), do: IPRanges.unmap(ip)
 end

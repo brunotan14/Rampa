@@ -22,7 +22,9 @@ defmodule RampaWeb.ErrorMessagesTest do
   test "todo código listado tem mensagem própria, diferente da genérica" do
     generic = ErrorMessages.message(:internal_error)
 
-    for code <- ErrorMessages.codes() -- ["internal_error", "rate_limited"] do
+    for code <-
+          Enum.map(Rampa.ErrorCodes.all(), &Atom.to_string/1) --
+            ["internal_error", "rate_limited"] do
       message = ErrorMessages.message(code)
       assert is_binary(message) and message != "", code
       assert message != generic, code
@@ -35,7 +37,7 @@ defmodule RampaWeb.ErrorMessagesTest do
   end
 
   test "nenhuma mensagem diz que o site está conforme ou é acessível" do
-    for code <- ErrorMessages.codes() -- ["rate_limited"] do
+    for code <- Enum.map(Rampa.ErrorCodes.all(), &Atom.to_string/1) -- ["rate_limited"] do
       refute ErrorMessages.message(code) =~ ~r/est[aá] conforme|[eé] acess[ií]vel/i, code
     end
   end

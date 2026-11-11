@@ -62,15 +62,18 @@ defmodule RampaWeb.AuditController do
   )
 
   @doc """
-  Cria a auditoria. Corpo `{ "url": string, "page_limit"?: integer }`; cabeçalho opcional
+  Cria a auditoria. Corpo `{ "url": string, "page_limit"?: integer }` (só o corpo, nunca a
+  query string); cabeçalho opcional
   `Idempotency-Key`. 202 com `{ "id" }`. `page_limit` é conferido (1 a 25), mas no M1 a
   auditoria tem sempre uma página (`Rampa.Audits.create_audit/3`).
   """
-  def create(conn, %{"url" => url} = params) when is_binary(url) do
-    with {:ok, key} <- idempotency_key(conn),
+  # Só o corpo: `url` e `page_limit` na query string não valem (`conn.params` mistura os dois).
+  def create(conn, _params) do
+    with {:ok, url, page_limit} <- body(conn.body_params),
+         {:ok, key} <- idempotency_key(conn),
          {:ok, audit} <-
            Audits.create_audit(url, %{ip_hash: conn.assigns.requester_ip_hash},
-             page_limit: params["page_limit"],
+             page_limit: page_limit,
              idempotency_key: key
            ) do
       conn
@@ -79,7 +82,8 @@ defmodule RampaWeb.AuditController do
     end
   end
 
-  def create(_conn, _params), do: {:error, :invalid_body}
+  defp body(%{"url" => url} = body) when is_binary(url), do: {:ok, url, body["page_limit"]}
+  defp body(_body), do: {:error, :invalid_body}
 
   operation(:show,
     operation_id: "getAudit",

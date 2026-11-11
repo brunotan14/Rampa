@@ -1,9 +1,17 @@
 defmodule Rampa.Security.TrustedProxiesTest do
-  use ExUnit.Case, async: true
+  # `async: false`: `load/2` troca as faixas guardadas para o app inteiro.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
   alias Rampa.Security.{IPRanges, TrustedProxies}
+
+  # Volta às faixas da configuração de teste.
+  setup do
+    on_exit(fn ->
+      :ok = TrustedProxies.load(:test, Application.get_env(:rampa, :trusted_proxies))
+    end)
+  end
 
   describe "parse/1" do
     test "vazia por padrão" do
@@ -37,10 +45,6 @@ defmodule Rampa.Security.TrustedProxiesTest do
       refute TrustedProxies.trusted?({0xFE80, 0, 0, 0, 0, 0, 0, 1}, ranges)
     end
 
-    test "IPv4 mapeado em IPv6 casa com a faixa IPv4", %{ranges: ranges} do
-      assert TrustedProxies.trusted?({0, 0, 0, 0, 0, 0xFFFF, 0xAC12, 0x0304}, ranges)
-    end
-
     test "lista vazia não confia em ninguém" do
       refute TrustedProxies.trusted?({127, 0, 0, 1}, [])
     end
@@ -51,11 +55,11 @@ defmodule Rampa.Security.TrustedProxiesTest do
     end
   end
 
-  describe "check_startup/2" do
+  describe "load/2" do
     test "valor inválido não sobe, em qualquer ambiente" do
       for env <- [:prod, :dev] do
         capture_log(fn ->
-          assert {:error, reason} = TrustedProxies.check_startup(env, "traefik")
+          assert {:error, reason} = TrustedProxies.load(env, "traefik")
           assert reason =~ "TRUSTED_PROXIES"
           assert reason =~ "traefik"
         end)
@@ -65,7 +69,7 @@ defmodule Rampa.Security.TrustedProxiesTest do
     test "vazia em produção sobe com aviso no log" do
       log =
         capture_log([level: :warning], fn ->
-          assert :ok = TrustedProxies.check_startup(:prod, "")
+          assert :ok = TrustedProxies.load(:prod, "")
         end)
 
       assert log =~ "TRUSTED_PROXIES está vazia em produção"
@@ -74,11 +78,24 @@ defmodule Rampa.Security.TrustedProxiesTest do
     test "preenchida sobe sem aviso" do
       # Só o log deste módulo: o `capture_log` também pega o de outros testes assíncronos.
       log =
-        capture_log(fn -> assert :ok = TrustedProxies.check_startup(:prod, "172.18.0.0/16") end)
+        capture_log(fn -> assert :ok = TrustedProxies.load(:prod, "172.18.0.0/16") end)
 
       refute log =~ "TRUSTED_PROXIES"
 
-      assert :ok = TrustedProxies.check_startup(:dev, "")
+      assert :ok = TrustedProxies.load(:dev, "")
+    end
+
+    test "interpreta uma vez e guarda: ranges/0 devolve o que foi carregado" do
+      assert :ok = TrustedProxies.load(:test, "172.18.0.0/16")
+      assert TrustedProxies.ranges() == [{{172, 18, 0, 0}, 16}]
+    end
+
+    test "valor inválido não troca as faixas guardadas" do
+      assert :ok = TrustedProxies.load(:test, "10.0.0.0/8")
+
+      capture_log(fn -> assert {:error, _reason} = TrustedProxies.load(:test, "lixo") end)
+
+      assert TrustedProxies.ranges() == [{{10, 0, 0, 0}, 8}]
     end
   end
 end

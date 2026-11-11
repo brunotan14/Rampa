@@ -23,11 +23,6 @@ defmodule Rampa.Security.IPHashTest do
       refute IPHash.hash({1, 2, 3, 4}, @secret) == IPHash.hash({1, 2, 3, 4}, @secret <> "x")
     end
 
-    test "IPv4 mapeado em IPv6 tem o mesmo hash do IPv4" do
-      assert IPHash.hash({0, 0, 0, 0, 0, 0xFFFF, 0x0102, 0x0304}, @secret) ==
-               IPHash.hash({1, 2, 3, 4}, @secret)
-    end
-
     test "IPv6 conta pelo prefixo /64" do
       a = IPHash.hash({0x2001, 0xDB8, 1, 2, 0, 0, 0, 1}, @secret)
       b = IPHash.hash({0x2001, 0xDB8, 1, 2, 0xFFFF, 0xAB, 0xCD, 0xEF}, @secret)

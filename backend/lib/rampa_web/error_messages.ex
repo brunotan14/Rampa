@@ -9,6 +9,9 @@ defmodule RampaWeb.ErrorMessages do
   em `priv/gettext/<idioma>/`, sem mexer no código (RNF-RA009). `mix gettext.extract` lista
   as mensagens em `priv/gettext/errors.pot`.
 
+  Os códigos vêm de `Rampa.ErrorCodes`, a fonte única; o teste de contrato falha se algum
+  deles não tiver mensagem própria aqui.
+
   Os códigos dos erros de página e de auditoria (`pages.error`, `audits.error`) também
   ganham mensagem aqui, para `GET /api/audits/:id` devolver o erro já pronto para a tela.
   """
@@ -18,21 +21,6 @@ defmodule RampaWeb.ErrorMessages do
   alias Rampa.Audits.Limits
 
   @type error :: %{code: String.t(), message: String.t()}
-
-  @doc """
-  Códigos de erro da API e de páginas e auditorias que têm mensagem própria. Código fora da
-  lista ganha a mensagem genérica de `internal_error`.
-  """
-  @spec codes() :: [String.t()]
-  def codes do
-    ~w(unsupported_scheme invalid_url blocked_address unresolvable dns_error
-       invalid_page_limit invalid_idempotency_key idempotency_conflict invalid_body rate_limited
-       daily_limit_reached audit_not_found invalid_filter invalid_limit invalid_cursor
-       bad_request not_found method_not_allowed not_acceptable payload_too_large
-       unsupported_media_type internal_error timeout http_error navigation_failed
-       analysis_failed resource_limit unavailable invalid_request invalid_scan_result
-       stale scan_failed)
-  end
 
   @doc "Erro no formato da API: `%{code, message}`."
   @spec error(atom() | String.t(), keyword()) :: error()
@@ -95,6 +83,14 @@ defmodule RampaWeb.ErrorMessages do
     dgettext(
       "errors",
       "Outra requisição com o mesmo Idempotency-Key está em andamento. Tente de novo."
+    )
+  end
+
+  def message("idempotency_key_reused", _bindings) do
+    dgettext(
+      "errors",
+      "Este Idempotency-Key já foi usado para auditar outro endereço. Use uma chave nova " <>
+        "para cada auditoria."
     )
   end
 

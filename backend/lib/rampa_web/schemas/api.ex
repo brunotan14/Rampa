@@ -100,7 +100,7 @@ defmodule RampaWeb.Schemas.AuditError do
       required: [:code, :message],
       additionalProperties: false,
       properties: %{
-        code: %Schema{type: :string, enum: RampaWeb.Schemas.scan_error_codes()},
+        code: %Schema{type: :string, enum: RampaWeb.Schemas.page_codes()},
         message: %Schema{type: :string}
       }
     },
@@ -297,7 +297,7 @@ defmodule RampaWeb.Schemas.InvalidBodyError do
     RampaWeb.Schemas.error(
       "InvalidBodyError",
       "Corpo malformado (JSON inválido) ou sem `url` em texto.",
-      ~w(invalid_body)
+      RampaWeb.Schemas.codes(:create_audit, 400)
     ),
     struct?: false,
     derive?: false
@@ -317,9 +317,10 @@ defmodule RampaWeb.Schemas.CreateAuditRefused do
         "inválido, com credenciais ou acima de 2.048 caracteres. `blocked_address`: rede " <>
         "interna, nome interno ou porta fora de 80/443 (\"Este endereço não pode ser " <>
         "auditado\"). `unresolvable`: o domínio não existe. `invalid_page_limit`: fora de " <>
-        "1 a 25. `invalid_idempotency_key`: cabeçalho fora do formato ou repetido.",
-      ~w(unsupported_scheme invalid_url blocked_address unresolvable invalid_page_limit
-         invalid_idempotency_key)
+        "1 a 25. `invalid_idempotency_key`: cabeçalho fora do formato ou repetido. " <>
+        "`idempotency_key_reused`: a chave já foi usada por este IP, nas últimas 24 h, " <>
+        "para outra URL (comparada depois de normalizada).",
+      RampaWeb.Schemas.codes(:create_audit, 422)
     ),
     struct?: false,
     derive?: false
@@ -336,7 +337,7 @@ defmodule RampaWeb.Schemas.IdempotencyConflictError do
     RampaWeb.Schemas.error(
       "IdempotencyConflictError",
       "Corrida rara entre duas requisições com a mesma `Idempotency-Key`; repita o pedido.",
-      ~w(idempotency_conflict)
+      RampaWeb.Schemas.codes(:create_audit, 409)
     ),
     struct?: false,
     derive?: false
@@ -355,7 +356,7 @@ defmodule RampaWeb.Schemas.RateLimitError do
       "`rate_limited`: limite de auditorias por hora deste IP; a mensagem traz o horário " <>
         "(São Paulo, HH:MM). `daily_limit_reached`: acabou o limite do dia; vale de novo " <>
         "à meia-noite de São Paulo.",
-      ~w(rate_limited daily_limit_reached),
+      RampaWeb.Schemas.codes(:create_audit, 429),
       %{
         retry_after: %Schema{
           type: :string,
@@ -379,7 +380,7 @@ defmodule RampaWeb.Schemas.DnsError do
     RampaWeb.Schemas.error(
       "DnsError",
       "Não foi possível verificar o endereço agora (falha passageira do DNS).",
-      ~w(dns_error)
+      RampaWeb.Schemas.codes(:create_audit, 503)
     ),
     struct?: false,
     derive?: false
@@ -396,7 +397,7 @@ defmodule RampaWeb.Schemas.AuditNotFound do
     RampaWeb.Schemas.error(
       "AuditNotFound",
       "Auditoria inexistente ou id que não é UUID (mesma resposta nos dois casos).",
-      ~w(audit_not_found)
+      RampaWeb.Schemas.codes(:get_audit, 404)
     ),
     struct?: false,
     derive?: false
@@ -414,7 +415,7 @@ defmodule RampaWeb.Schemas.FindingsQueryError do
       "FindingsQueryError",
       "`invalid_filter`: `severity`, `source` ou `needs_review` fora dos valores aceitos. " <>
         "`invalid_limit`: `limit` fora de 1 a 100. `invalid_cursor`: cursor inválido.",
-      ~w(invalid_filter invalid_limit invalid_cursor)
+      RampaWeb.Schemas.codes(:list_findings, 422)
     ),
     struct?: false,
     derive?: false
@@ -431,7 +432,7 @@ defmodule RampaWeb.Schemas.InternalError do
     RampaWeb.Schemas.error(
       "InternalError",
       "Erro inesperado no servidor.",
-      ~w(internal_error)
+      RampaWeb.Schemas.codes(:create_audit, 500)
     ),
     struct?: false,
     derive?: false

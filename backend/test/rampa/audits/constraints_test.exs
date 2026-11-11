@@ -164,8 +164,8 @@ defmodule Rampa.Audits.ConstraintsTest do
           finding_attrs(page, %{
             id: Ecto.UUID.generate(),
             audit_id: other.id,
-            inserted_at: DateTime.utc_now(:second),
-            updated_at: DateTime.utc_now(:second)
+            inserted_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
           })
         ])
       end)

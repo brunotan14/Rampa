@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isBlockedIp } from "../src/ssrf/ip.js";
-import { checkStartup, checkUrl, defaultPolicy, parseAllowlist } from "../src/ssrf/policy.js";
+import { checkStartup, checkUrl, defaultPolicy, normalizeHost, parseAllowlist } from "../src/ssrf/policy.js";
 
 // Casos compartilhados com o backend (`backend/test/rampa/security/url_guard_test.exs`).
 interface SharedCases {
@@ -25,8 +25,13 @@ describe("casos compartilhados com o backend: URLs", () => {
     const hosts = parseAllowlist((allowlist ?? []).join(","));
     const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }));
     expect(check.ok ? "ok" : check.reason).toBe(expected);
-    // IDN: o WHATWG URL e o URLGuard do backend precisam chegar à mesma URL.
-    if (normalized !== undefined && check.ok) expect(check.url.href).toBe(normalized);
+    // IDN: o WHATWG URL e o URLGuard do backend precisam chegar à mesma URL. O backend tira
+    // o ponto final do host (RF-RA001); aqui ele sai pelo `normalizeHost` do scanner.
+    if (normalized !== undefined && check.ok) {
+      const url = new URL(check.url.href);
+      url.hostname = normalizeHost(url.hostname);
+      expect(url.href).toBe(normalized);
+    }
   });
 });
 

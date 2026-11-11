@@ -90,6 +90,7 @@ defmodule Rampa.Audits do
           | :invalid_idempotency_key
           | {:rate_limited, DateTime.t()}
           | {:daily_limit_reached, DateTime.t()}
+          | :idempotency_key_reused
           | :idempotency_conflict
 
   ## Criação de auditorias
@@ -108,19 +109,23 @@ defmodule Rampa.Audits do
       `page_limit = 1`** (RF-RA001); o M5 passa a usar o valor pedido;
     * `:idempotency_key`: o cabeçalho `Idempotency-Key`, de 1 a 128 caracteres ASCII
       visíveis (senão `{:error, :invalid_idempotency_key}`). A mesma chave do mesmo
-      solicitante em até 24 h devolve a auditoria já criada, sem criar outra nem contar no
-      limite. Depois de 24 h a chave é liberada e a próxima requisição cria uma auditoria
-      nova;
+      solicitante em até 24 h, com a mesma URL **depois de normalizada**, devolve a
+      auditoria já criada, sem criar outra nem contar no limite; com outra URL, devolve
+      `{:error, :idempotency_key_reused}`. O `page_limit` não entra na comparação no M1,
+      porque o valor pedido não é guardado (toda auditoria tem uma página); quando o M5
+      guardar o valor pedido, ele passa a ser comparado também. Depois de 24 h a chave é
+      liberada e a próxima requisição cria uma auditoria nova;
     * `:limits`: sobrescreve `:per_ip_per_hour` e `:daily` (`Rampa.Audits.Limits.config/1`);
-    * `:now`: o instante de referência (testes).
+    * `:now`: fixa o relógio (testes).
 
-  Ordem: a forma da requisição (`page_limit`, chave) é conferida primeiro; uma chave já
-  usada devolve a auditoria sem consultar o DNS; depois a URL passa pelo `URLGuard` (com o
-  DNS) **fora da transação**, e só então a transação abre e toma as travas consultivas
-  (`Rampa.Audits.Limits`: solicitante, depois global). Com as travas, a chave é procurada
-  de novo, e os limites são contados: por hora (`{:error, {:rate_limited, retry_at}}`) e do
-  dia (`{:error, {:daily_limit_reached, retry_at}}`). `retry_at` é o horário a partir do
-  qual dá para tentar de novo, em UTC.
+  Ordem: a forma da requisição (`page_limit`, chave, URL normalizada sem DNS) é conferida
+  primeiro; uma chave já usada é resolvida sem consultar o DNS. Depois a URL passa pelo
+  `URLGuard` (com o DNS) **fora da transação**, e só então a transação abre e toma as
+  travas consultivas (`Rampa.Audits.Limits`: solicitante, depois global). **Com as duas
+  travas**, o relógio é lido (`inserted_at` da auditoria e base da janela e do dia), a
+  chave é procurada de novo e os limites são contados: por hora
+  (`{:error, {:rate_limited, retry_at}}`) e do dia (`{:error, {:daily_limit_reached,
+  retry_at}}`). `retry_at` é o horário a partir do qual dá para tentar de novo, em UTC.
 
   Recusas da URL: as de `Rampa.Security.URLGuard.validate/2`.
   """
@@ -128,22 +133,28 @@ defmodule Rampa.Audits do
           {:ok, Audit.t()} | {:error, create_error() | Ecto.Changeset.t()}
   def create_audit(raw_url, %{ip_hash: ip_hash}, opts \\ []) when is_binary(ip_hash) do
     key = Keyword.get(opts, :idempotency_key)
-    now = opts |> Keyword.get_lazy(:now, &now/0) |> DateTime.truncate(:second)
+    clock = fn -> opts |> Keyword.get_lazy(:now, &now/0) |> DateTime.truncate(:second) end
+    request = %{ip_hash: ip_hash, key: key}
 
     with :ok <- check_page_limit(Keyword.get(opts, :page_limit)),
-         :ok <- check_idempotency_key(key) do
-      case find_idempotent(ip_hash, key, now) do
-        %Audit{} = audit -> {:ok, audit}
-        nil -> validate_and_insert(raw_url, %{ip_hash: ip_hash, key: key}, opts, now)
+         :ok <- check_idempotency_key(key),
+         {:ok, normalized} <- URLGuard.normalize(raw_url) do
+      case find_idempotent(ip_hash, key, clock.()) do
+        %Audit{} = audit -> replay(audit, normalized)
+        nil -> validate_and_insert(raw_url, request, opts, clock)
       end
     end
   end
 
+  # A chave já usada só devolve a auditoria se a URL normalizada é a mesma.
+  defp replay(%Audit{start_url: url} = audit, url), do: {:ok, audit}
+  defp replay(%Audit{}, _other_url), do: {:error, :idempotency_key_reused}
+
   # O DNS do `URLGuard` roda aqui, fora da transação e antes das travas.
-  defp validate_and_insert(raw_url, request, opts, now) do
+  defp validate_and_insert(raw_url, request, opts, clock) do
     with {:ok, url} <- URLGuard.validate(raw_url) do
       limits = Limits.config(Keyword.get(opts, :limits, []))
-      insert_audit(Map.put(request, :url, url), limits, now)
+      insert_audit(Map.put(request, :url, url), limits, clock)
     end
   end
 
@@ -159,26 +170,30 @@ defmodule Rampa.Audits do
 
   defp check_idempotency_key(_invalid), do: {:error, :invalid_idempotency_key}
 
-  defp insert_audit(request, limits, now) do
+  # As duas travas vêm antes de qualquer leitura ou escrita: nenhuma trava de linha é
+  # segurada enquanto se espera trava consultiva (ver `Rampa.Audits.Limits`).
+  defp insert_audit(request, limits, clock) do
     Repo.transact(fn ->
       :ok = Limits.lock_requester(request.ip_hash)
+      :ok = Limits.lock_global()
+      now = clock.()
 
       case claim_idempotency_key(request.ip_hash, request.key, now) do
-        %Audit{} = audit -> {:ok, audit}
+        %Audit{} = audit -> replay(audit, request.url)
         nil -> insert_within_limits(request, limits, now)
       end
     end)
     |> case do
       # Conflito no índice único da chave: outra requisição com a mesma chave ganhou. Não
       # acontece com a trava do solicitante, mas o índice é a última palavra.
-      {:error, :idempotency_conflict} -> idempotent_winner(request, now)
+      {:error, :idempotency_conflict} -> idempotent_winner(request, clock.())
       result -> result
     end
   end
 
   defp idempotent_winner(request, now) do
     case find_idempotent(request.ip_hash, request.key, now) do
-      %Audit{} = audit -> {:ok, audit}
+      %Audit{} = audit -> replay(audit, request.url)
       nil -> {:error, :idempotency_conflict}
     end
   end
@@ -197,7 +212,6 @@ defmodule Rampa.Audits do
       |> Ecto.Changeset.change(inserted_at: now, updated_at: now)
 
     with :ok <- Limits.check_hourly(request.ip_hash, limits.per_ip_per_hour, now),
-         :ok <- Limits.lock_global(),
          :ok <- Limits.check_daily(limits.daily, now),
          {:ok, audit} <- insert_new_audit(changeset),
          {:ok, _page, audit} <- append_page(audit, request.url, now) do
@@ -227,8 +241,9 @@ defmodule Rampa.Audits do
     )
   end
 
-  # Com a trava do solicitante: devolve a auditoria da chave ainda válida; se a chave venceu,
-  # libera-a na auditoria antiga para a nova poder usá-la.
+  # Com as duas travas: devolve a auditoria da chave ainda válida; se a chave venceu,
+  # libera-a na auditoria antiga para a nova poder usá-la. O `UPDATE` trava a linha antiga,
+  # mas só depois das travas consultivas, nunca antes de esperar por elas.
   defp claim_idempotency_key(_ip_hash, nil, _now), do: nil
 
   defp claim_idempotency_key(ip_hash, key, now) do
@@ -296,8 +311,12 @@ defmodule Rampa.Audits do
     * `"limit"`: de 1 a #{@findings_max_limit}, padrão #{@findings_default_limit}
       (`{:error, :invalid_limit}`);
     * `"cursor"`: o `next_cursor` da página anterior, opaco (`{:error, :invalid_cursor}`).
-      Paginação por chave (keyset): achado gravado depois de a lista começar entra no fim,
-      sem repetir nem pular os anteriores.
+
+  Paginação por chave (keyset) em `(inserted_at, id)`, com `inserted_at` em microssegundos:
+  nada se repete nem é pulado. É **estável depois que a auditoria termina**. Durante a
+  auditoria, um achado novo pode aparecer fora de ordem: o `inserted_at` é o horário da
+  transação que grava a página, e uma transação que começou antes pode terminar depois de
+  a lista já ter passado pelo horário dela.
 
   `next_cursor` é `nil` na última página. Auditoria inexistente: `{:error, :audit_not_found}`.
   """
@@ -369,10 +388,13 @@ defmodule Rampa.Audits do
 
   defp findings_limit(_invalid), do: {:error, :invalid_limit}
 
-  # Cursor: `<inserted_at em segundos Unix>:<id>` em Base64 de URL, sem preenchimento. O
-  # cliente não precisa (nem deve) interpretar.
+  # Cursor: `<inserted_at em microssegundos Unix>:<id>` em Base64 de URL, sem
+  # preenchimento. O cliente não precisa (nem deve) interpretar.
   defp encode_cursor(%Finding{inserted_at: inserted_at, id: id}),
-    do: Base.url_encode64("#{DateTime.to_unix(inserted_at)}:#{id}", padding: false)
+    do:
+      Base.url_encode64("#{DateTime.to_unix(inserted_at, :microsecond)}:#{id}",
+        padding: false
+      )
 
   defp decode_cursor(nil), do: {:ok, nil}
 
@@ -380,7 +402,7 @@ defmodule Rampa.Audits do
     with {:ok, decoded} <- Base.url_decode64(cursor, padding: false),
          [unix, id] <- String.split(decoded, ":"),
          {unix, ""} <- Integer.parse(unix),
-         {:ok, inserted_at} <- DateTime.from_unix(unix),
+         {:ok, inserted_at} <- DateTime.from_unix(unix, :microsecond),
          {:ok, id} <- Ecto.UUID.cast(id) do
       {:ok, {inserted_at, id}}
     else
@@ -766,7 +788,7 @@ defmodule Rampa.Audits do
          {:ok, task} <- update_task(task, %{status: :done, error: nil, finished_at: now}),
          {:ok, page} <- refresh_page(page, replace(tasks, task), scan_attrs(result, axe, now)),
          {_deleted, _} <- Repo.delete_all(axe_findings_query(page.id)),
-         {:ok, _count} <- insert_findings(page, axe, now),
+         {:ok, _count} <- insert_findings(page, axe, DateTime.utc_now()),
          {:ok, _audit} <- settle(audit, now) do
       {:ok, page}
     end

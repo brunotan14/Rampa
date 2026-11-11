@@ -4,11 +4,8 @@ defmodule Rampa.Security.IPHash do
   `IP_HASH_SECRET`, em hexadecimal. O IP puro nunca vai para o banco nem para o log; só o
   hash, que serve ao limite de taxa e à idempotência do `POST /api/audits`.
 
-  Antes do hash:
-
-    * IPv4 mapeado em IPv6 (`::ffff:a.b.c.d`) vira o IPv4, para a mesma pessoa não ter dois
-      hashes conforme a pilha da conexão;
-    * IPv6 é reduzido ao prefixo `/64`. Uma conexão doméstica recebe um `/64` inteiro e
+  O IP chega já normalizado por `RampaWeb.Plugs.ClientIP` (IPv4 mapeado em IPv6 vira IPv4
+  lá, num lugar só). Antes do hash, IPv6 é reduzido ao prefixo `/64`. Uma conexão doméstica recebe um `/64` inteiro e
       pode trocar de endereço dentro dele à vontade; contar por endereço deixaria furar o
       limite de taxa trocando de IP.
 
@@ -18,8 +15,6 @@ defmodule Rampa.Security.IPHash do
   """
 
   require Logger
-
-  alias Rampa.Security.IPRanges
 
   @min_prod_length 32
 
@@ -31,7 +26,7 @@ defmodule Rampa.Security.IPHash do
 
   # O texto que identifica a pessoa: o IPv4 ou o prefixo /64 do IPv6.
   defp identity(ip) do
-    case IPRanges.unmap(ip) do
+    case ip do
       {_, _, _, _} = ipv4 ->
         ipv4 |> :inet.ntoa() |> to_string()
 

@@ -14,11 +14,14 @@ defmodule RampaWeb.ApiSpecTest do
   import OpenApiSpex.TestAssertions
   import Rampa.AuditsFixtures
 
+  alias OpenApiSpex.{Reference, Response}
   alias Rampa.Audits.{Limits, Page, ScanPageJob}
+  alias Rampa.ErrorCodes
   alias Rampa.Repo
   alias Rampa.Scanner.ClientMock
   alias Rampa.Security.{IPHash, ResolverMock}
   alias RampaWeb.{ApiSpec, ErrorMessages}
+  alias RampaWeb.Schemas.AuditError
 
   setup :verify_on_exit!
 
@@ -53,18 +56,64 @@ defmodule RampaWeb.ApiSpecTest do
       assert Enum.any?(list.parameters, &(&1.name == :cursor and &1.in == :query))
     end
 
-    test "todo código de erro documentado tem mensagem própria", %{spec: spec} do
-      codes =
-        for {_name, %{properties: %{error: %{properties: %{code: %{enum: enum}}}}}} <-
-              spec.components.schemas,
-            code <- enum,
-            uniq: true,
-            do: code
+    # Fonte única: `Rampa.ErrorCodes`. Falha se um código não estiver no `enum` da resposta
+    # certa da spec, se a spec tiver código ou status a mais, ou se faltar mensagem.
+    test "cada código de Rampa.ErrorCodes está no enum do status certo da operação",
+         %{spec: spec} do
+      operations = %{
+        create_audit: spec.paths["/api/audits"].post,
+        get_audit: spec.paths["/api/audits/{id}"].get,
+        list_findings: spec.paths["/api/audits/{audit_id}/findings"].get
+      }
 
-      assert "rate_limited" in codes and "blocked_address" in codes
-      assert codes -- ErrorMessages.codes() == []
+      assert Enum.sort(Map.keys(operations)) == Enum.sort(ErrorCodes.operations())
+
+      for {operation, spec_operation} <- operations do
+        documented =
+          for {status, response} <- spec_operation.responses, status >= 400 do
+            {status, response |> error_schema(spec) |> enum_codes()}
+          end
+          |> Map.new()
+
+        expected =
+          operation
+          |> ErrorCodes.api()
+          |> Enum.group_by(fn {_code, status} -> status end, fn {code, _status} ->
+            Atom.to_string(code)
+          end)
+
+        assert Map.new(documented, fn {status, codes} -> {status, Enum.sort(codes)} end) ==
+                 Map.new(expected, fn {status, codes} -> {status, Enum.sort(codes)} end),
+               "códigos de #{operation} divergem entre Rampa.ErrorCodes e a spec"
+      end
+    end
+
+    test "o enum do erro da auditoria é o de pages.error" do
+      enum = AuditError.schema().properties.code.enum
+
+      assert Enum.sort(enum) == Enum.sort(Enum.map(ErrorCodes.page(), &Atom.to_string/1))
+    end
+
+    test "todo código tem mensagem própria" do
+      generic = ErrorMessages.message(:internal_error)
+
+      for code <- ErrorCodes.all() -- [:internal_error, :rate_limited] do
+        assert ErrorMessages.message(code) != generic, "#{code} sem mensagem própria"
+      end
     end
   end
+
+  defp error_schema(%Response{content: %{"application/json" => media}}, spec) do
+    case media.schema do
+      %Reference{"$ref": "#/components/schemas/" <> name} ->
+        spec.components.schemas[name]
+
+      schema ->
+        schema
+    end
+  end
+
+  defp enum_codes(%{properties: %{error: %{properties: %{code: %{enum: enum}}}}}), do: enum
 
   describe "POST /api/audits" do
     test "202", %{conn: conn} do
@@ -105,6 +154,17 @@ defmodule RampaWeb.ApiSpecTest do
         assert conn.status == 422
         assert_operation_response(conn, "createAudit")
       end
+    end
+
+    test "422: Idempotency-Key reutilizada com outra URL", %{conn: conn} do
+      stub_public_dns()
+      conn = put_req_header(conn, "idempotency-key", "contrato")
+
+      conn |> create(%{url: "https://exemplo.com/a"}) |> assert_operation_response("createAudit")
+
+      reused = create(conn, %{url: "https://exemplo.com/b"})
+      assert %{"error" => %{"code" => "idempotency_key_reused"}} = json_response(reused, 422)
+      assert_operation_response(reused, "createAudit")
     end
 
     test "429: limite por hora, com Retry-After", %{conn: conn, ip: ip} do

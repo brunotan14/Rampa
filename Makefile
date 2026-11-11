@@ -1,7 +1,7 @@
 # Comandos do Rampa. Pré-requisitos: Elixir 1.20 / OTP 29, Node 24, Docker.
 COMPOSE = docker compose -f infra/docker-compose.yml
 
-.PHONY: setup services down dev test test-backend test-frontend test-scanner e2e lint
+.PHONY: setup services down dev test test-backend test-frontend test-scanner e2e lint openapi
 
 setup: services ## Instala dependências e prepara o banco
 	cd backend && mix deps.get && mix ecto.setup
@@ -40,3 +40,7 @@ lint: ## Formatação, lint e tipos das três partes
 	cd frontend && npm run lint && npm run typecheck
 	cd scanner && npm run lint && npm run typecheck
 	cd e2e && npm run typecheck
+
+openapi: ## Regenera o contrato OpenAPI versionado (shared/openapi.json)
+	cd backend && mix openapi.spec.json --spec RampaWeb.ApiSpec --pretty=true \
+		--start-app=false --vendor-extensions=false --quiet ../shared/openapi.json

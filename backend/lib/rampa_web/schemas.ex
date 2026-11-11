@@ -7,7 +7,7 @@ defmodule RampaWeb.Schemas do
   `requester_ip_hash` ou `raw`) quebra o teste de contrato.
 
   Os erros seguem `{ "error": { "code", "message" } }` (`RampaWeb.ErrorJSON`), com os
-  `code` possíveis de cada resposta em `enum`.
+  `code` possíveis de cada resposta em `enum`, derivados de `Rampa.ErrorCodes`.
   """
 
   alias OpenApiSpex.Schema
@@ -48,11 +48,12 @@ defmodule RampaWeb.Schemas do
     }
   end
 
-  @doc "Códigos de erro de página e de auditoria (`pages.error`, `audits.error`)."
-  @spec scan_error_codes() :: [String.t()]
-  def scan_error_codes do
-    ~w(blocked_address unsupported_scheme invalid_url unresolvable dns_error timeout
-       http_error navigation_failed analysis_failed resource_limit unavailable
-       invalid_request invalid_scan_result internal_error stale scan_failed)
-  end
+  @doc "Códigos (texto) da operação com o status, de `Rampa.ErrorCodes`."
+  @spec codes(Rampa.ErrorCodes.operation(), pos_integer()) :: [String.t()]
+  def codes(operation, status),
+    do: operation |> Rampa.ErrorCodes.api(status) |> Enum.map(&Atom.to_string/1)
+
+  @doc "Códigos (texto) de `pages.error` e `audits.error`, de `Rampa.ErrorCodes`."
+  @spec page_codes() :: [String.t()]
+  def page_codes, do: Enum.map(Rampa.ErrorCodes.page(), &Atom.to_string/1)
 end

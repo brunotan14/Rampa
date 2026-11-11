@@ -13,16 +13,23 @@ defmodule Rampa.Audits.Limits do
   ## Travas consultivas
 
   A contagem e a inserção ficam serializadas por `pg_advisory_xact_lock`, liberado no fim da
-  transação. São duas travas, **sempre nesta ordem**:
+  transação. São duas travas, **sempre nesta ordem**, tomadas logo no começo da transação,
+  antes de qualquer leitura ou escrita:
 
     1. a do solicitante (`lock_requester/1`), com chave derivada do `requester_ip_hash`;
     2. a global (`lock_global/0`).
 
-  Solicitante antes do global: uma rajada de um mesmo IP fica na fila da trava dele e não
-  segura a trava global; a idempotência e o limite por hora são decididos antes de entrar
-  na fila global. Nenhum outro código toma essas travas, e quem as toma não tem trava de
-  linha nenhuma (a auditoria nova é inserida depois delas), então não há ciclo de espera
-  com as travas `FOR UPDATE` do ciclo de vida.
+  Com as duas, `Rampa.Audits.create_audit/3` lê o relógio, procura a `Idempotency-Key`
+  (liberando a vencida com um `UPDATE` na auditoria antiga), conta os limites e insere.
+
+  Por que não há deadlock: todo mundo que toma essas travas as toma na mesma ordem, e
+  nenhuma trava de linha é segurada enquanto se espera por elas (o `UPDATE` da chave
+  vencida e as inserções vêm depois). Os jobs do ciclo de vida travam linhas com
+  `FOR UPDATE`, mas nunca pedem trava consultiva: quem segura as travas consultivas pode
+  esperar por uma linha, e a espera termina quando o job faz `COMMIT`, sem ciclo.
+
+  Solicitante antes do global: uma rajada de um mesmo IP fica na fila da trava dele, e só
+  uma requisição desse IP por vez disputa a trava global.
 
   As travas usam a forma de duas chaves `int4` (espaço próprio do Rampa), que não se
   mistura com as travas de uma chave `int8` do Oban.

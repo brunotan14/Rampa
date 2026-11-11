@@ -74,8 +74,21 @@ defmodule Rampa.AuditsFixtures do
   defp scan_task_defaults(_scanned, _error),
     do: %{status: :done, attempt: 1, started_at: now(), finished_at: now()}
 
-  @doc "Achado de uma página, inserido direto. Padrão: `image-alt` do axe, crítico, confirmado."
+  @doc """
+  Achado de uma página, inserido direto. Padrão: `image-alt` do axe, crítico, confirmado.
+  `inserted_at` e `updated_at` informados em segundos ganham a precisão de microssegundos
+  da coluna.
+  """
   def finding_fixture(%Page{} = page, attrs \\ %{}) do
+    attrs =
+      Map.new(attrs, fn
+        {key, %DateTime{} = value} when key in [:inserted_at, :updated_at] ->
+          {key, usec(value)}
+
+        pair ->
+          pair
+      end)
+
     Repo.insert!(
       struct!(
         Finding,
@@ -107,6 +120,9 @@ defmodule Rampa.AuditsFixtures do
   def scanner_response(name) do
     @scanner_fixtures |> Path.join("#{name}.json") |> File.read!() |> Jason.decode!()
   end
+
+  defp usec(%DateTime{microsecond: {value, _precision}} = datetime),
+    do: %{datetime | microsecond: {value, 6}}
 
   defp now, do: DateTime.utc_now(:second)
 end

@@ -46,7 +46,8 @@ defmodule Rampa.Audits.Finding do
     belongs_to :page, Page
     belongs_to :audit, Audit
 
-    timestamps(type: :utc_datetime)
+    # Microssegundos: a paginação por cursor usa `(inserted_at, id)`.
+    timestamps(type: :utc_datetime_usec)
   end
 
   @spec sources() :: [source()]

@@ -140,4 +140,41 @@ defmodule Rampa.Audits.CreateAuditConcurrencyTest do
     assert Enum.all?(results, &match?({:ok, %Audit{}}, &1))
     assert created(prefix) == 1
   end
+
+  test "o inserted_at da auditoria é tomado depois das travas consultivas", %{prefix: prefix} do
+    ip_hash = prefix <> "espera"
+    parent = self()
+
+    # Outra transação segura a trava do solicitante.
+    holder =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false)
+
+        Repo.transact(fn ->
+          :ok = Limits.lock_requester(ip_hash)
+          send(parent, :locked)
+
+          receive do
+            :release -> {:ok, :released}
+          end
+        end)
+      end)
+
+    assert_receive :locked, 5_000
+
+    creator =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false)
+        Audits.create_audit(@url, %{ip_hash: ip_hash})
+      end)
+
+    # A criação fica esperando a trava por mais de um segundo.
+    Process.sleep(1_200)
+    released_at = DateTime.utc_now(:second)
+    send(holder.pid, :release)
+
+    assert {:ok, {:ok, :released}} = {:ok, Task.await(holder)}
+    assert {:ok, %Audit{} = audit} = Task.await(creator)
+    assert DateTime.compare(audit.inserted_at, released_at) != :lt
+  end
 end

@@ -15,7 +15,7 @@ defmodule Rampa.Application do
     # `IP_HASH_SECRET` ou com `TRUSTED_PROXIES` inválida, o app não sobe em nenhum ambiente.
     with :ok <- Allowlist.check_startup(env, Allowlist.hosts()),
          :ok <- IPHash.check_startup(env, IPHash.secret()),
-         :ok <- TrustedProxies.check_startup(env, Application.get_env(:rampa, :trusted_proxies)) do
+         :ok <- TrustedProxies.load(env, Application.get_env(:rampa, :trusted_proxies)) do
       start_children()
     end
   end

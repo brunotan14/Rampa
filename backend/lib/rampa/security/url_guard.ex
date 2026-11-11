@@ -79,6 +79,22 @@ defmodule Rampa.Security.URLGuard do
 
   def validate(_url, _opts), do: {:error, :invalid_url}
 
+  @doc """
+  Só a normalização, **sem** checar porta, nome nem IP e sem DNS: a URL que `validate/2`
+  devolveria se o endereço fosse aceito. Serve para comparar URLs (idempotência do
+  `POST /api/audits`); nunca para liberar uma URL para o scanner.
+  """
+  @spec normalize(String.t()) :: {:ok, String.t()} | {:error, :invalid_url | :unsupported_scheme}
+  def normalize(url) when is_binary(url) do
+    with {:ok, uri} <- parse(url),
+         :ok <- check_scheme(uri),
+         {:ok, host} <- normalize_host(uri.host) do
+      {:ok, serialize(uri, host)}
+    end
+  end
+
+  def normalize(_url), do: {:error, :invalid_url}
+
   defp parse(url) do
     url = String.trim(url)
 
@@ -121,13 +137,16 @@ defmodule Rampa.Security.URLGuard do
     end
   end
 
-  # Por rótulo, para um rótulo ASCII com `_` (aceito pelo navegador e recusado pelo IDNA2008)
-  # não derrubar o nome inteiro. Os separadores de rótulo do UTS #46 (`。`, `．`, `｡`) viram
-  # ponto.
+  # Host fora do ASCII: os separadores de rótulo do UTS #46 (`。`, `．`, `｡`) viram ponto,
+  # mesmo quando os rótulos são ASCII (`exemplo。com.br`), como no WHATWG. A conversão é por
+  # rótulo, para um rótulo ASCII com `_` (aceito pelo navegador e recusado pelo IDNA2008)
+  # não derrubar o nome inteiro. Host ASCII só passa pelo IDNA se tem rótulo `xn--`.
   defp idna_host(host) do
     labels = String.split(host, @label_separators)
 
-    if Enum.any?(labels, &idna_label?/1), do: encode_labels(labels), else: {:ok, host}
+    if not ascii?(host) or Enum.any?(labels, &idna_label?/1),
+      do: encode_labels(labels),
+      else: {:ok, host}
   end
 
   defp encode_labels(labels) do

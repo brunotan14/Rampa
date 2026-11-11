@@ -25,14 +25,7 @@ defmodule RampaWeb.ErrorJSON do
     |> error()
   end
 
-  # JSON malformado no corpo (`Plug.Parsers`).
+  # JSON malformado no corpo (`Plug.Parsers`); o resto sai de `Rampa.ErrorCodes`.
   defp status_code(400, %Plug.Parsers.ParseError{}), do: :invalid_body
-  defp status_code(400, _reason), do: :bad_request
-  defp status_code(404, _reason), do: :not_found
-  defp status_code(405, _reason), do: :method_not_allowed
-  defp status_code(406, _reason), do: :not_acceptable
-  defp status_code(413, _reason), do: :payload_too_large
-  defp status_code(415, _reason), do: :unsupported_media_type
-  defp status_code(status, _reason) when status in 400..499, do: :bad_request
-  defp status_code(_status, _reason), do: :internal_error
+  defp status_code(status, _reason), do: Rampa.ErrorCodes.http_code(status)
 end

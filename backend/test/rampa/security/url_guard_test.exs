@@ -148,6 +148,13 @@ defmodule Rampa.Security.URLGuardTest do
       assert {:error, :unsupported_scheme} = validate("javascript:alert('ação')")
     end
 
+    test "separador de rótulo ideográfico em nome ASCII vira ponto, como no WHATWG" do
+      assert {:ok, "https://exemplo.com.br/"} = validate("https://exemplo。com.br/")
+      assert {:ok, "https://exemplo.com.br/"} = validate("https://exemplo．com｡br/")
+      assert {:ok, "https://exemplo.com/"} = validate("https://exemplo.com。/")
+      assert {:error, :blocked_address} = validate("http://localhost。/")
+    end
+
     test "IDN que vira nome interno ou IP proibido é bloqueado sem consultar o DNS" do
       assert {:error, :blocked_address} = validate("http://ｌｏｃａｌｈｏｓｔ/")
       assert {:error, :blocked_address} = validate("http://①②⑦.0.0.1/")

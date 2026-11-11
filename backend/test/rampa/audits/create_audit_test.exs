@@ -134,6 +134,23 @@ defmodule Rampa.Audits.CreateAuditTest do
   end
 
   describe "idempotência" do
+    test "mesma chave com outra URL normalizada é recusada, sem criar nada",
+         %{requester: requester} do
+      stub_public_dns()
+      opts = [idempotency_key: "k-url"]
+
+      assert {:ok, first} = create("https://exemplo.com/a", requester, opts)
+
+      # Mesma URL depois de normalizar: é a mesma requisição.
+      assert {:ok, same} = create("HTTPS://Exemplo.com/a#topo", requester, opts)
+      assert same.id == first.id
+
+      assert {:error, :idempotency_key_reused} =
+               create("https://exemplo.com/b", requester, opts)
+
+      assert count_audits() == 1
+    end
+
     test "a mesma chave do mesmo solicitante devolve a mesma auditoria, sem DNS nem limite",
          %{requester: requester} do
       expect(ResolverMock, :resolve, 1, fn _host -> {:ok, [@public_ip]} end)
@@ -450,6 +467,25 @@ defmodule Rampa.Audits.CreateAuditTest do
 
       assert {:ok, %{data: data}} = Audits.list_findings(page.audit_id, %{"limit" => "100"})
       assert Enum.all?(data, &(&1.audit_id == page.audit_id))
+    end
+
+    test "achado gravado no mesmo segundo, com id menor, aparece na página seguinte" do
+      page = page_fixture(%{status: :done})
+      [small_id, big_id] = Enum.sort([Ecto.UUID.generate(), Ecto.UUID.generate()])
+
+      finding_fixture(page, %{id: big_id, inserted_at: ~U[2026-11-10 12:00:00.100000Z]})
+
+      assert {:ok, %{data: [%{id: ^big_id}], next_cursor: nil}} =
+               Audits.list_findings(page.audit_id, %{"limit" => "1"})
+
+      # Página cheia: pede de novo com limite 1 para ter cursor.
+      finding_fixture(page, %{id: small_id, inserted_at: ~U[2026-11-10 12:00:00.200000Z]})
+
+      assert {:ok, %{data: [%{id: ^big_id}], next_cursor: cursor}} =
+               Audits.list_findings(page.audit_id, %{"limit" => "1"})
+
+      assert {:ok, %{data: [%{id: ^small_id}], next_cursor: nil}} =
+               Audits.list_findings(page.audit_id, %{"limit" => "1", "cursor" => cursor})
     end
 
     test "auditoria inexistente" do

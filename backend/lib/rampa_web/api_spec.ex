@@ -13,17 +13,22 @@ defmodule RampaWeb.ApiSpec do
   (`{ "error": { "code", "message" } }` em português, 400 para corpo sem `url`, 422 para
   `page_limit`) não cabem no erro padrão do `OpenApiSpex.Plug.CastAndValidate`. O teste de
   contrato (`test/rampa_web/api_spec_test.exs`) confere as respostas reais contra a spec.
+
+  O contrato fica versionado em `shared/openapi.json` (`make openapi` regenera; o CI falha
+  se o arquivo estiver desatualizado).
   """
 
   @behaviour OpenApiSpex.OpenApi
 
   alias OpenApiSpex.{Info, OpenApi, Paths, Server}
-  alias RampaWeb.{Endpoint, Router}
+  alias RampaWeb.Router
 
   @impl OpenApiSpex.OpenApi
   def spec do
     %OpenApi{
-      servers: [Server.from_endpoint(Endpoint)],
+      # Relativo: a mesma origem do app (PRD §7). Fixo para `shared/openapi.json` não mudar
+      # conforme o ambiente que gerou o arquivo.
+      servers: [%Server{url: "/"}],
       info: %Info{
         title: "Rampa",
         version: to_string(Application.spec(:rampa, :vsn)),

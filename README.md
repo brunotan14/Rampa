@@ -39,6 +39,7 @@ Documentação da API: a especificação OpenAPI fica em `http://localhost:4000/
 make test    # unitários: ExUnit (backend), Vitest (frontend e scanner)
 make e2e     # Playwright + axe
 make lint    # formatação, lint e tipos
+make openapi # regenera o contrato da API em shared/openapi.json (o CI confere se está atualizado)
 ```
 
 ## Licença

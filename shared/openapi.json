@@ -1,0 +1,963 @@
+{
+  "components": {
+    "responses": {},
+    "schemas": {
+      "AuditError": {
+        "additionalProperties": false,
+        "description": "Por que a auditoria falhou: o erro da última página que falhou, com a mensagem pronta. `null` enquanto não houver falha.",
+        "nullable": true,
+        "properties": {
+          "code": {
+            "enum": [
+              "invalid_url",
+              "unsupported_scheme",
+              "blocked_address",
+              "unresolvable",
+              "dns_error",
+              "resource_limit",
+              "timeout",
+              "http_error",
+              "navigation_failed",
+              "analysis_failed",
+              "invalid_request",
+              "unavailable",
+              "invalid_scan_result",
+              "internal_error",
+              "stale",
+              "scan_failed"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AuditError",
+        "type": "object"
+      },
+      "AuditNotFound": {
+        "additionalProperties": false,
+        "description": "Auditoria inexistente ou id que não é UUID (mesma resposta nos dois casos).",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "audit_not_found"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AuditNotFound",
+        "type": "object"
+      },
+      "AuditSummary": {
+        "additionalProperties": false,
+        "description": "Resumo da auditoria (mínimo do M1).",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/AuditError"
+          },
+          "finished_at": {
+            "description": "Fim da auditoria (UTC).",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "description": "Criação (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "needs_review_count": {
+            "description": "Achados que pedem confirmação manual (IA, heurística, incompletos).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "page_limit": {
+            "maximum": 25,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pages_failed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pages_found": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pages_scanned": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_url": {
+            "description": "URL inicial, já normalizada.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "Início da varredura (UTC).",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "description": "Andamento da auditoria.",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "totals_by_severity": {
+            "$ref": "#/components/schemas/SeverityTotals"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "start_url",
+          "page_limit",
+          "pages_found",
+          "pages_scanned",
+          "pages_failed",
+          "totals_by_severity",
+          "needs_review_count",
+          "error",
+          "started_at",
+          "finished_at",
+          "inserted_at"
+        ],
+        "title": "AuditSummary",
+        "type": "object"
+      },
+      "CreateAuditRefused": {
+        "additionalProperties": false,
+        "description": "Pedido recusado. `unsupported_scheme`: só http e https. `invalid_url`: endereço inválido, com credenciais ou acima de 2.048 caracteres. `blocked_address`: rede interna, nome interno ou porta fora de 80/443 (\"Este endereço não pode ser auditado\"). `unresolvable`: o domínio não existe. `invalid_page_limit`: fora de 1 a 25. `invalid_idempotency_key`: cabeçalho fora do formato ou repetido. `idempotency_key_reused`: a chave já foi usada por este IP, nas últimas 24 h, para outra URL (comparada depois de normalizada).",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "unsupported_scheme",
+                  "invalid_url",
+                  "blocked_address",
+                  "unresolvable",
+                  "invalid_page_limit",
+                  "invalid_idempotency_key",
+                  "idempotency_key_reused"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "CreateAuditRefused",
+        "type": "object"
+      },
+      "CreateAuditRequest": {
+        "description": "Pedido de auditoria (RF-RA001).",
+        "example": {
+          "page_limit": 1,
+          "url": "https://exemplo.com/"
+        },
+        "properties": {
+          "page_limit": {
+            "description": "Limite de páginas. Conferido (1 a 25), mas no M1 a auditoria tem sempre uma página; o M5 passa a usar o valor pedido.",
+            "example": 1,
+            "maximum": 25,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "url": {
+            "description": "Endereço a auditar. Só http e https; sem esquema, assume https://. Nomes internacionalizados viram punycode. Recusa credenciais, redes internas e portas diferentes de 80 e 443.",
+            "example": "exemplo.com",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "CreateAuditRequest",
+        "type": "object"
+      },
+      "CreateAuditResponse": {
+        "additionalProperties": false,
+        "description": "Auditoria aceita; a varredura roda em segundo plano.",
+        "example": {
+          "id": "3f1c2b8e-6a0d-4a7e-9d6e-1b2c3d4e5f60"
+        },
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "CreateAuditResponse",
+        "type": "object"
+      },
+      "DnsError": {
+        "additionalProperties": false,
+        "description": "Não foi possível verificar o endereço agora (falha passageira do DNS).",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "dns_error"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "DnsError",
+        "type": "object"
+      },
+      "Finding": {
+        "additionalProperties": false,
+        "description": "Um problema encontrado numa página.",
+        "properties": {
+          "confidence": {
+            "description": "Confiança da IA ou da heurística; `null` para o axe.",
+            "maximum": 1,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "html_snippet": {
+            "description": "Trecho do HTML do elemento, até 2 KB.",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "needs_review": {
+            "description": "Verdadeiro para sugestões que pedem confirmação manual.",
+            "type": "boolean"
+          },
+          "page_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_id": {
+            "example": "image-alt",
+            "type": "string"
+          },
+          "selector": {
+            "nullable": true,
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "serious",
+              "moderate",
+              "minor"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "axe",
+              "ai",
+              "heuristic"
+            ],
+            "type": "string"
+          },
+          "wcag_criteria": {
+            "example": [
+              "1.1.1"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "page_id",
+          "source",
+          "rule_id",
+          "wcag_criteria",
+          "severity",
+          "needs_review",
+          "confidence",
+          "selector",
+          "html_snippet",
+          "message"
+        ],
+        "title": "Finding",
+        "type": "object"
+      },
+      "FindingsPage": {
+        "additionalProperties": false,
+        "description": "Uma página de achados.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Cursor opaco da próxima página (parâmetro `cursor`); `null` na última.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "title": "FindingsPage",
+        "type": "object"
+      },
+      "FindingsQueryError": {
+        "additionalProperties": false,
+        "description": "`invalid_filter`: `severity`, `source` ou `needs_review` fora dos valores aceitos. `invalid_limit`: `limit` fora de 1 a 100. `invalid_cursor`: cursor inválido.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "invalid_filter",
+                  "invalid_limit",
+                  "invalid_cursor"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "FindingsQueryError",
+        "type": "object"
+      },
+      "Health": {
+        "additionalProperties": false,
+        "description": "Saúde do app, do banco e do scanner.",
+        "properties": {
+          "checks": {
+            "additionalProperties": false,
+            "properties": {
+              "app": {
+                "enum": [
+                  "ok",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "database": {
+                "enum": [
+                  "ok",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "scanner": {
+                "enum": [
+                  "ok",
+                  "error"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "app",
+              "database",
+              "scanner"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "Health",
+        "type": "object"
+      },
+      "IdempotencyConflictError": {
+        "additionalProperties": false,
+        "description": "Corrida rara entre duas requisições com a mesma `Idempotency-Key`; repita o pedido.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "idempotency_conflict"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "IdempotencyConflictError",
+        "type": "object"
+      },
+      "InternalError": {
+        "additionalProperties": false,
+        "description": "Erro inesperado no servidor.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "internal_error"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "InternalError",
+        "type": "object"
+      },
+      "InvalidBodyError": {
+        "additionalProperties": false,
+        "description": "Corpo malformado (JSON inválido) ou sem `url` em texto.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "invalid_body"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "InvalidBodyError",
+        "type": "object"
+      },
+      "RateLimitError": {
+        "additionalProperties": false,
+        "description": "`rate_limited`: limite de auditorias por hora deste IP; a mensagem traz o horário (São Paulo, HH:MM). `daily_limit_reached`: acabou o limite do dia; vale de novo à meia-noite de São Paulo.",
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável do erro, para o cliente decidir o que fazer.",
+                "enum": [
+                  "rate_limited",
+                  "daily_limit_reached"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "description": "Mensagem em português do Brasil, pronta para exibir.",
+                "type": "string"
+              },
+              "retry_after": {
+                "description": "A partir de quando dá para tentar de novo (ISO 8601, UTC).",
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retry_after"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "RateLimitError",
+        "type": "object"
+      },
+      "SeverityTotals": {
+        "additionalProperties": false,
+        "description": "Achados confirmados (`needs_review = false`) por severidade, com os nomes do axe.",
+        "properties": {
+          "critical": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "moderate": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "serious": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "critical",
+          "serious",
+          "moderate",
+          "minor"
+        ],
+        "title": "SeverityTotals",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "API do Rampa, auditor de acessibilidade web. Todas as mensagens de erro vêm em português do Brasil, no formato `{ \"error\": { \"code\", \"message\" } }`. A pontuação e os achados são indicadores: a verificação automática não substitui a avaliação com pessoas e tecnologias assistivas.",
+    "title": "Rampa",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/audits": {
+      "post": {
+        "callbacks": {},
+        "description": "Valida a URL (RF-RA001) e a proteção contra SSRF (RF-RA002), confere os limites de taxa (por IP na última hora e o teto do dia) e cria a auditoria `queued` com a varredura da primeira página em segundo plano. No M1 a auditoria tem uma página.",
+        "operationId": "createAudit",
+        "parameters": [
+          {
+            "description": "Chave opcional, de 1 a 128 caracteres ASCII visíveis. Repetir a mesma chave do mesmo IP em até 24 h devolve 202 com o mesmo `id`, sem criar outra auditoria nem contar no limite.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[!-~]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAuditRequest"
+              }
+            }
+          },
+          "description": "Endereço a auditar",
+          "required": false
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAuditResponse"
+                }
+              }
+            },
+            "description": "Auditoria aceita"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidBodyError"
+                }
+              }
+            },
+            "description": "Corpo malformado ou sem `url`"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdempotencyConflictError"
+                }
+              }
+            },
+            "description": "Mesma chave em uso por outra requisição"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAuditRefused"
+                }
+              }
+            },
+            "description": "URL, `page_limit` ou chave recusados"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitError"
+                }
+              }
+            },
+            "description": "Limite de taxa ou teto diário atingido",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder tentar de novo.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "style": "simple"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalError"
+                }
+              }
+            },
+            "description": "Erro inesperado"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsError"
+                }
+              }
+            },
+            "description": "Não foi possível verificar o endereço agora"
+          }
+        },
+        "summary": "Cria uma auditoria",
+        "tags": [
+          "auditorias"
+        ]
+      }
+    },
+    "/api/audits/{audit_id}/findings": {
+      "get": {
+        "callbacks": {},
+        "description": "Achados na ordem em que foram gravados, em páginas. Para a próxima página, envie o `next_cursor` recebido no parâmetro `cursor`; `null` indica a última. Achado com `needs_review = true` é sugestão a confirmar manualmente.",
+        "operationId": "listFindings",
+        "parameters": [
+          {
+            "description": "Id da auditoria.",
+            "in": "path",
+            "name": "audit_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filtra pela severidade (nomes do axe).",
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "enum": [
+                "critical",
+                "serious",
+                "moderate",
+                "minor"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filtra pela origem do achado.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "axe",
+                "ai",
+                "heuristic"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filtra pelos achados que pedem (ou não) revisão manual.",
+            "in": "query",
+            "name": "needs_review",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Achados por página, de 1 a 100 (padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor opaco devolvido em `next_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingsPage"
+                }
+              }
+            },
+            "description": "Uma página de achados"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditNotFound"
+                }
+              }
+            },
+            "description": "Auditoria não encontrada"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingsQueryError"
+                }
+              }
+            },
+            "description": "Filtro, limite ou cursor inválido"
+          }
+        },
+        "summary": "Achados de uma auditoria",
+        "tags": [
+          "auditorias"
+        ]
+      }
+    },
+    "/api/audits/{id}": {
+      "get": {
+        "callbacks": {},
+        "description": "Status, contadores, totais por severidade (só achados confirmados) e o erro, se a auditoria falhou.",
+        "operationId": "getAudit",
+        "parameters": [
+          {
+            "description": "Id da auditoria.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditSummary"
+                }
+              }
+            },
+            "description": "Resumo"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditNotFound"
+                }
+              }
+            },
+            "description": "Auditoria não encontrada"
+          }
+        },
+        "summary": "Resumo de uma auditoria",
+        "tags": [
+          "auditorias"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "callbacks": {},
+        "description": "Confere o app, o banco e o scanner.",
+        "operationId": "health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Tudo de pé"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Algum componente fora do ar"
+          }
+        },
+        "summary": "Saúde do serviço",
+        "tags": [
+          "saúde"
+        ]
+      }
+    }
+  },
+  "security": [],
+  "servers": [
+    {
+      "url": "/",
+      "variables": {}
+    }
+  ],
+  "tags": []
+}
