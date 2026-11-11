@@ -22,7 +22,7 @@ export type AxeSelector = string;
  */
 export type AxeTarget = (AxeSelector | AxeSelector[])[];
 /**
- * Códigos de erro do scanner, com o status HTTP de cada um. `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url` (422): URL com credenciais ou host inválido. `resource_limit` (422): a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total. `http_error` (502): o documento respondeu com status >= 400 (`detail`: "HTTP 404"); o axe não roda. `navigation_failed` (502): a página não abriu. `analysis_failed` (502): a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).
+ * Códigos de erro do scanner. O status HTTP de cada um fica em `x-http-status` (palavra-chave própria do Rampa, sem efeito na validação). `blocked_address`: a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url`: URL com credenciais ou host inválido. `resource_limit`: a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout`: a página não carregou em 30 s ou a análise passou do limite total. `http_error`: o documento respondeu com status >= 400 (`detail`: "HTTP 404"); o axe não roda. `navigation_failed`: a página não abriu. `analysis_failed`: a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).
  */
 export type ScanErrorCode =
   | "blocked_address"
@@ -112,9 +112,13 @@ export interface AxeNode {
    */
   failureSummary: string | null;
   impact: AxeImpact;
+  /**
+   * Presente (e `true`) quando o `target` passou dos limites e foi cortado: os seletores deixam de apontar com segurança para o elemento e não devem ser usados como seletor CSS. Ausente quando o `target` está inteiro.
+   */
+  target_truncated?: true;
 }
 /**
- * Resposta de erro (HTTP 422, 502 ou 504, conforme o código).
+ * Resposta de erro, com o status HTTP dado pelo código (`x-http-status` em `ScanErrorCode`).
  */
 export interface ScanError {
   contract_version: ContractVersion;
@@ -153,6 +157,17 @@ export const SCAN_ERROR_CODES = [
   "navigation_failed",
   "analysis_failed"
 ] as const satisfies readonly ScanErrorCode[];
+
+// Status HTTP de cada código de erro (`x-http-status` no schema).
+export const SCAN_ERROR_STATUS = {
+  "blocked_address": 422,
+  "invalid_url": 422,
+  "resource_limit": 422,
+  "timeout": 504,
+  "http_error": 502,
+  "navigation_failed": 502,
+  "analysis_failed": 502
+} as const satisfies Record<ScanErrorCode, number>;
 
 // Limites do contrato que o scanner cumpre cortando antes de responder.
 export const CONTRACT_LIMITS = {

@@ -275,5 +275,5 @@ msgstr ""
 
 #: lib/rampa_web/error_messages.ex:207
 #, elixir-autogen, elixir-format
-msgid "O serviço de análise estava sendo atualizado e não concluiu esta página. Tente uma nova auditoria em alguns minutos."
+msgid "Não foi possível concluir a análise por uma incompatibilidade interna do Rampa. O problema ficou registrado para a equipe corrigir."
 msgstr ""

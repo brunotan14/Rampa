@@ -540,15 +540,21 @@ defmodule Rampa.Audits do
   (`Rampa.Scanner.Contract`, conferido em `Rampa.Scanner.HTTP`). Ele é saneado antes
   (`Rampa.Audits.PageData`): sem NUL e com o título cortado em #{@title_max_bytes} bytes.
   Como defesa para quem chama sem passar pelo cliente, resultado sem o campo `axe` devolve
-  `{:error, :invalid_scan_result}`; achado que não passa no changeset devolve
-  `{:error, changeset}` e nada é gravado.
+  `{:error, :invalid_scan_result}`. Achado que não passa no changeset (recusa causada pelos
+  dados do scanner) devolve `{:error, {:invalid_finding, changeset}}` e nada é gravado. Os
+  outros erros (trava, tarefa ou página ausente, changeset da tarefa, da página ou da
+  auditoria) voltam como estão: são do ciclo de vida ou do banco, não do resultado.
 
   Os achados `source: :axe` da página são apagados e regravados na mesma transação: varrer a
   página de novo não duplica nada. Achados de outras fontes ficam.
   """
   @spec record_scan_result(Page.t(), map()) ::
           {:ok, Page.t()}
-          | {:error, transition_error() | :invalid_scan_result | Ecto.Changeset.t()}
+          | {:error,
+             transition_error()
+             | :invalid_scan_result
+             | {:invalid_finding, Ecto.Changeset.t()}
+             | Ecto.Changeset.t()}
   def record_scan_result(%Page{id: page_id}, result) do
     case PageData.sanitize(result) do
       %{"axe" => %{} = axe} = result -> Repo.transact(fn -> save_scan(page_id, result, axe) end)
@@ -819,7 +825,7 @@ defmodule Rampa.Audits do
 
       case Ecto.Changeset.apply_action(Finding.changeset(%Finding{}, attrs), :insert) do
         {:ok, finding} -> {:cont, {:ok, [row(finding, now) | rows]}}
-        {:error, changeset} -> {:halt, {:error, changeset}}
+        {:error, changeset} -> {:halt, {:error, {:invalid_finding, changeset}}}
       end
     end)
     |> case do

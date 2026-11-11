@@ -25,24 +25,36 @@ export function truncate(text: string, max: number): string {
   return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 }
 
-const selector = (value: string) => truncate(value, LIMITS.selector);
-
-function limitTarget(target: AxeTarget): AxeTarget {
-  return target
-    .slice(0, LIMITS.targetLevels)
-    .map((level) => (Array.isArray(level) ? level.slice(0, LIMITS.shadowLevels).map(selector) : selector(level)));
+// Corta níveis de iframe, de shadow DOM e seletores longos. Cortado, o `target` deixa de
+// identificar o elemento com segurança: o nó ganha `target_truncated` e quem consome (o
+// backend) não o usa como seletor CSS.
+function limitTarget(target: AxeTarget): { target: AxeTarget; truncated: boolean } {
+  let truncated = target.length > LIMITS.targetLevels;
+  const selector = (value: string) => {
+    if (value.length > LIMITS.selector) truncated = true;
+    return truncate(value, LIMITS.selector);
+  };
+  const limited = target.slice(0, LIMITS.targetLevels).map((level) => {
+    if (!Array.isArray(level)) return selector(level);
+    if (level.length > LIMITS.shadowLevels) truncated = true;
+    return level.slice(0, LIMITS.shadowLevels).map(selector);
+  });
+  return { target: limited, truncated };
 }
 
 function limitNode(node: AxeNode): AxeNode {
+  const { target, truncated } = limitTarget(node.target);
   return {
-    target: limitTarget(node.target),
+    target,
     html: truncate(node.html, LIMITS.html),
     failureSummary: node.failureSummary === null ? null : truncate(node.failureSummary, LIMITS.failureSummary),
     impact: node.impact,
+    ...(truncated || node.target_truncated ? { target_truncated: true as const } : {}),
   };
 }
 
-// Só os primeiros nós; `nodes_total` guarda quantos a regra tinha.
+// O corte de nós por regra (e o `nodes_total`) é feito na coleta (`axe.ts`, `slimRule`);
+// aqui ele é repetido só por defesa, para um coletor que não corte.
 function limitRule(rule: AxeRule): AxeRule {
   return {
     id: truncate(rule.id, LIMITS.ruleId),
@@ -52,7 +64,7 @@ function limitRule(rule: AxeRule): AxeRule {
     help: truncate(rule.help, LIMITS.ruleText),
     helpUrl: truncate(rule.helpUrl, LIMITS.helpUrl),
     nodes: rule.nodes.slice(0, LIMITS.nodes).map(limitNode),
-    nodes_total: Math.max(rule.nodes_total, rule.nodes.length),
+    nodes_total: rule.nodes_total,
   };
 }
 

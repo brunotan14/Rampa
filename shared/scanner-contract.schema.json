@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ScanReply",
   "description": "Contrato entre o backend (Phoenix) e o scanner (PRD §7), fonte única da verdade. O scanner gera os tipos TypeScript a partir dele (`make scanner-contract`, `scanner/src/contract.gen.ts`) e os testes validam as respostas reais de POST /scan; o backend o embute na compilação (`Rampa.Scanner.Contract`) e valida toda resposta antes de gravar. A raiz descreve o corpo de uma resposta de POST /scan com código do contrato: `ScanResponse` (HTTP 200) ou `ScanError`. O erro de validação do pedido (HTTP 400 do Fastify) fica fora do contrato.",
-  "$comment": "Versão do contrato (`ContractVersion`): sobe só em mudança incompatível (campo obrigatório novo, campo removido ou renomeado, tipo trocado, limite reduzido, valor novo num `enum` de resposta, significado alterado). Campo opcional novo na resposta, limite ampliado que o backend aceita ou texto de `description` não sobem a versão. Ao subir: o scanner e o backend mudam juntos no mesmo PR, e durante o deploy o backend trata a versão diferente como erro passageiro (`contract_mismatch`).",
+  "$comment": "Versão do contrato (`ContractVersion`): sobe só em mudança incompatível (campo obrigatório novo, campo removido ou renomeado, tipo trocado, limite reduzido, valor novo num `enum` de resposta, significado alterado). Campo opcional novo na resposta, limite ampliado ou texto de `description` não sobem a versão; como os objetos da resposta têm `additionalProperties: false`, o backend que aceita o campo novo precisa estar no ar antes (ou junto) do scanner que o envia. Ao subir: o scanner e o backend mudam juntos no mesmo PR, e durante o deploy o backend trata a versão diferente como erro passageiro (`contract_mismatch`).",
   "oneOf": [{ "$ref": "#/definitions/ScanResponse" }, { "$ref": "#/definitions/ScanError" }],
   "definitions": {
     "ContractVersion": {
@@ -139,7 +139,12 @@
           "type": ["string", "null"],
           "maxLength": 2048
         },
-        "impact": { "$ref": "#/definitions/AxeImpact" }
+        "impact": { "$ref": "#/definitions/AxeImpact" },
+        "target_truncated": {
+          "description": "Presente (e `true`) quando o `target` passou dos limites e foi cortado: os seletores deixam de apontar com segurança para o elemento e não devem ser usados como seletor CSS. Ausente quando o `target` está inteiro.",
+          "type": "boolean",
+          "const": true
+        }
       }
     },
     "AxeTarget": {
@@ -173,7 +178,7 @@
     },
     "ScanError": {
       "title": "ScanError",
-      "description": "Resposta de erro (HTTP 422, 502 ou 504, conforme o código).",
+      "description": "Resposta de erro, com o status HTTP dado pelo código (`x-http-status` em `ScanErrorCode`).",
       "type": "object",
       "required": ["contract_version", "error", "detail"],
       "additionalProperties": false,
@@ -189,7 +194,7 @@
     },
     "ScanErrorCode": {
       "title": "ScanErrorCode",
-      "description": "Códigos de erro do scanner, com o status HTTP de cada um. `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url` (422): URL com credenciais ou host inválido. `resource_limit` (422): a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total. `http_error` (502): o documento respondeu com status >= 400 (`detail`: \"HTTP 404\"); o axe não roda. `navigation_failed` (502): a página não abriu. `analysis_failed` (502): a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).",
+      "description": "Códigos de erro do scanner. O status HTTP de cada um fica em `x-http-status` (palavra-chave própria do Rampa, sem efeito na validação). `blocked_address`: a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url`: URL com credenciais ou host inválido. `resource_limit`: a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout`: a página não carregou em 30 s ou a análise passou do limite total. `http_error`: o documento respondeu com status >= 400 (`detail`: \"HTTP 404\"); o axe não roda. `navigation_failed`: a página não abriu. `analysis_failed`: a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).",
       "type": "string",
       "enum": [
         "blocked_address",
@@ -199,7 +204,16 @@
         "http_error",
         "navigation_failed",
         "analysis_failed"
-      ]
+      ],
+      "x-http-status": {
+        "blocked_address": 422,
+        "invalid_url": 422,
+        "resource_limit": 422,
+        "timeout": 504,
+        "http_error": 502,
+        "navigation_failed": 502,
+        "analysis_failed": 502
+      }
     }
   }
 }

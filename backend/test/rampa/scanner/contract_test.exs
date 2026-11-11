@@ -35,29 +35,30 @@ defmodule Rampa.Scanner.ContractTest do
     for file <- fixtures do
       test "#{file} cumpre o contrato" do
         body = scanner_response(Path.rootname(unquote(file)))
-        assert Contract.check(:response, body) == :ok
+        assert Contract.check_response(body) == :ok
       end
     end
   end
 
-  describe "check(:response, body)" do
+  describe "check_response/1" do
     for field <- get_in(@schema, ["definitions", "ScanResponse", "required"]),
         field != "contract_version" do
       test "sem #{field} é invalid_scan_result" do
         body = Map.delete(scanner_response("img-sem-alt"), unquote(field))
 
         assert {:error, %{code: :invalid_scan_result, detail: detail}} =
-                 Contract.check(:response, body)
+                 Contract.check_response(body)
 
         assert detail =~ "fora do contrato"
         assert detail =~ unquote(field)
       end
     end
 
+    @tag :capture_log
     test "sem contract_version é contract_mismatch" do
       body = Map.delete(scanner_response("limpa"), "contract_version")
 
-      assert Contract.check(:response, body) ==
+      assert Contract.check_response(body) ==
                {:error,
                 %{
                   code: :contract_mismatch,
@@ -65,31 +66,32 @@ defmodule Rampa.Scanner.ContractTest do
                 }}
     end
 
+    @tag :capture_log
     test "outra versão é contract_mismatch, mesmo com o resto válido" do
       body = Map.put(scanner_response("limpa"), "contract_version", "2")
-      assert {:error, %{code: :contract_mismatch}} = Contract.check(:response, body)
+      assert {:error, %{code: :contract_mismatch}} = Contract.check_response(body)
     end
 
     test "campo desconhecido é recusado" do
       body = Map.put(scanner_response("limpa"), "extra", 1)
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, body)
+      assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(body)
     end
 
     test "status de erro numa resposta de sucesso é recusado" do
       body = Map.put(scanner_response("limpa"), "http_status", 404)
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, body)
+      assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(body)
 
       assert :ok =
-               Contract.check(:response, Map.put(scanner_response("limpa"), "http_status", nil))
+               Contract.check_response(Map.put(scanner_response("limpa"), "http_status", nil))
     end
 
     test "título acima do limite é recusado" do
       max = get_in(@schema, ["definitions", "ScanResponse", "properties", "title", "maxLength"])
       ok = Map.put(scanner_response("limpa"), "title", String.duplicate("é", max))
-      assert :ok = Contract.check(:response, ok)
+      assert :ok = Contract.check_response(ok)
 
       long = Map.put(ok, "title", String.duplicate("é", max + 1))
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, long)
+      assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(long)
     end
 
     test "mais nós por regra que o limite é recusado" do
@@ -101,7 +103,7 @@ defmodule Rampa.Scanner.ContractTest do
         end)
 
       assert {:error, %{code: :invalid_scan_result, detail: detail}} =
-               Contract.check(:response, body)
+               Contract.check_response(body)
 
       assert detail =~ "#/axe/violations/0/nodes"
     end
@@ -114,7 +116,7 @@ defmodule Rampa.Scanner.ContractTest do
           [%{rule | "nodes" => [%{hd(rule["nodes"]) | "html" => String.duplicate("a", max + 1)}]}]
         end)
 
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, body)
+      assert {:error, %{code: :invalid_scan_result}} = Contract.check_response(body)
     end
 
     test "o detalhe lista no máximo três erros" do
@@ -127,33 +129,42 @@ defmodule Rampa.Scanner.ContractTest do
         })
 
       assert {:error, %{code: :invalid_scan_result, detail: detail}} =
-               Contract.check(:response, body)
+               Contract.check_response(body)
 
       assert detail =~ "(e mais "
     end
 
-    test "corpo que não é objeto é invalid_scan_result" do
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, "<html>")
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:response, [1])
+    test "corpo que não é objeto é unavailable" do
+      assert {:error, %{code: :unavailable}} = Contract.check_response("<html>")
+      assert {:error, %{code: :unavailable}} = Contract.check_response([1])
     end
   end
 
-  describe "check(:error, body)" do
-    test "cada código do contrato é aceito" do
+  describe "scanner_error/2" do
+    test "cada código do contrato é aceito, com o status do schema" do
       for code <- Contract.error_codes() do
         body = %{"contract_version" => "1", "error" => Atom.to_string(code), "detail" => "x"}
-        assert Contract.check(:error, body) == :ok
+        assert Contract.scanner_error(422, body) == {:ok, %{code: code, detail: "x"}}
       end
+
+      assert Map.keys(Contract.error_statuses()) |> Enum.sort() ==
+               Enum.sort(Contract.error_codes())
+
+      assert Contract.error_statuses() ==
+               Map.new(definition("ScanErrorCode")["x-http-status"], fn {code, status} ->
+                 {String.to_existing_atom(code), status}
+               end)
     end
 
-    test "sem detail é invalid_scan_result" do
+    @tag :capture_log
+    test "código conhecido sem detail vira HTTP <status>" do
       body = %{"contract_version" => "1", "error" => "timeout"}
-      assert {:error, %{code: :invalid_scan_result}} = Contract.check(:error, body)
+      assert Contract.scanner_error(504, body) == {:ok, %{code: :timeout, detail: "HTTP 504"}}
     end
 
-    test "sem versão é contract_mismatch" do
-      body = %{"error" => "timeout", "detail" => "x"}
-      assert {:error, %{code: :contract_mismatch}} = Contract.check(:error, body)
+    test "sem código reconhecível e sem versão é :unknown" do
+      assert Contract.scanner_error(400, %{"error" => "Bad Request"}) == :unknown
+      assert Contract.scanner_error(500, "erro") == :unknown
     end
   end
 end

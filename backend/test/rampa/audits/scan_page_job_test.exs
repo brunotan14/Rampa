@@ -449,6 +449,76 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
   end
 
+  # Item do review: só a recusa causada pelos dados do scanner (achado inválido) é definitiva;
+  # os outros erros da gravação são do banco ou do ciclo de vida e ganham nova tentativa.
+  describe "outros erros da gravação" do
+    @tag :capture_log
+    test "erro da gravação que não vem dos achados é passageiro (internal_error)" do
+      page = page_fixture()
+      # `http_status` fora da faixa do changeset da página: a recusa é da página, não de um
+      # achado (o cliente real já recusaria; aqui o mock entrega direto à gravação).
+      expect_scan(page, {:ok, Map.put(scanner_response("limpa"), "http_status", 700)})
+
+      assert {:error, :internal_error} = perform(page, attempt: 1)
+
+      assert %Page{status: :scanning, error: nil} = reload(page)
+      assert %Audit{status: :running, pages_failed: 0} = audit_of(page)
+    end
+
+    @tag :capture_log
+    test "na última tentativa fecha a página com internal_error" do
+      page = page_fixture()
+      expect_scan(page, {:ok, Map.put(scanner_response("limpa"), "http_status", 700)})
+
+      assert {:cancel, :internal_error} = perform(page, attempt: 2)
+
+      assert %Page{status: :failed, error: "internal_error"} = reload(page)
+    end
+
+    @tag :capture_log
+    test "tarefa scan apagada durante a varredura cancela sem marcar falha" do
+      page = page_fixture()
+
+      expect(ClientMock, :scan, fn _url ->
+        Repo.delete_all(from t in PageTask, where: t.page_id == ^page.id)
+        {:ok, scanner_response("limpa")}
+      end)
+
+      assert {:cancel, :task_not_found} = perform(page, attempt: 1)
+      assert %Page{error: nil} = reload(page)
+    end
+  end
+
+  describe "nodes_total" do
+    test "regra com 30 nós (20 enviados) gera 20 achados e o total 30 fica no raw" do
+      page = page_fixture()
+
+      response =
+        update_in(scanner_response("img-sem-alt"), ["axe", "violations"], fn [rule] ->
+          [node] = rule["nodes"]
+          [%{rule | "nodes" => List.duplicate(node, 20), "nodes_total" => 30}]
+        end)
+
+      expect_scan(page, {:ok, response})
+      assert :ok = perform(page)
+
+      found = findings(page)
+      assert length(found) == 20
+      assert Enum.all?(found, &(&1.raw["nodes_total"] == 30))
+    end
+  end
+
+  describe "target cortado pelo scanner" do
+    test "nó com target_truncated grava selector nulo e mantém o trecho de HTML" do
+      page = page_fixture()
+      expect_scan(page, {:ok, with_node(&Map.put(&1, "target_truncated", true))})
+
+      assert :ok = perform(page)
+
+      assert [%Finding{selector: nil, html_snippet: "<img" <> _}] = findings(page)
+    end
+  end
+
   describe "exceções" do
     @tag :capture_log
     test "na primeira tentativa relança sem marcar falha" do

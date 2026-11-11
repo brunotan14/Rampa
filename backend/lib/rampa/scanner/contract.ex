@@ -15,9 +15,12 @@ defmodule Rampa.Scanner.Contract do
     * `version/0`: a versão do contrato que o backend fala (`ContractVersion`);
     * `error_codes/0`: os códigos de erro do scanner (`ScanErrorCode`), que alimentam
       `Rampa.ErrorCodes.scanner/0`;
-    * `check/2`: a validação de um corpo de resposta, usada por `Rampa.Scanner.HTTP` antes de
-      qualquer gravação.
+    * `error_statuses/0`: o status HTTP de cada código (`x-http-status`);
+    * `check_response/1` e `scanner_error/2`: a interpretação de um corpo de resposta,
+      usada por `Rampa.Scanner.HTTP` antes de qualquer gravação.
   """
+
+  require Logger
 
   @path Path.expand("../../../../shared/scanner-contract.schema.json", __DIR__)
   @external_resource @path
@@ -48,11 +51,29 @@ defmodule Rampa.Scanner.Contract do
     error: ExJsonSchema.Schema.get_fragment!(@root, "#/definitions/ScanError")
   }
 
+  # Status HTTP de cada código (`x-http-status`, palavra-chave própria do Rampa no schema).
+  @error_statuses Map.new(
+                    get_in(@schema, ["definitions", "ScanErrorCode", "x-http-status"]),
+                    fn {code, status} -> {String.to_atom(code), status} end
+                  )
+
+  @error_codes_by_name Map.new(@error_codes, &{Atom.to_string(&1), &1})
+
+  @detail_max_length get_in(@schema, [
+                       "definitions",
+                       "ScanError",
+                       "properties",
+                       "detail",
+                       "maxLength"
+                     ])
+
   # Quantos erros de validação entram no `detail` (o resto é contado).
   @max_reported_errors 3
 
-  @type kind :: :response | :error
-  @type failure :: %{code: :contract_mismatch | :invalid_scan_result, detail: String.t()}
+  @type failure :: %{
+          code: :unavailable | :contract_mismatch | :invalid_scan_result,
+          detail: String.t()
+        }
 
   @doc "Versão do contrato que o backend fala."
   @spec version() :: String.t()
@@ -62,45 +83,92 @@ defmodule Rampa.Scanner.Contract do
   @spec error_codes() :: [atom()]
   def error_codes, do: @error_codes
 
+  @doc "Status HTTP de cada código de erro do scanner (`x-http-status` do schema)."
+  @spec error_statuses() :: %{atom() => pos_integer()}
+  def error_statuses, do: @error_statuses
+
   @doc "Caminho do schema usado na compilação."
   @spec path() :: String.t()
   def path, do: @path
 
   @doc """
-  Confere um corpo de resposta do scanner: `:response` (HTTP 200) ou `:error` (corpo com um
-  código do contrato).
+  Confere o corpo de uma resposta de sucesso (HTTP 200):
 
-    * `contract_version` ausente ou diferente de `version/0` → `:contract_mismatch`. Durante
-      um deploy o scanner e o backend podem estar em versões diferentes por alguns instantes,
-      então é tratado como passageiro;
+    * corpo que não é JSON, ou JSON que não é objeto → `:unavailable` (passageiro): não é uma
+      resposta do scanner, e sim de algo no caminho;
+    * `contract_version` ausente ou diferente de `version/0` → `:contract_mismatch`
+      (passageiro, uma nova tentativa), com `Logger.error` mostrando as duas versões, para a
+      divergência duradoura aparecer no log;
     * mesma versão, mas fora do schema (campo obrigatório faltando, tipo errado, acima de um
-      limite) ou corpo que não é objeto → `:invalid_scan_result`. Um formato quebrado não se
-      resolve com nova tentativa.
+      limite) → `:invalid_scan_result` (definitivo: um formato quebrado não se resolve com
+      nova tentativa).
   """
-  @spec check(kind(), term()) :: :ok | {:error, failure()}
-  def check(kind, body) when kind in [:response, :error] do
-    cond do
-      not is_map(body) ->
-        invalid("corpo da resposta do scanner não é um objeto JSON")
+  @spec check_response(term()) :: :ok | {:error, failure()}
+  def check_response(body) when not is_map(body),
+    do: failure(:unavailable, "resposta 200 do scanner não é um objeto JSON")
 
-      body["contract_version"] != @version ->
-        {:error,
-         %{
-           code: :contract_mismatch,
-           detail:
-             "versão do contrato do scanner: recebida #{inspect(body["contract_version"])}, " <>
-               "esperada #{inspect(@version)}"
-         }}
-
-      true ->
-        validate(kind, body)
+  def check_response(%{"contract_version" => @version} = body) do
+    case validate(:response, body) do
+      :ok -> :ok
+      {:error, detail} -> failure(:invalid_scan_result, detail)
     end
+  end
+
+  def check_response(body), do: mismatch(body["contract_version"])
+
+  @doc """
+  Interpreta o corpo de uma resposta de erro (HTTP diferente de 200). O código vem primeiro:
+
+    * `"error"` com um código do contrato → `{:ok, %{code, detail}}` com o código real, mesmo
+      com a versão ausente ou diferente (só um aviso no log) e mesmo fora do schema: o
+      `detail` é cortado no limite do contrato, ou vira `"HTTP <status>"` se faltar;
+    * código desconhecido com `contract_version` de outra versão → `:contract_mismatch`;
+    * qualquer outra coisa → `:unknown` (o cliente decide pelo status HTTP).
+  """
+  @spec scanner_error(pos_integer(), term()) ::
+          {:ok, %{code: atom(), detail: String.t()}} | {:error, failure()} | :unknown
+  def scanner_error(status, %{"error" => name} = body)
+      when is_map_key(@error_codes_by_name, name) do
+    warn_divergent_version(body["contract_version"], name)
+
+    with {:error, detail} <- validate(:error, body) do
+      Logger.warning("erro do scanner fora do contrato (#{name}): #{detail}")
+    end
+
+    {:ok, %{code: Map.fetch!(@error_codes_by_name, name), detail: error_detail(body, status)}}
+  end
+
+  def scanner_error(_status, %{"contract_version" => version}) when version != @version,
+    do: mismatch(version)
+
+  def scanner_error(_status, _body), do: :unknown
+
+  defp error_detail(%{"detail" => detail}, _status) when is_binary(detail),
+    do: String.slice(detail, 0, @detail_max_length)
+
+  defp error_detail(_body, status), do: "HTTP #{status}"
+
+  defp warn_divergent_version(@version, _name), do: :ok
+
+  defp warn_divergent_version(version, name) do
+    Logger.warning(
+      "versão do contrato do scanner divergente num erro #{name}: recebida " <>
+        "#{inspect(version)}, esperada #{inspect(@version)}; o código foi respeitado"
+    )
+  end
+
+  defp mismatch(version) do
+    detail =
+      "versão do contrato do scanner: recebida #{inspect(version)}, esperada #{inspect(@version)}"
+
+    Logger.error(detail)
+    failure(:contract_mismatch, detail)
   end
 
   defp validate(kind, body) do
     case ExJsonSchema.Validator.validate_fragment(@root, Map.fetch!(@fragments, kind), body) do
       :ok -> :ok
-      {:error, errors} -> invalid("resposta do scanner fora do contrato: " <> describe(errors))
+      {:error, errors} -> {:error, "resposta do scanner fora do contrato: " <> describe(errors)}
     end
   end
 
@@ -112,5 +180,5 @@ defmodule Rampa.Scanner.Contract do
 
   defp describe_error({message, path}), do: "#{path}: #{message}"
 
-  defp invalid(detail), do: {:error, %{code: :invalid_scan_result, detail: detail}}
+  defp failure(code, detail), do: {:error, %{code: code, detail: detail}}
 end

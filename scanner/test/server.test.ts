@@ -300,6 +300,7 @@ describe("limites do contrato", () => {
       expect(first?.nodes[0]?.html).toHaveLength(CONTRACT_LIMITS.html);
       expect(first?.nodes[0]?.failureSummary).toHaveLength(CONTRACT_LIMITS.failureSummary);
       expect(first?.nodes[0]?.target).toEqual([huge.slice(0, CONTRACT_LIMITS.selector), Array(CONTRACT_LIMITS.shadowLevels).fill("#host")]);
+      expect(first?.nodes[0]?.target_truncated).toBe(true);
     } finally {
       await big.close();
     }

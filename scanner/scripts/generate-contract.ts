@@ -80,6 +80,17 @@ const replyTypes = await compile(structuredClone(schema) as JSONSchema, "ScanRep
 const requestTypes = await compile(structuredClone(at("/definitions/ScanRequest")) as JSONSchema, "ScanRequest", compileOptions);
 const types = `${replyTypes.trim()}\n\n${requestTypes.trim()}`;
 
+// Status HTTP de cada código de erro (`x-http-status`): um para cada código do `enum`.
+const errorCodes = at("/definitions/ScanErrorCode/enum");
+const errorStatus = at("/definitions/ScanErrorCode/x-http-status");
+if (!Array.isArray(errorCodes) || errorStatus === null || typeof errorStatus !== "object" || Array.isArray(errorStatus)) {
+  throw new Error("ScanErrorCode precisa de enum e x-http-status");
+}
+const statusKeys = Object.keys(errorStatus).sort();
+if (JSON.stringify(statusKeys) !== JSON.stringify([...errorCodes].map(String).sort())) {
+  throw new Error("x-http-status precisa ter exatamente os códigos do enum");
+}
+
 const json = (value: unknown) => JSON.stringify(value, null, 2);
 const limitValues = Object.fromEntries(Object.entries(limits).map(([name, pointer]) => [name, integerAt(pointer)]));
 
@@ -90,7 +101,10 @@ ${types.trim()}
 
 export const CONTRACT_VERSION = ${json(at("/definitions/ContractVersion/const"))} as const;
 
-export const SCAN_ERROR_CODES = ${json(at("/definitions/ScanErrorCode/enum"))} as const satisfies readonly ScanErrorCode[];
+export const SCAN_ERROR_CODES = ${json(errorCodes)} as const satisfies readonly ScanErrorCode[];
+
+// Status HTTP de cada código de erro (\`x-http-status\` no schema).
+export const SCAN_ERROR_STATUS = ${json(errorStatus)} as const satisfies Record<ScanErrorCode, number>;
 
 // Limites do contrato que o scanner cumpre cortando antes de responder.
 export const CONTRACT_LIMITS = ${json(limitValues)} as const;

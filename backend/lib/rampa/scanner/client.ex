@@ -19,10 +19,12 @@ defmodule Rampa.Scanner.Client do
       destruído por redirecionamento via script);
     * `:invalid_request`: o scanner recusou o pedido (4xx sem código do contrato), um erro
       do lado do backend que não melhora com nova tentativa;
-    * `:unavailable`: o scanner não respondeu ou respondeu 5xx sem código do contrato;
-    * `:contract_mismatch`: a resposta veio sem `contract_version` ou com outra versão
-      (scanner e backend em versões diferentes, como durante um deploy);
-    * `:invalid_scan_result`: a resposta tem a versão certa, mas está fora do schema (campo
+    * `:unavailable`: o scanner não respondeu, respondeu 5xx sem código do contrato ou
+      respondeu 200 com um corpo que não é objeto JSON;
+    * `:contract_mismatch`: resposta 200 sem `contract_version` ou com outra versão, ou erro
+      com código desconhecido e outra versão (scanner e backend em versões diferentes). Um
+      erro com código conhecido vale mesmo com outra versão;
+    * `:invalid_scan_result`: resposta 200 com a versão certa, mas fora do schema (campo
       obrigatório faltando, tipo errado, acima de um limite).
   """
 

@@ -206,7 +206,7 @@ defmodule RampaWeb.ErrorMessages do
   def message("contract_mismatch", _bindings) do
     dgettext(
       "errors",
-      "O serviço de análise estava sendo atualizado e não concluiu esta página. Tente uma nova auditoria em alguns minutos."
+      "Não foi possível concluir a análise por uma incompatibilidade interna do Rampa. O problema ficou registrado para a equipe corrigir."
     )
   end
 
