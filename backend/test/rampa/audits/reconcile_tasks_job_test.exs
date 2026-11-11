@@ -291,4 +291,43 @@ defmodule Rampa.Audits.ReconcileTasksJobTest do
       assert rescue_after > job_timeout
     end
   end
+
+  # RF-RA004: a reconciliação publica pelo mesmo caminho dos jobs.
+  describe "eventos do canal" do
+    alias Rampa.Audits.Events
+    alias Rampa.Audits.Events.Event
+
+    defp received do
+      receive do
+        {:audit_event, %Event{name: name, revision: revision}} -> [{name, revision} | received()]
+      after
+        0 -> []
+      end
+    end
+
+    test "tarefa presa fechada: page_failed e audit_failed, com a revision gravada" do
+      page = page_fixture(%{status: :scanning, task: %{attempt: 2, started_at: ago(20)}})
+      :ok = Events.subscribe(page.audit_id)
+
+      assert %{failed: 1} = Audits.reconcile_stale_tasks()
+
+      revision = audit_of(page).revision
+      assert [{:page_failed, ^revision}, {:audit_failed, ^revision}] = received()
+
+      # Rodar de novo não muda nada nem publica.
+      assert %{failed: 0} = Audits.reconcile_stale_tasks()
+      assert received() == []
+    end
+
+    test "tarefa reenfileirada não muda o andamento: nenhum evento, revision parada" do
+      page = page_fixture(%{status: :scanning, task: %{attempt: 1, started_at: ago(20)}})
+      :ok = Events.subscribe(page.audit_id)
+      before = audit_of(page).revision
+
+      assert %{requeued: 1} = Audits.reconcile_stale_tasks()
+
+      assert received() == []
+      assert audit_of(page).revision == before
+    end
+  end
 end

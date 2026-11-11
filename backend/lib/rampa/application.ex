@@ -44,8 +44,13 @@ defmodule Rampa.Application do
       {Phoenix.PubSub, name: Rampa.PubSub},
       # Tarefas sem link com quem chamou (ex.: consultas de DNS do `Resolver.Inet`).
       {Task.Supervisor, name: Rampa.TaskSupervisor},
+      # Canais `audit:<id>` abertos por conexão (limite em `RampaWeb.AuditChannel`).
+      {Registry, keys: :duplicate, name: RampaWeb.AuditChannel.Registry},
       {Oban, Application.fetch_env!(:rampa, Oban)},
       # Start to serve requests, typically the last entry
+      # Origens do websocket (`PHX_ALLOWED_ORIGINS`): validadas antes do endpoint; inválidas
+      # impedem a subida. Não fica processo vivo (`:ignore`).
+      RampaWeb.Origins,
       RampaWeb.Endpoint
     ]
 

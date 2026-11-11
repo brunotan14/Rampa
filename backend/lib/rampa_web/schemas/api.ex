@@ -126,6 +126,7 @@ defmodule RampaWeb.Schemas.AuditSummary do
       type: :object,
       required: [
         :id,
+        :revision,
         :status,
         :start_url,
         :page_limit,
@@ -142,6 +143,13 @@ defmodule RampaWeb.Schemas.AuditSummary do
       additionalProperties: false,
       properties: %{
         id: %Schema{type: :string, format: :uuid},
+        revision: %Schema{
+          type: :integer,
+          minimum: 0,
+          description:
+            "Versão do andamento (RF-RA004). Sobe a cada mudança gravada; é a mesma dos " <>
+              "eventos do canal `audit:<id>`. O cliente fica com o estado de maior `revision`."
+        },
         status: %Schema{
           type: :string,
           enum: ~w(queued running completed failed cancelled),

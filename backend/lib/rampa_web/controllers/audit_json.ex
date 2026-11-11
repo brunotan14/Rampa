@@ -2,7 +2,8 @@ defmodule RampaWeb.AuditJSON do
   @moduledoc """
   Resumo da auditoria (`GET /api/audits/:id`). Nunca expõe `requester_ip_hash` nem
   `idempotency_key`. O `error` interno vira `{ code, message }` com a mensagem pronta
-  (`RampaWeb.ErrorMessages`).
+  (`RampaWeb.ErrorMessages`). `revision` é a mesma do canal `audit:<id>` (RF-RA004): o cliente
+  fica com o estado de maior `revision`, venha daqui ou do canal.
   """
 
   alias Rampa.Audits.Audit
@@ -11,6 +12,7 @@ defmodule RampaWeb.AuditJSON do
   def show(%{summary: %{audit: %Audit{} = audit} = summary}) do
     %{
       id: audit.id,
+      revision: audit.revision,
       status: audit.status,
       start_url: audit.start_url,
       page_limit: audit.page_limit,

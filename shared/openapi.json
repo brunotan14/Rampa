@@ -116,6 +116,11 @@
             "minimum": 0,
             "type": "integer"
           },
+          "revision": {
+            "description": "Versão do andamento (RF-RA004). Sobe a cada mudança gravada; é a mesma dos eventos do canal `audit:<id>`. O cliente fica com o estado de maior `revision`.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "start_url": {
             "description": "URL inicial, já normalizada.",
             "type": "string"
@@ -143,6 +148,7 @@
         },
         "required": [
           "id",
+          "revision",
           "status",
           "start_url",
           "page_limit",

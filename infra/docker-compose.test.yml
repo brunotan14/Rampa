@@ -28,6 +28,8 @@ name: rampa-e2e
 x-app-env: &app-env
   PHX_SERVER: "true"
   PHX_HOST: app
+  # Origens do websocket `/socket` (RF-RA004): os nomes pelos quais o runner abre o app.
+  PHX_ALLOWED_ORIGINS: http://app-via-proxy:4000,http://app-direct:4000,http://app-daily-via-proxy:4000
   PORT: "4000"
   POOL_SIZE: "10"
   SCANNER_URL: http://scanner:4100

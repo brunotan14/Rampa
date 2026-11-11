@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuditChannel",
+  "description": "Contrato do canal Phoenix `audit:<id>` (RF-RA004, PRD §9), fonte única da verdade dos payloads em tempo real. O OpenAPI não cobre canais. O backend valida contra este schema, nos testes, a resposta do join, as recusas e cada evento enviado (`test/rampa_web/channels/`); o frontend gera os tipos a partir dele. `x-topic` é o tópico, `x-join` aponta os payloads do join e `x-events` liga cada nome de evento ao schema do payload.",
+  "$comment": "Versão do canal (`x-channel-version`): sobe só em mudança incompatível (campo obrigatório novo, campo removido ou renomeado, tipo trocado, valor novo num `enum`, evento removido, significado alterado). Evento novo em `x-events` (como `page_discovered` no M5 e `findings_added` no M4) e campo opcional novo não sobem a versão: o cliente ignora evento e campo que não conhece. Regras do cliente (PRD §9): (1) o estado da auditoria é o `progress` de maior `revision` recebido, venha do join, de um evento ou do `GET /api/audits/:id`; eventos podem chegar fora de ordem, e os campos próprios do evento (`page_id`) valem sempre; (2) a conclusão é anunciada quando o status local passa de não final a final, uma vez, venha a mudança de onde vier; (3) com a auditoria aberta e 30 s sem nenhum evento, o cliente busca `GET /api/audits/:id`. Estado final: a auditoria pode ir de `queued` direto a `failed` (a URL da única página é recusada antes da varredura), sem `status_changed`; a entrada em estado final sai só por `audit_completed` ou `audit_failed`, e `status_changed` é só a passagem de `queued` a `running`. `revision` sem evento: `add_page`, `add_task` e a passagem da página de `analyzing` a `done` sobem a `revision` sem evento próprio. No M2 elas não acontecem no fluxo normal (só no M4 e no M5); o M4 e o M5 PRECISAM acrescentar os eventos dessas transições (`findings_added`, `page_discovered`) junto com elas. Até lá, a regra (3) cobre o cliente.",
+  "x-channel-version": "1",
+  "x-topic": "audit:<id>",
+  "x-join": {
+    "params": "Nenhum. O que vier é ignorado.",
+    "reply": "#/definitions/JoinReply",
+    "error": "#/definitions/JoinError"
+  },
+  "x-events": {
+    "status_changed": "#/definitions/StatusChanged",
+    "page_scanned": "#/definitions/PageScanned",
+    "page_failed": "#/definitions/PageFailed",
+    "audit_completed": "#/definitions/AuditCompleted",
+    "audit_failed": "#/definitions/AuditFailed"
+  },
+  "definitions": {
+    "Revision": {
+      "title": "Revision",
+      "description": "Versão do andamento da auditoria. Sobe a cada transição gravada, na ordem de commit; eventos da mesma transição têm a mesma. É a mesma do campo `revision` de `GET /api/audits/:id`.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "Uuid": {
+      "title": "Uuid",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "AuditStatus": {
+      "title": "AuditStatus",
+      "type": "string",
+      "enum": ["queued", "running", "completed", "failed", "cancelled"]
+    },
+    "SeverityCounts": {
+      "title": "SeverityCounts",
+      "description": "Achados confirmados (`needs_review = false`) por severidade, com os nomes do axe.",
+      "type": "object",
+      "required": ["critical", "serious", "moderate", "minor"],
+      "additionalProperties": false,
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "serious": { "type": "integer", "minimum": 0 },
+        "moderate": { "type": "integer", "minimum": 0 },
+        "minor": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PageError": {
+      "title": "PageError",
+      "description": "Erro de página ou de auditoria, com a mensagem em português pronta para exibir. Os códigos são os de `pages.error` e `audits.error` (`Rampa.ErrorCodes.page/0`).",
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_url",
+            "unsupported_scheme",
+            "blocked_address",
+            "unresolvable",
+            "dns_error",
+            "resource_limit",
+            "timeout",
+            "http_error",
+            "navigation_failed",
+            "analysis_failed",
+            "invalid_request",
+            "unavailable",
+            "contract_mismatch",
+            "invalid_scan_result",
+            "internal_error",
+            "stale",
+            "scan_failed"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "Progress": {
+      "title": "Progress",
+      "description": "Estado absoluto da auditoria (não é delta), com os mesmos nomes de `GET /api/audits/:id`. No M2 a etapa atual é derivada do `status` (`queued` ou `running`: varredura automática); o campo `stage` entra no M4.",
+      "type": "object",
+      "required": [
+        "status",
+        "pages_found",
+        "pages_scanned",
+        "pages_failed",
+        "totals_by_severity",
+        "needs_review_count",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/definitions/AuditStatus" },
+        "pages_found": { "type": "integer", "minimum": 0 },
+        "pages_scanned": { "type": "integer", "minimum": 0 },
+        "pages_failed": { "type": "integer", "minimum": 0 },
+        "totals_by_severity": { "$ref": "#/definitions/SeverityCounts" },
+        "needs_review_count": {
+          "description": "Achados que pedem confirmação manual (IA, heurística, incompletos do axe).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Por que a auditoria falhou; `null` enquanto não falhou.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/PageError" }]
+        }
+      }
+    },
+    "JoinReply": {
+      "title": "JoinReply",
+      "description": "Resposta do join: o snapshot atual, lido depois de o canal se inscrever nos eventos. Evento com `revision` menor ou igual à do snapshot não é enviado.",
+      "type": "object",
+      "required": ["revision", "progress"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" }
+      }
+    },
+    "JoinError": {
+      "title": "JoinError",
+      "description": "Recusa do join, no formato de erro da API. `audit_not_found`: id que não é um UUID em minúsculas ou auditoria inexistente (mesma resposta para os dois). `channel_limit_reached`: a conexão já acompanha o máximo de auditorias.",
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string", "enum": ["audit_not_found", "channel_limit_reached"] },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "StatusChanged": {
+      "title": "StatusChanged",
+      "description": "A auditoria passou de `queued` a `running`. A entrada em estado final sai como `audit_completed` ou `audit_failed`.",
+      "type": "object",
+      "required": ["revision", "progress", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" },
+        "status": { "type": "string", "enum": ["running"] }
+      }
+    },
+    "PageScanned": {
+      "title": "PageScanned",
+      "description": "A varredura automática de uma página terminou (a página saiu de `queued` ou `scanning` para `analyzing` ou `done`). As contagens são só desta página.",
+      "type": "object",
+      "required": ["revision", "progress", "page_id", "counts_by_severity", "needs_review_count"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" },
+        "page_id": { "$ref": "#/definitions/Uuid" },
+        "counts_by_severity": { "$ref": "#/definitions/SeverityCounts" },
+        "needs_review_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PageFailed": {
+      "title": "PageFailed",
+      "description": "A página passou a `failed` (a varredura falhou). Falha de uma análise de IA não falha a página e não gera este evento.",
+      "type": "object",
+      "required": ["revision", "progress", "page_id", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" },
+        "page_id": { "$ref": "#/definitions/Uuid" },
+        "error": { "$ref": "#/definitions/PageError" }
+      }
+    },
+    "AuditCompleted": {
+      "title": "AuditCompleted",
+      "description": "A auditoria entrou em `completed`. Os totais estão em `progress`. `score` é `null` até o M3.",
+      "type": "object",
+      "required": ["revision", "progress", "score"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" },
+        "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 }
+      }
+    },
+    "AuditFailed": {
+      "title": "AuditFailed",
+      "description": "A auditoria entrou em `failed`: nenhuma página foi varrida. O motivo está em `progress.error`.",
+      "type": "object",
+      "required": ["revision", "progress"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "$ref": "#/definitions/Revision" },
+        "progress": { "$ref": "#/definitions/Progress" }
+      }
+    }
+  }
+}

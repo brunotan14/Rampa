@@ -100,12 +100,25 @@ if config_env() in [:prod, :e2e] do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  # Host público do app. Obrigatório: dele saem as URLs geradas e a origem aceita no websocket
+  # `/socket` (`RampaWeb.Origins`); sem ele, o tempo real seria recusado em silêncio.
+  host =
+    System.get_env("PHX_HOST") ||
+      raise """
+      environment variable PHX_HOST is missing.
+      For example: rampa.exemplo.com.br
+      """
+
+  # Origens aceitas no websocket: `https://<PHX_HOST>` mais `PHX_ALLOWED_ORIGINS` (lista
+  # separada por vírgula, sem curinga). Conferidas na subida (`RampaWeb.Origins.load/1`, em
+  # `Rampa.Application.start/2`): valor inválido impede a subida.
+  config :rampa, :allowed_origins, host: host, extra: System.get_env("PHX_ALLOWED_ORIGINS")
 
   config :rampa, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :rampa, RampaWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
+    check_origin: {RampaWeb.Origins, :allowed?, []},
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
