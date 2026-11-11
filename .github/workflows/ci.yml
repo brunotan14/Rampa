@@ -90,6 +90,13 @@ jobs:
     name: Scanner (lint, tipos, Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Roda dentro da imagem do Playwright, a mesma do scanner em produção (`scanner/Dockerfile`):
+    # Chromium, fontes, bibliotecas do sistema e o Node do `.nvmrc` já vêm nela, sem `apt-get`
+    # (a instalação pelo `--with-deps` dependia dos espelhos do Ubuntu e falhava junto com eles).
+    # `scanner/test/toolchain.test.ts` garante que a tag acompanha o pacote `playwright`.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      options: --user 1001
     defaults:
       run:
         working-directory: scanner
@@ -108,9 +115,8 @@ jobs:
         working-directory: .
         run: |
           git ls-files --error-unmatch shared/scanner-contract.schema.json scanner/src/contract.gen.ts
-          make scanner-contract
+          npm --prefix scanner run contract
           git diff --exit-code scanner/src/contract.gen.ts
-      - run: npx playwright install --with-deps chromium
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
@@ -119,6 +125,13 @@ jobs:
     name: E2E (Playwright + axe)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Roda dentro da imagem do Playwright, a mesma do scanner em produção (`scanner/Dockerfile`):
+    # Chromium, fontes, bibliotecas do sistema e o Node do `.nvmrc` já vêm nela, sem `apt-get`
+    # (a instalação pelo `--with-deps` dependia dos espelhos do Ubuntu e falhava junto com eles).
+    # A tag acompanha o `@playwright/test` do `e2e/package.json` (a mesma versão do scanner).
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      options: --user 1001
     needs: [frontend]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,8 +145,6 @@ jobs:
       - run: npm ci
         working-directory: frontend
       - run: npm ci
-        working-directory: e2e
-      - run: npx playwright install --with-deps chromium
         working-directory: e2e
       - run: npm run typecheck
         working-directory: e2e
