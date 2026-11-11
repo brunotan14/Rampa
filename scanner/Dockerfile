@@ -4,7 +4,8 @@
 # `docker run --rm <imagem> node --version` e atualize esta linha e o `.nvmrc` juntos;
 # `scanner/test/toolchain.test.ts` falha se eles divergirem.
 # Node da imagem: 26.13.0
-FROM mcr.microsoft.com/playwright:v1.65.0-noble
+# Fixada por digest (a tag pode ser regravada); o digest acompanha a tag nos jobs do CI.
+FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
 
 WORKDIR /app
 COPY package.json package-lock.json ./
