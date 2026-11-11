@@ -10,7 +10,8 @@
 #   `scanner/test/toolchain.test.ts` falha se divergirem.
 #
 # Para subir o Playwright (um PR só):
-# 1. Troque a tag em `scanner/Dockerfile` e o `playwright` em `scanner/package.json`
+# 1. Troque a tag em `scanner/Dockerfile` e nos dois `container.image` de `.github/workflows/ci.yml`,
+#    o `playwright` em `scanner/package.json` e o `@playwright/test` em `e2e/package.json`
 #    (`npm install --prefix scanner playwright@<versão> --save-exact`).
 # 2. Confira o Node da imagem: `docker run --rm <imagem> node --version`.
 # 3. Atualize a linha `# Node da imagem:` do Dockerfile e o `.nvmrc` com essa versão.

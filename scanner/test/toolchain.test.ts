@@ -13,8 +13,12 @@ const pkg = JSON.parse(read("../package.json")) as {
   devDependencies?: Record<string, string>;
 };
 
+const ci = read("../../.github/workflows/ci.yml");
+const e2ePkg = JSON.parse(read("../../e2e/package.json")) as { devDependencies?: Record<string, string> };
+
 const IMAGE_FROM = /^FROM\s+mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-\S+/m;
 const IMAGE_NODE = /^# Node da imagem: (\S+)$/m;
+const CI_IMAGE = /image:\s+mcr\.microsoft\.com\/playwright:(v\S+)/g;
 
 describe("versões da imagem do scanner", () => {
   it("a tag da imagem do Playwright é a mesma versão do pacote playwright", () => {
@@ -42,5 +46,20 @@ describe("versões da imagem do scanner", () => {
       `o .nvmrc (${nvmrc}) não é o Node da imagem do scanner (${imageNode ?? "?"}): local, CI e produção ` +
         "precisam rodar a mesma versão. Confira com `docker run --rm <imagem> node --version`.",
     ).toBe(imageNode);
+  });
+
+  it("os jobs do CI rodam na mesma imagem do Dockerfile, e o e2e usa a mesma versão do Playwright", () => {
+    const image = /mcr\.microsoft\.com\/playwright:(v\S+)/.exec(dockerfile)?.[1];
+    const ciImages = [...ci.matchAll(CI_IMAGE)].map((m) => m[1]);
+    expect(ciImages.length, ".github/workflows/ci.yml precisa rodar o Scanner e o E2E na imagem do Playwright").toBeGreaterThan(0);
+    for (const ciImage of ciImages) {
+      expect(ciImage, `o CI usa playwright:${ciImage}, e o scanner/Dockerfile usa playwright:${image ?? "?"}: atualize os dois juntos.`).toBe(image);
+    }
+
+    const tag = IMAGE_FROM.exec(dockerfile)?.[1];
+    expect(
+      e2ePkg.devDependencies?.["@playwright/test"],
+      "o @playwright/test do e2e/package.json precisa ser a versão da imagem: o E2E roda nela no CI.",
+    ).toBe(tag);
   });
 });
