@@ -133,6 +133,11 @@ export function apiError(result: PostAuditResult): ApiError["error"] {
   return (result.body as ApiError).error;
 }
 
+/** Cabeçalho `Retry-After` de uma recusa 429, em segundos (`NaN` se faltar ou não for número). */
+export function retryAfterSeconds(result: PostAuditResult): number {
+  return Number(result.response.headers()["retry-after"]);
+}
+
 /** `GET /api/audits/:id`. */
 export async function getAudit(
   request: APIRequestContext,

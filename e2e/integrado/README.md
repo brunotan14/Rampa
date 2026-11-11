@@ -41,6 +41,25 @@ compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsí
 - `getAudit(request, id)` e `waitForAuditEnd(request, id, { timeoutMs })`: resumo; o segundo espera `completed`, `failed` ou `cancelled` (padrão 60 s).
 - `listFindings(request, id, { filters })`: todos os achados, seguindo o cursor.
 - `scanDirect(request, url)`: resposta do scanner, com `blocked_requests` (não é gravado no banco).
+- `retryAfterSeconds(result)`: o cabeçalho `Retry-After` de uma recusa 429.
+
+Também em `support/`: `messages.ts` (os textos de `error.message` que os critérios afirmam),
+`time.ts` (`saoPauloTime`, o `HH:MM` das mensagens) e `evidence.ts`. Todo caso leva a anotação
+`requisito` com o texto do critério (`requirement(...)`) e anexa o que mediu
+(`attachObserved`); o `afterEach` com `requireObserved` reprova o caso verde sem anexo.
+
+## Specs
+
+| Spec | Cobre |
+|---|---|
+| `smoke.spec.ts` | Fumaça de ponta a ponta; é o RF-RA003 CA1 (`img-sem-alt.html`) |
+| `rf-ra001-iniciar-auditoria.spec.ts` | RF-RA001 CA1 a CA3. A tela de progresso (CA1) está como `fixme` até o M2 |
+| `rf-ra002-protecao-ssrf.spec.ts` | RF-RA002 CA1, CA2, CA3 e CA6 |
+| `rf-ra002-limites.spec.ts` | RF-RA002 CA4, `X-Forwarded-For` fora da faixa confiável e teto diário (os dois baldes exclusivos) |
+| `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |
+
+O RF-RA002 CA5 (produção não sobe com a allowlist) e o isolamento de rede do scanner são
+provados pelos scripts da seção abaixo, não pelos specs.
 
 ## Limites (`support/env.ts`, `limits`)
 
