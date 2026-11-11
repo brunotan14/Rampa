@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Healthcheck do container: sai com 0 se `GET /api/health` responde 200 (app, banco e
+# scanner de pé). Usa o `/dev/tcp` do bash: a imagem não tem curl nem wget.
+set -euo pipefail
+
+exec 3<>"/dev/tcp/127.0.0.1/${PORT:-4000}"
+printf 'GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+IFS= read -r status_line <&3
+[[ "$status_line" == *" 200 "* ]]

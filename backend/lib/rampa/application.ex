@@ -5,19 +5,35 @@ defmodule Rampa.Application do
 
   use Application
 
-  alias Rampa.Security.{Allowlist, IPHash, TrustedProxies}
+  require Logger
+
+  alias Rampa.Security.{Allowlist, IPHash, RuntimeEnv, TrustedProxies}
 
   @impl true
   def start(_type, _args) do
-    env = Application.fetch_env!(:rampa, :env)
+    env = startup_env()
 
     # RF-RA002: em produção, `SSRF_ALLOWLIST` preenchida impede a subida; sem
     # `IP_HASH_SECRET` ou com `TRUSTED_PROXIES` inválida, o app não sobe em nenhum ambiente.
+    # A release `:e2e` sem o marcador `RAMPA_E2E=1` segue as regras de produção.
     with :ok <- Allowlist.check_startup(env, Allowlist.hosts()),
          :ok <- IPHash.check_startup(env, IPHash.secret()),
          :ok <- TrustedProxies.load(env, Application.get_env(:rampa, :trusted_proxies)) do
       start_children()
     end
+  end
+
+  defp startup_env do
+    compiled = Application.fetch_env!(:rampa, :env)
+    env = RuntimeEnv.effective(compiled, Application.get_env(:rampa, :e2e_marker))
+
+    if compiled != env do
+      Logger.warning(
+        "release #{compiled} sem #{RuntimeEnv.marker_variable()}=1: valem as regras de produção"
+      )
+    end
+
+    env
   end
 
   defp start_children do

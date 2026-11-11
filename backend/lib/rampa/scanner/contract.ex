@@ -18,6 +18,16 @@ defmodule Rampa.Scanner.Contract do
     * `error_statuses/0`: o status HTTP de cada código (`x-http-status`);
     * `check_response/1` e `scanner_error/2`: a interpretação de um corpo de resposta,
       usada por `Rampa.Scanner.HTTP` antes de qualquer gravação.
+
+  ## Campos desconhecidos (ordem de deploy)
+
+  O schema canônico é estrito (`additionalProperties: false`): o scanner, nos testes dele,
+  não pode mandar campo fora do contrato. O backend é tolerante: numa resposta da mesma
+  versão, os campos que o schema não conhece (ex.: um campo opcional novo de um scanner que
+  subiu antes do backend) são **descartados** antes da validação, guiado pelo próprio schema,
+  e registrados num aviso. O que sobra é validado contra o schema estrito: os campos
+  conhecidos continuam conferidos por inteiro (tipo, obrigatoriedade, limites), e nada fora
+  do contrato chega à gravação.
   """
 
   require Logger
@@ -59,6 +69,13 @@ defmodule Rampa.Scanner.Contract do
 
   @error_codes_by_name Map.new(@error_codes, &{Atom.to_string(&1), &1})
 
+  # Definições e a raiz da resposta de sucesso, para descartar os campos desconhecidos.
+  @definitions @schema["definitions"]
+  @response_schema @definitions["ScanResponse"]
+
+  # Quantos caminhos descartados entram no aviso do log.
+  @max_reported_dropped 5
+
   @detail_max_length get_in(@schema, [
                        "definitions",
                        "ScanError",
@@ -92,25 +109,33 @@ defmodule Rampa.Scanner.Contract do
   def path, do: @path
 
   @doc """
-  Confere o corpo de uma resposta de sucesso (HTTP 200):
+  Confere o corpo de uma resposta de sucesso (HTTP 200) e devolve o corpo que pode ser
+  gravado:
 
     * corpo que não é JSON, ou JSON que não é objeto → `:unavailable` (passageiro): não é uma
       resposta do scanner, e sim de algo no caminho;
     * `contract_version` ausente ou diferente de `version/0` → `:contract_mismatch`
       (passageiro, uma nova tentativa), com `Logger.error` mostrando as duas versões, para a
       divergência duradoura aparecer no log;
-    * mesma versão, mas fora do schema (campo obrigatório faltando, tipo errado, acima de um
-      limite) → `:invalid_scan_result` (definitivo: um formato quebrado não se resolve com
-      nova tentativa).
+    * mesma versão: os campos que o schema não conhece são descartados (com um aviso no log)
+      e o resto é validado contra o schema estrito. Fora dele (campo obrigatório faltando,
+      tipo errado, acima de um limite) → `:invalid_scan_result` (definitivo: um formato
+      quebrado não se resolve com nova tentativa); dentro → `{:ok, corpo_sem_os_desconhecidos}`.
   """
-  @spec check_response(term()) :: :ok | {:error, failure()}
+  @spec check_response(term()) :: {:ok, map()} | {:error, failure()}
   def check_response(body) when not is_map(body),
     do: failure(:unavailable, "resposta 200 do scanner não é um objeto JSON")
 
   def check_response(%{"contract_version" => @version} = body) do
-    case validate(:response, body) do
-      :ok -> :ok
-      {:error, detail} -> failure(:invalid_scan_result, detail)
+    {known, dropped} = prune(body, @response_schema, "#")
+
+    case validate(:response, known) do
+      :ok ->
+        warn_dropped(dropped)
+        {:ok, known}
+
+      {:error, detail} ->
+        failure(:invalid_scan_result, detail)
     end
   end
 
@@ -163,6 +188,49 @@ defmodule Rampa.Scanner.Contract do
 
     Logger.error(detail)
     failure(:contract_mismatch, detail)
+  end
+
+  # Descarta, guiado pelo schema, as chaves que um objeto da resposta não declara em
+  # `properties`, e devolve os caminhos descartados (índices de lista viram `*`). Valores de
+  # outro tipo que o esperado passam como estão: a validação estrita os recusa depois.
+  defp prune(value, %{"$ref" => "#/definitions/" <> name}, path),
+    do: prune(value, Map.fetch!(@definitions, name), path)
+
+  defp prune(value, %{"type" => "object", "properties" => properties}, path)
+       when is_map(value) do
+    Enum.reduce(value, {%{}, []}, fn {key, item}, {kept, dropped} ->
+      case Map.fetch(properties, key) do
+        {:ok, schema} ->
+          {item, more} = prune(item, schema, "#{path}/#{key}")
+          {Map.put(kept, key, item), more ++ dropped}
+
+        :error ->
+          {kept, ["#{path}/#{key}" | dropped]}
+      end
+    end)
+  end
+
+  defp prune(value, %{"type" => "array", "items" => %{} = items}, path) when is_list(value) do
+    Enum.map_reduce(value, [], fn item, dropped ->
+      {item, more} = prune(item, items, "#{path}/*")
+      {item, more ++ dropped}
+    end)
+  end
+
+  defp prune(value, _schema, _path), do: {value, []}
+
+  defp warn_dropped([]), do: :ok
+
+  defp warn_dropped(dropped) do
+    paths = dropped |> Enum.uniq() |> Enum.sort()
+    shown = paths |> Enum.take(@max_reported_dropped) |> Enum.join(", ")
+    rest = length(paths) - @max_reported_dropped
+    shown = if rest > 0, do: "#{shown} (e mais #{rest})", else: shown
+
+    Logger.warning(
+      "resposta do scanner com campos que a versão #{@version} do contrato não conhece, " <>
+        "descartados: #{shown}. O scanner está à frente do backend; atualize o backend."
+    )
   end
 
   defp validate(kind, body) do

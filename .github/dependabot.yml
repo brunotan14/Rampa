@@ -5,17 +5,25 @@
 #   cada major chega num PR próprio, para uma falha na CI apontar qual atualização quebrou.
 # - `@types/node` não sobe de major sozinho: ele acompanha a major do Node, que é decidida pela
 #   imagem do scanner (`.nvmrc`).
-# - A imagem do Playwright não é atualizada aqui (sem ecossistema `docker`) e o pacote
-#   `playwright` é ignorado no scanner: os dois sobem juntos, à mão, porque
+# - As imagens Docker não são atualizadas aqui (sem ecossistema `docker`): as do backend
+#   (`backend/Dockerfile`, acompanham `OTP_VERSION` e `ELIXIR_VERSION` do `ci.yml`), a do
+#   `fixtures` (`infra/test/fixtures.Dockerfile`) e a do PostgreSQL sobem à mão, com o digest
+#   conferido por `docker buildx imagetools inspect <tag>`.
+# - A imagem do Playwright não é atualizada aqui, e os pacotes que a acompanham são ignorados
+#   (`playwright` no scanner, `@playwright/test` no e2e): sobem juntos, à mão, porque
 #   `scanner/test/toolchain.test.ts` falha se divergirem.
 #
 # Para subir o Playwright (um PR só):
-# 1. Troque a tag em `scanner/Dockerfile` e nos dois `container.image` de `.github/workflows/ci.yml`,
-#    o `playwright` em `scanner/package.json` e o `@playwright/test` em `e2e/package.json`
-#    (`npm install --prefix scanner playwright@<versão> --save-exact`).
-# 2. Confira o Node da imagem: `docker run --rm <imagem> node --version`.
-# 3. Atualize a linha `# Node da imagem:` do Dockerfile e o `.nvmrc` com essa versão.
-# 4. Se a major do Node mudar, suba junto o `@types/node` e o `engines` de frontend, scanner e e2e.
+# 1. Troque a tag e o digest (`docker buildx imagetools inspect <imagem>`) em `scanner/Dockerfile`,
+#    `e2e/Dockerfile` e nos dois `container.image` de `.github/workflows/ci.yml`.
+# 2. Suba o `playwright` do scanner e o `@playwright/test` do e2e para a versão da tag:
+#    `npm install --prefix scanner playwright@<versão> --save-exact` e
+#    `npm install --prefix e2e @playwright/test@<versão> --save-exact`.
+# 3. Confira o Node da imagem: `docker run --rm <imagem> node --version`.
+# 4. Atualize a linha `# Node da imagem:` do `scanner/Dockerfile` e o `.nvmrc` com essa versão.
+# 5. Se a major do Node mudar, suba junto o `@types/node` (`--save-exact`) e o `engines` de
+#    frontend, scanner e e2e.
+# 6. Rode `make test` (o `toolchain.test.ts` confere tudo isso) e `make e2e-integrado`.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -43,6 +51,8 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
+      # Sobe junto com a imagem do Playwright, à mão (ver o topo deste arquivo).
+      - dependency-name: "@playwright/test"
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       # eslint-plugin-jsx-a11y 6.10.2 (lint de acessibilidade do frontend) ainda não aceita o

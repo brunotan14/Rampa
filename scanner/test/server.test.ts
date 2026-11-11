@@ -7,7 +7,7 @@ import type { Browser } from "playwright";
 import type { FastifyInstance } from "fastify";
 import { launchBrowser } from "../src/browser.js";
 import { buildServer, type ServerOptions } from "../src/server.js";
-import { CONTRACT_LIMITS, CONTRACT_VERSION, type ScanResponse } from "../src/contract.gen.js";
+import { CONTRACT_LIMITS, CONTRACT_VERSION, type AxeTarget, type ScanResponse } from "../src/contract.gen.js";
 import { scanOn } from "./support/contract.js";
 import { fixturesPolicy } from "./support/policy.js";
 
@@ -303,6 +303,40 @@ describe("limites do contrato", () => {
       expect(first?.nodes[0]?.target_truncated).toBe(true);
     } finally {
       await big.close();
+    }
+  });
+
+  it("descarta nó sem o mínimo de target do schema e continua contando em nodes_total", async () => {
+    const node = (target: AxeTarget, html: string) => ({ target, html, failureSummary: null, impact: "critical" as const });
+    const rule = {
+      id: "image-alt",
+      impact: "critical" as const,
+      tags: ["wcag2a", "wcag111"],
+      description: "d",
+      help: "h",
+      helpUrl: "https://dequeuniversity.com/rules/axe/4.14/image-alt",
+      nodes: [
+        node([], "sem-target"),
+        node([[]], "shadow-vazio"),
+        node(["iframe", []], "shadow-vazio-no-iframe"),
+        node(["img"], "valido"),
+        node([["#host", "img"]], "shadow-valido"),
+      ],
+      nodes_total: 5,
+    };
+    const odd = buildServer(
+      browser,
+      serverOptions({ analyze: async () => ({ version: "4.14.0", violations: [rule], incomplete: [] }) }),
+    );
+    try {
+      // `scanOn` confere a resposta contra o schema estrito.
+      const res = await scanOn(odd, `${fixturesUrl}/limpa.html`);
+      expect(res.statusCode).toBe(200);
+      const [only] = res.json<ScanResponse>().axe.violations;
+      expect(only?.nodes.map((n) => n.html)).toEqual(["valido", "shadow-valido"]);
+      expect(only?.nodes_total).toBe(5);
+    } finally {
+      await odd.close();
     }
   });
 });

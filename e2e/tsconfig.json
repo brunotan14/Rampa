@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["playwright.config.ts", "tests"]
+  "include": ["playwright.config.ts", "playwright.integrado.config.ts", "tests", "integrado"]
 }

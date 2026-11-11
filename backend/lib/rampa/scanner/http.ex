@@ -4,7 +4,8 @@ defmodule Rampa.Scanner.HTTP do
 
   Toda resposta passa por `Rampa.Scanner.Contract` antes de sair daqui, e portanto antes de
   qualquer gravação: o resultado `{:ok, body}` sempre cumpre o schema
-  `shared/scanner-contract.schema.json` (campos obrigatórios, tipos e limites). Num erro, o
+  `shared/scanner-contract.schema.json` (campos obrigatórios, tipos e limites), já sem os
+  campos que a versão do contrato não conhece (`Rampa.Scanner.Contract`). Num erro, o
   código conhecido do contrato prevalece sobre a forma do corpo (ver
   `Rampa.Scanner.Contract.scanner_error/2`).
   """
@@ -33,7 +34,7 @@ defmodule Rampa.Scanner.HTTP do
 
     case Req.post(base_url() <> "/scan", options) do
       {:ok, %Req.Response{status: 200, body: body}} ->
-        with :ok <- Contract.check_response(body), do: {:ok, body}
+        Contract.check_response(body)
 
       {:ok, %Req.Response{status: status, body: body}} ->
         case Contract.scanner_error(status, body) do

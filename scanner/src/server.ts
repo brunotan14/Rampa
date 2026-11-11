@@ -56,7 +56,9 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
   const analyze = options.analyze ?? runAxe;
   const policy = defaultPolicy(options.ssrf);
   const limits: ProxyLimits = { ...DEFAULT_PROXY_LIMITS, ...options.limits };
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+  // Sem log só no Vitest (que define `VITEST`). O `NODE_ENV=test` do Compose de teste mantém
+  // o log: é ele que mostra, no `compose.log`, as varreduras e as conexões bloqueadas.
+  const app = Fastify({ logger: !process.env.VITEST });
 
   // Nunca rejeita: todo erro vira um `Outcome`. Depois que o prazo total estoura e o
   // contexto é fechado, o erro que isso provoca aqui é descartado.

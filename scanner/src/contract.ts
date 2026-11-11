@@ -15,6 +15,17 @@ import {
 // título de 1 MB, milhares de nós numa regra), e o scanner, que divide a VPS com o resto do
 // Rampa (RNF-RA003), não pode mandar ao backend um corpo sem teto. Os valores saem do schema
 // via `contract.gen.ts`.
+//
+// Mínimos do schema:
+//   * `target` com pelo menos um nível e cada nível de shadow DOM com pelo menos um seletor
+//     (`minItems: 1`): nó fora disso não identifica o elemento e é descartado
+//     (`hasMinimumTarget`), continuando contado em `nodes_total`;
+//   * `axe.version` e `rule.id` não vazios (`minLength: 1`): não são tratados aqui porque não
+//     vêm da página. A versão é a constante do pacote axe-core (`testEngine.version`) e o `id`
+//     é o de uma regra embutida do axe (o scanner não registra regras próprias). Se um dia
+//     vierem vazios, o backend recusa a resposta (`invalid_scan_result`) e o erro aparece;
+//   * números (`nodes_total`, `blocked_requests`, `http_status`) já nascem dentro dos mínimos:
+//     contagens não ficam negativas e status < 100 não existe no navegador.
 
 // Corta em no máximo `max` unidades UTF-16 sem separar um par substituto: o resultado tem
 // no máximo `max` pontos de código (o que o `maxLength` do JSON Schema conta).
@@ -42,6 +53,11 @@ function limitTarget(target: AxeTarget): { target: AxeTarget; truncated: boolean
   return { target: limited, truncated };
 }
 
+// O mínimo de `AxeTarget`: pelo menos um nível, e nenhum nível de shadow DOM vazio.
+export function hasMinimumTarget(target: AxeTarget): boolean {
+  return target.length > 0 && target.every((level) => !Array.isArray(level) || level.length > 0);
+}
+
 function limitNode(node: AxeNode): AxeNode {
   const { target, truncated } = limitTarget(node.target);
   return {
@@ -53,8 +69,10 @@ function limitNode(node: AxeNode): AxeNode {
   };
 }
 
-// O corte de nós por regra (e o `nodes_total`) é feito na coleta (`axe.ts`, `slimRule`);
-// aqui ele é repetido só por defesa, para um coletor que não corte.
+// O corte de nós por regra (e o `nodes_total`) e o descarte de nó sem o mínimo de `target`
+// são feitos na coleta (`axe.ts`, `slimRule`); aqui são repetidos por defesa, para um coletor
+// que não faça. O descarte vem depois do corte de níveis: só o `target` enviado precisa
+// cumprir o mínimo. `nodes_total` nunca fica abaixo dos nós enviados.
 function limitRule(rule: AxeRule): AxeRule {
   return {
     id: truncate(rule.id, LIMITS.ruleId),
@@ -63,8 +81,11 @@ function limitRule(rule: AxeRule): AxeRule {
     description: truncate(rule.description, LIMITS.ruleText),
     help: truncate(rule.help, LIMITS.ruleText),
     helpUrl: truncate(rule.helpUrl, LIMITS.helpUrl),
-    nodes: rule.nodes.slice(0, LIMITS.nodes).map(limitNode),
-    nodes_total: rule.nodes_total,
+    nodes: rule.nodes
+      .map(limitNode)
+      .filter((node) => hasMinimumTarget(node.target))
+      .slice(0, LIMITS.nodes),
+    nodes_total: Math.max(rule.nodes_total, 0),
   };
 }
 

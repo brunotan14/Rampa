@@ -1,0 +1,225 @@
+# Compose de teste: E2E integrado (PRD §11.2 e §11.4). Sobe banco, app (release do Phoenix),
+# scanner real e o site de fixtures, e roda os specs de `e2e/integrado/` no serviço `e2e`.
+# Use pelo `make e2e-integrado` (script `infra/test/run-e2e.sh`), que também derruba tudo.
+#
+# É o ÚNICO lugar com `SSRF_ALLOWLIST` preenchida (só `fixtures`). Os segredos abaixo são
+# fictícios, de teste; nada daqui vai para produção.
+#
+# Redes (PRD §7):
+#   db      postgres, app, app-daily. O scanner NÃO está nela: não tem rota para o banco.
+#   scan    app, app-daily, scanner, fixtures e o runner (que chama o scanner direto).
+#   proxy   faixa confiável (TRUSTED_PROXIES): o runner faz o papel do Traefik e simula o
+#           IP de quem pede pelo X-Forwarded-For.
+#   direct  faixa NÃO confiável: o X-Forwarded-For vindo dela é ignorado pelo app.
+# Todas são `internal`: nenhum container sai para a internet durante o teste.
+#
+# Sem volumes do host: fixtures e specs entram nas imagens, e a saída do Playwright é copiada
+# do container no fim. Assim o Compose não depende do compartilhamento de pastas do Docker.
+#
+# Nomes que o runner usa (apelidos de uma rede só, para a origem da conexão ser previsível;
+# não use o nome do serviço, que resolve em qualquer rede compartilhada):
+#   http://app-via-proxy:4000        app, pela faixa confiável
+#   http://app-direct:4000           app, pela faixa não confiável
+#   http://app-daily-via-proxy:4000  instância com teto diário baixo, banco próprio
+#   http://scanner:4100              scanner
+#   http://fixtures/                 fixtures (como o app e o scanner enxergam)
+name: rampa-e2e
+
+x-app-env: &app-env
+  PHX_SERVER: "true"
+  PHX_HOST: app
+  PORT: "4000"
+  POOL_SIZE: "10"
+  SCANNER_URL: http://scanner:4100
+  SCAN_CONCURRENCY: "2"
+  # Fictícios, só de teste.
+  SECRET_KEY_BASE: teste-e2e-secret-key-base-ficticio-nao-usar-em-producao-0123456789abcdef
+  IP_HASH_SECRET: teste-e2e-ip-hash-secret-ficticio-nao-usar-em-producao
+  # RF-RA002: só o container de fixtures pula a checagem de nome e de IP. A release `e2e` só
+  # aceita a allowlist com o marcador RAMPA_E2E=1; sem ele, segue as regras de produção.
+  SSRF_ALLOWLIST: fixtures
+  RAMPA_E2E: "1"
+  # Só a rede `proxy` é confiável (ver `networks.proxy`).
+  TRUSTED_PROXIES: 172.29.250.0/24
+  # O limite por IP é o do PRD (5/h); cada teste usa IPs simulados próprios.
+  AUDITS_PER_IP_PER_HOUR: "5"
+  AUDITS_DAILY_LIMIT: "100000"
+
+x-app-healthcheck: &app-healthcheck
+  test: ["CMD", "/app/bin/health"]
+  interval: 2s
+  timeout: 3s
+  retries: 90
+
+# Nome que resolve para um IP privado (10.0.0.5), para o critério "um domínio que resolve
+# para 10.0.0.5" (RF-RA002). `.test` é reservado (RFC 6761) e não está entre os sufixos
+# recusados pelo nome: a recusa vem do IP resolvido.
+x-private-hosts: &private-hosts
+  - "interno.rampa.test:10.0.0.5"
+
+services:
+  postgres:
+    # Mesma imagem do CI e do Compose de dev, fixada por digest.
+    image: postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rampa_e2e
+    configs:
+      - source: daily-database
+        target: /docker-entrypoint-initdb.d/10-daily.sql
+    # Dados descartáveis, em memória.
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [db]
+    healthcheck:
+      # Pelo TCP: durante a inicialização o servidor temporário só escuta no socket local.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "rampa_e2e_daily"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        # Release de teste (config/e2e.exs): aceita a SSRF_ALLOWLIST. A de prod recusa.
+        MIX_ENV: e2e
+    image: rampa-e2e-app
+    command: ["sh", "-c", "bin/migrate && exec bin/server"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: ecto://postgres:postgres@postgres/rampa_e2e
+    extra_hosts: *private-hosts
+    networks:
+      db: {}
+      scan: {}
+      proxy:
+        aliases: [app-via-proxy]
+      direct:
+        aliases: [app-direct]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  # Segunda instância, com teto diário baixo e banco próprio (RF-RA002, teto global): o teto
+  # conta todas as auditorias do dia, e no banco do `app` os outros testes o esgotariam.
+  # Só um spec deve usá-la por execução.
+  app-daily:
+    image: rampa-e2e-app
+    # Construída pelo serviço `app`; nunca baixar de um registro.
+    pull_policy: never
+    command: ["sh", "-c", "bin/migrate && exec bin/server"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: ecto://postgres:postgres@postgres/rampa_e2e_daily
+      AUDITS_PER_IP_PER_HOUR: "1000"
+      AUDITS_DAILY_LIMIT: "3"
+    extra_hosts: *private-hosts
+    networks:
+      db: {}
+      scan: {}
+      proxy:
+        aliases: [app-daily-via-proxy]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  scanner:
+    build: ../scanner
+    image: rampa-e2e-scanner
+    environment:
+      # `production` recusaria a allowlist (RF-RA002).
+      NODE_ENV: test
+      SSRF_ALLOWLIST: fixtures
+      HOST: 0.0.0.0
+    extra_hosts: *private-hosts
+    networks: [scan]
+    init: true
+    shm_size: 1gb
+    mem_limit: 1536m
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  fixtures:
+    # nginx fixado por digest, com as páginas e a configuração (`infra/test/fixtures.Dockerfile`).
+    build:
+      context: ..
+      dockerfile: infra/test/fixtures.Dockerfile
+    image: rampa-e2e-fixtures
+    networks: [scan]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Runner do Playwright (`e2e/Dockerfile`, `e2e/playwright.integrado.config.ts`). Fora do
+  # `up` (perfil próprio): `docker compose run e2e [args do playwright]`. A saída fica em
+  # `/e2e/out` (`infra/test/run-e2e.sh` copia para `e2e/test-results/integrado/`).
+  e2e:
+    profiles: [e2e]
+    build: ../e2e
+    image: rampa-e2e-runner
+    environment:
+      CI: ${CI:-}
+      HOME: /tmp
+      RAMPA_API_URL: http://app-via-proxy:4000
+      RAMPA_API_DIRECT_URL: http://app-direct:4000
+      RAMPA_API_DAILY_URL: http://app-daily-via-proxy:4000
+      RAMPA_SCANNER_URL: http://scanner:4100
+      RAMPA_FIXTURES_URL: http://fixtures
+      RAMPA_TRUSTED_PROXIES: 172.29.250.0/24
+    networks: [proxy, direct, scan]
+    depends_on:
+      app:
+        condition: service_healthy
+      app-daily:
+        condition: service_healthy
+      fixtures:
+        condition: service_healthy
+
+  # Release de PRODUÇÃO (MIX_ENV=prod), só para provar que ela se recusa a subir com a
+  # SSRF_ALLOWLIST preenchida (`infra/test/check-allowlist-prod.sh`). Nunca sobe no `up`.
+  app-prod:
+    profiles: [check]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        MIX_ENV: prod
+    image: rampa-e2e-app-prod
+
+# Banco à parte da instância `app-daily` (teto diário baixo): o teto conta todas as
+# auditorias do dia no banco, e no banco do `app` os outros testes o esgotariam antes da hora.
+configs:
+  daily-database:
+    content: |
+      CREATE DATABASE rampa_e2e_daily;
+
+networks:
+  db:
+    internal: true
+  scan:
+    internal: true
+  proxy:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.250.0/24
+  direct:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.251.0/24

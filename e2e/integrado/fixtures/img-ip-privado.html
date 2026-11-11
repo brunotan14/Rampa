@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imagem em endereço privado</title>
+</head>
+<body>
+  <header><p>Fixture do Rampa</p></header>
+  <main>
+    <h1>Imagem em endereço privado</h1>
+    <p>A imagem abaixo aponta para um IP da rede interna. A proteção contra SSRF bloqueia a requisição (RF-RA002) e a varredura continua.</p>
+    <img src="http://192.168.0.1/x.png" alt="Gráfico de acessos do mês" width="120" height="80">
+    <p>O botão abaixo não tem nome acessível. O axe deve apontar a regra <code>button-name</code> (critério 4.1.2), prova de que a página foi analisada depois do bloqueio.</p>
+    <button type="button"></button>
+  </main>
+</body>
+</html>

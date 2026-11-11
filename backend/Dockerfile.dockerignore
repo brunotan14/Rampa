@@ -1,0 +1,14 @@
+# Contexto do `backend/Dockerfile` (a raiz do repositório): só o que a release usa.
+# Lido pelo BuildKit no lugar do `.dockerignore` da raiz, só para este Dockerfile.
+*
+!backend/mix.exs
+!backend/mix.lock
+!backend/config/
+!backend/lib/
+!backend/priv/
+!backend/rel/
+!shared/scanner-contract.schema.json
+
+# O build do frontend entra em `priv/static` no M6, dentro da própria imagem.
+backend/priv/static/
+**/.DS_Store

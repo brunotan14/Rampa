@@ -1,6 +1,7 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "playwright";
 import { CONTRACT_LIMITS, type AxeFacts, type AxeNode, type AxeRule } from "./contract.gen.js";
+import { hasMinimumTarget } from "./contract.js";
 
 // Varredura automática com axe-core (RF-RA003). O scanner só repassa os fatos: quem converte
 // em achado, corta o HTML em 2 KB para gravar e decide a severidade é o backend.
@@ -22,8 +23,9 @@ export async function runAxe(page: Page): Promise<AxeFacts> {
 
 // Mantém só os campos do contrato (`shared/scanner-contract.schema.json`). `any`/`all`/`none`,
 // `relatedNodes`, `xpath` e `ancestry` ficam de fora para o payload não crescer. Só os primeiros
-// nós da regra são convertidos (`nodes_total` guarda quantos eram); os cortes de tamanho (HTML,
-// seletores) ficam em `contract.ts`, aplicados pelo servidor a toda resposta.
+// nós da regra são convertidos (`nodes_total` guarda quantos eram, inclusive os descartados por
+// não ter o mínimo de `target`); os cortes de tamanho (HTML, seletores) ficam em `contract.ts`,
+// aplicados pelo servidor a toda resposta.
 function slimRule(rule: RawRule): AxeRule {
   return {
     id: rule.id,
@@ -32,7 +34,10 @@ function slimRule(rule: RawRule): AxeRule {
     description: rule.description,
     help: rule.help,
     helpUrl: rule.helpUrl,
-    nodes: rule.nodes.slice(0, CONTRACT_LIMITS.nodes).map(slimNode),
+    nodes: rule.nodes
+      .filter((node) => hasMinimumTarget(node.target))
+      .slice(0, CONTRACT_LIMITS.nodes)
+      .map(slimNode),
     nodes_total: rule.nodes.length,
   };
 }

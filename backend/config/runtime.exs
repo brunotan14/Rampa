@@ -29,6 +29,10 @@ config :rampa, :scanner_url, System.get_env("SCANNER_URL", "http://localhost:410
 # (`Rampa.Security.Allowlist.check_startup/2`, chamada em `Rampa.Application.start/2`).
 config :rampa, :ssrf_allowlist, System.get_env("SSRF_ALLOWLIST", "")
 
+# Marcador do Compose de teste: só com `RAMPA_E2E=1` a release `:e2e` aceita a allowlist; sem
+# ele, ela segue as regras de produção (`Rampa.Security.RuntimeEnv`).
+config :rampa, :e2e_marker, System.get_env("RAMPA_E2E")
+
 if config_env() != :test do
   config :rampa, Oban,
     queues: [
@@ -56,16 +60,17 @@ if config_env() != :test do
 end
 
 # Segredo do HMAC do IP de quem pede auditorias (`Rampa.Security.IPHash`). Obrigatório em
-# produção: sem ele o app não sobe. Dev e test têm valor fixo, que a variável sobrescreve
-# em dev.
+# produção e na release `:e2e` do Compose de teste: sem ele o app não sobe. Dev e test têm
+# valor fixo, que a variável sobrescreve em dev.
 case {config_env(), System.get_env("IP_HASH_SECRET")} do
   {:test, _secret} -> :ok
-  {:prod, secret} -> config :rampa, :ip_hash_secret, secret
+  {env, secret} when env in [:prod, :e2e] -> config :rampa, :ip_hash_secret, secret
   {_dev, nil} -> :ok
   {_dev, secret} -> config :rampa, :ip_hash_secret, secret
 end
 
-if config_env() == :prod do
+# `:e2e` é a release do Compose de teste (config/e2e.exs): mesmas variáveis obrigatórias.
+if config_env() in [:prod, :e2e] do
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

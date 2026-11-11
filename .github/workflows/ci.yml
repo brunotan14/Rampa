@@ -14,6 +14,7 @@ permissions:
 
 # Versões do Erlang/OTP e do Elixir, usadas no setup-beam e na chave do cache do Mix: mudar
 # qualquer uma invalida o `_build` guardado, que não pode ser reaproveitado entre versões.
+# As imagens de build e de runtime de `backend/Dockerfile` acompanham estas versões.
 env:
   OTP_VERSION: "29.1"
   ELIXIR_VERSION: "1.20.5"
@@ -158,6 +159,34 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
+          retention-days: 14
+
+  # E2E integrado (PRD §11.4): Compose de teste (`infra/docker-compose.test.yml`) com a release
+  # do app, o scanner real, o banco e o site de fixtures, e os specs de `e2e/integrado/`.
+  # Roda direto no runner, sem `container:`, porque usa o Docker dele. O mesmo script do
+  # `make e2e-integrado` local: constrói as imagens, prova que a release de produção recusa a
+  # SSRF_ALLOWLIST, confere o isolamento de rede do scanner e roda o Playwright.
+  # Sem cache de build entre execuções: com o driver `docker` do runner não há exportação de
+  # cache, e o driver `docker-container` exigiria a imagem do BuildKit e o `--load` de imagens
+  # de mais de 1 GB, que custam mais do que a compilação que economizariam.
+  e2e-integrated:
+    name: E2E integrado (API + scanner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compose de teste e specs integrados
+        run: make e2e-integrado
+      # O script já derruba tudo; este passo cobre o cancelamento e o prazo estourado (guarda
+      # os logs se os containers ainda existirem).
+      - name: Derruba o Compose de teste
+        if: always()
+        run: infra/test/run-e2e.sh down
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() || cancelled()
+        with:
+          name: e2e-integrado
+          path: e2e/test-results/integrado
           retention-days: 14
 
   # Barra no PR dependência nova (npm, mix, actions) com vulnerabilidade conhecida de severidade

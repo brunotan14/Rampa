@@ -6,7 +6,7 @@ defmodule Rampa.ApplicationTest do
 
   alias Rampa.Security.TrustedProxies
 
-  @keys [:env, :ip_hash_secret, :trusted_proxies, :ssrf_allowlist]
+  @keys [:env, :e2e_marker, :ip_hash_secret, :trusted_proxies, :ssrf_allowlist]
 
   setup do
     previous = Map.new(@keys, &{&1, Application.get_env(:rampa, &1)})
@@ -42,6 +42,27 @@ defmodule Rampa.ApplicationTest do
     capture_log(fn ->
       assert {:error, reason} = start()
       assert reason =~ "TRUSTED_PROXIES"
+    end)
+  end
+
+  test "release :e2e sem RAMPA_E2E=1 se comporta como produção e recusa a SSRF_ALLOWLIST" do
+    Application.put_env(:rampa, :env, :e2e)
+    Application.put_env(:rampa, :e2e_marker, nil)
+    Application.put_env(:rampa, :ssrf_allowlist, "fixtures")
+
+    log = capture_log(fn -> assert {:error, "SSRF_ALLOWLIST" <> _} = start() end)
+    assert log =~ "sem RAMPA_E2E=1"
+  end
+
+  test "release :e2e sem RAMPA_E2E=1 exige o IP_HASH_SECRET de produção (32+ caracteres)" do
+    Application.put_env(:rampa, :env, :e2e)
+    Application.put_env(:rampa, :e2e_marker, nil)
+    Application.put_env(:rampa, :ssrf_allowlist, "")
+    Application.put_env(:rampa, :ip_hash_secret, "curto")
+
+    capture_log(fn ->
+      assert {:error, reason} = start()
+      assert reason =~ "menos de 32 caracteres"
     end)
   end
 

@@ -1,7 +1,7 @@
 # Comandos do Rampa. Pré-requisitos: Elixir 1.20 / OTP 29, Node 26 (versão exata no `.nvmrc`), Docker.
 COMPOSE = docker compose -f infra/docker-compose.yml
 
-.PHONY: setup services down dev test test-backend test-frontend test-scanner e2e lint openapi scanner-contract
+.PHONY: setup services down dev test test-backend test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint openapi scanner-contract
 
 setup: services ## Instala dependências e prepara o banco
 	cd backend && mix deps.get && mix ecto.setup
@@ -32,8 +32,22 @@ test-frontend:
 test-scanner:
 	cd scanner && npm test
 
-e2e: ## E2E com Playwright + axe
+e2e: ## E2E das telas do Rampa (Playwright + axe)
 	cd e2e && npm test
+
+# E2E integrado (PRD §11.4): Compose de teste com app, scanner, banco e fixtures. ARGS vai
+# para o Playwright, ex.: make e2e-integrado ARGS="-g fumaça".
+e2e-integrado: ## E2E integrado: sobe o Compose de teste, roda e2e/integrado e derruba
+	infra/test/run-e2e.sh $(ARGS)
+
+e2e-integrado-up: ## Constrói e sobe o Compose de teste, e deixa de pé
+	infra/test/run-e2e.sh up
+
+e2e-integrado-run: ## Roda os specs de e2e/integrado no Compose de teste de pé
+	infra/test/run-e2e.sh run $(ARGS)
+
+e2e-integrado-down: ## Guarda os logs e derruba o Compose de teste
+	infra/test/run-e2e.sh down
 
 lint: ## Formatação, lint e tipos das três partes
 	cd backend && mix format --check-formatted && mix credo --strict
