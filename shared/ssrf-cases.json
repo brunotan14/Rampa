@@ -1,5 +1,5 @@
 {
-  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL de qualquer requisição (documento, sub-recurso, salto de redirecionamento; a política é a mesma, inclusive a porta, só 80 e 443) e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso, interpretada pela mesma função que lê a variável de ambiente em cada lado.",
+  "description": "Casos da proteção contra SSRF (RF-RA002), lidos pelos testes do backend (backend/test/rampa/security/url_guard_test.exs) e do scanner (scanner/test/ssrf.test.ts) para as duas implementações não divergirem. `ips`: endereço e se é proibido. `urls`: URL de qualquer requisição (documento, sub-recurso, salto de redirecionamento; a política é a mesma, inclusive a porta, só 80 e 443) e o resultado esperado (`ok`, `blocked_address`, `unsupported_scheme` ou `invalid_url`), sem DNS real: nos dois lados, um nome que passa na checagem de nome resolve para IP público. `allowlist`, quando presente, é a SSRF_ALLOWLIST do caso, interpretada pela mesma função que lê a variável de ambiente em cada lado. `normalized`, quando presente, é a URL que os dois lados precisam produzir (no scanner, o `href` do WHATWG URL; no backend, o resultado do URLGuard); cobre os nomes internacionalizados (IDN), convertidos para punycode pelo UTS #46 não transicional.",
   "ips": [
     { "ip": "0.0.0.0", "blocked": true, "range": "0.0.0.0/8" },
     { "ip": "0.255.255.255", "blocked": true, "range": "0.0.0.0/8" },
@@ -123,6 +123,18 @@
     { "url": "http://[fe80::1]/", "expected": "blocked_address" },
     { "url": "http://[fd00::1]/", "expected": "blocked_address" },
     { "url": "http://[64:ff9b::a9fe:a9fe]/", "expected": "blocked_address" },
+
+    { "url": "https://ação.com.br/", "expected": "ok", "normalized": "https://xn--ao-siap.com.br/" },
+    { "url": "https://AÇÃO.com.br/", "expected": "ok", "normalized": "https://xn--ao-siap.com.br/" },
+    { "url": "https://münchen.de/", "expected": "ok", "normalized": "https://xn--mnchen-3ya.de/" },
+    { "url": "https://faß.de/", "expected": "ok", "normalized": "https://xn--fa-hia.de/" },
+    { "url": "https://日本。jp/", "expected": "ok", "normalized": "https://xn--wgv71a.jp/" },
+    { "url": "https://xn--ao-siap.com.br/", "expected": "ok", "normalized": "https://xn--ao-siap.com.br/" },
+    { "url": "https://exemplo.com/ação?q=ã", "expected": "ok", "normalized": "https://exemplo.com/a%C3%A7%C3%A3o?q=%C3%A3" },
+    { "url": "http://ｌｏｃａｌｈｏｓｔ/", "expected": "blocked_address" },
+    { "url": "http://①②⑦.0.0.1/", "expected": "blocked_address" },
+    { "url": "http://ação.local/", "expected": "blocked_address" },
+    { "url": "https://xn--zz.com/", "expected": "invalid_url" },
 
     { "url": "ftp://exemplo.com/", "expected": "unsupported_scheme" },
     { "url": "file:///etc/passwd", "expected": "unsupported_scheme" },

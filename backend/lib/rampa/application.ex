@@ -5,12 +5,17 @@ defmodule Rampa.Application do
 
   use Application
 
-  alias Rampa.Security.Allowlist
+  alias Rampa.Security.{Allowlist, IPHash, TrustedProxies}
 
   @impl true
   def start(_type, _args) do
-    # Em produção, `SSRF_ALLOWLIST` preenchida impede a subida (RF-RA002).
-    with :ok <- Allowlist.check_startup(Application.fetch_env!(:rampa, :env), Allowlist.hosts()) do
+    env = Application.fetch_env!(:rampa, :env)
+
+    # RF-RA002: em produção, `SSRF_ALLOWLIST` preenchida impede a subida; sem
+    # `IP_HASH_SECRET` ou com `TRUSTED_PROXIES` inválida, o app não sobe em nenhum ambiente.
+    with :ok <- Allowlist.check_startup(env, Allowlist.hosts()),
+         :ok <- IPHash.check_startup(env, IPHash.secret()),
+         :ok <- TrustedProxies.check_startup(env, Application.get_env(:rampa, :trusted_proxies)) do
       start_children()
     end
   end

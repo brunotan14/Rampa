@@ -10,15 +10,20 @@ defmodule Rampa.Security.URLGuard do
     * remove o fragmento, põe o host em minúsculas e tira o ponto final;
     * caminho vazio vira `/`; a porta padrão do esquema some;
     * IPv4 em notação não canônica (`127.1`, `0x7f.0.0.1`, `2130706433`) vira a forma
-      com pontos, como o navegador faria.
+      com pontos, como o navegador faria;
+    * nome internacionalizado (IDN) vira punycode antes de qualquer checagem, com a
+      biblioteca `idna` (UTS #46, não transicional, como o WHATWG URL Standard):
+      `ação.com.br` vira `xn--ao-siap.com.br`. A conversão é por rótulo e só nos rótulos
+      fora do ASCII ou em `xn--` (que são conferidos). O mapeamento pode transformar o
+      host num nome interno ou num IP (`ｌｏｃａｌｈｏｓｔ`, `①②⑦.0.0.1`), que passam
+      pelas checagens de sempre. Fora do host, os bytes fora do ASCII são codificados
+      com `%`, como faz o navegador.
 
   Recusas (`{:error, reason}`):
 
-    * `:invalid_url`: não interpreta, sem host, com credenciais (`user:pass@`), com
-      caractere inválido no host (inclusive `%`) ou com host fora do ASCII. Nomes
-      internacionalizados (IDN) ainda não são convertidos para punycode, porque o
-      Elixir não traz IDNA e o projeto não usa dependência para isso. A pessoa pode
-      informar o nome já em punycode (`xn--...`);
+    * `:invalid_url`: não interpreta, sem host, acima de 2.048 bytes, com
+      credenciais (`user:pass@`), com caractere inválido no host (inclusive `%`) ou com
+      nome internacionalizado que o IDNA recusa (inclusive rótulo `xn--` inválido);
     * `:unsupported_scheme`: esquema que não é `http` nem `https`;
     * `:blocked_address`: porta fora de 80/443, nome interno (sem ponto, `localhost`,
       `.local`, `.internal`, `.localdomain`, `.home.arpa`) ou IP, literal ou resolvido,
@@ -45,6 +50,10 @@ defmodule Rampa.Security.URLGuard do
   @host_port ~r/\A(?:[^\/?#:@]*\.[^\/?#:@]*|localhost):\d*(?:[\/?#]|\z)/i
   @scheme ~r/\A[a-z][a-z0-9+.\-]*:/i
   @name ~r/\A[a-z0-9_\-]+(?:\.[a-z0-9_\-]+)*\z/
+  # Esquema com `//`, autoridade (até `/`, `?` ou `#`) e o resto.
+  @authority ~r/\A([a-z][a-z0-9+.\-]*:\/\/)([^\/?#]*)(.*)\z/isu
+  @host_and_port ~r/\A(.*?)(:\d*)?\z/su
+  @label_separators ~r/[.。．｡]/u
 
   @doc """
   Valida a URL e devolve a forma normalizada.
@@ -74,12 +83,88 @@ defmodule Rampa.Security.URLGuard do
     url = String.trim(url)
 
     with true <- url != "" and byte_size(url) <= @max_length,
-         {:ok, %URI{userinfo: nil} = uri} <- url |> with_scheme() |> URI.new() do
+         {:ok, url} <- url |> with_scheme() |> to_ascii(),
+         true <- byte_size(url) <= @max_length,
+         {:ok, %URI{userinfo: nil} = uri} <- URI.new(url) do
       {:ok, uri}
     else
       _invalid -> {:error, :invalid_url}
     end
   end
+
+  # IDN (RF-RA001): o host internacionalizado vira punycode e o resto da URL tem os bytes
+  # fora do ASCII codificados com `%`, como o navegador faz. URL já em ASCII e sem rótulo
+  # `xn--` passa como veio.
+  defp to_ascii(url) do
+    case Regex.run(@authority, url, capture: :all_but_first) do
+      [scheme, authority, rest] ->
+        with {:ok, authority} <- ascii_authority(authority),
+             do: {:ok, scheme <> authority <> percent_encode(rest)}
+
+      nil ->
+        {:ok, percent_encode(url)}
+    end
+  end
+
+  # Com `@` (credenciais) a URL é recusada adiante; o host não é convertido.
+  defp ascii_authority(authority) do
+    if String.contains?(authority, "@") do
+      {:ok, percent_encode(authority)}
+    else
+      {host, port} =
+        case Regex.run(@host_and_port, authority, capture: :all_but_first) do
+          [host, port] -> {host, port}
+          [host] -> {host, ""}
+        end
+
+      with {:ok, host} <- idna_host(host), do: {:ok, host <> port}
+    end
+  end
+
+  # Por rótulo, para um rótulo ASCII com `_` (aceito pelo navegador e recusado pelo IDNA2008)
+  # não derrubar o nome inteiro. Os separadores de rótulo do UTS #46 (`。`, `．`, `｡`) viram
+  # ponto.
+  defp idna_host(host) do
+    labels = String.split(host, @label_separators)
+
+    if Enum.any?(labels, &idna_label?/1), do: encode_labels(labels), else: {:ok, host}
+  end
+
+  defp encode_labels(labels) do
+    labels
+    |> Enum.reduce_while({:ok, []}, fn label, {:ok, acc} ->
+      case idna_label(label) do
+        {:ok, label} -> {:cont, {:ok, [label | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, labels} -> {:ok, labels |> Enum.reverse() |> Enum.join(".")}
+      :error -> :error
+    end
+  end
+
+  defp idna_label?(label),
+    do: not ascii?(label) or String.starts_with?(String.downcase(label), "xn--")
+
+  defp idna_label(label) do
+    if idna_label?(label) do
+      {:ok, label |> String.to_charlist() |> :idna.encode([:uts46]) |> List.to_string()}
+    else
+      {:ok, label}
+    end
+  catch
+    _kind, _reason -> :error
+  end
+
+  defp ascii?(text), do: text =~ ~r/\A[\x00-\x7F]*\z/
+
+  defp percent_encode(text) do
+    if ascii?(text), do: text, else: for(<<byte <- text>>, into: "", do: encode_byte(byte))
+  end
+
+  defp encode_byte(byte) when byte < 0x80, do: <<byte>>
+  defp encode_byte(byte), do: "%" <> Base.encode16(<<byte>>)
 
   defp with_scheme("//" <> _ = url), do: "https:" <> url
 

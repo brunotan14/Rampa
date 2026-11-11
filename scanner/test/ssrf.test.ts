@@ -6,7 +6,7 @@ import { checkStartup, checkUrl, defaultPolicy, parseAllowlist } from "../src/ss
 // Casos compartilhados com o backend (`backend/test/rampa/security/url_guard_test.exs`).
 interface SharedCases {
   ips: { ip: string; blocked: boolean; range: string }[];
-  urls: { url: string; expected: string; allowlist?: string[] }[];
+  urls: { url: string; expected: string; allowlist?: string[]; normalized?: string }[];
 }
 
 const cases = JSON.parse(
@@ -20,11 +20,13 @@ describe("casos compartilhados com o backend: IPs", () => {
 });
 
 describe("casos compartilhados com o backend: URLs", () => {
-  it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist }) => {
+  it.each(cases.urls)("$url (allowlist $allowlist) → $expected", ({ url, expected, allowlist, normalized }) => {
     // A lista passa pela mesma interpretação da variável de ambiente, como no backend.
     const hosts = parseAllowlist((allowlist ?? []).join(","));
     const check = checkUrl(url, defaultPolicy({ allowlist: new Set(hosts) }));
     expect(check.ok ? "ok" : check.reason).toBe(expected);
+    // IDN: o WHATWG URL e o URLGuard do backend precisam chegar à mesma URL.
+    if (normalized !== undefined && check.ok) expect(check.url.href).toBe(normalized);
   });
 });
 

@@ -65,6 +65,21 @@ config :rampa, :scanner_client, Rampa.Scanner.HTTP
 config :rampa, :dns_resolver, Rampa.Security.Resolver.Inet
 config :rampa, :env, config_env()
 
+# Limites de criação de auditorias (RF-RA002, `Rampa.Audits.Limits`). Fora de test,
+# `AUDITS_PER_IP_PER_HOUR` e `AUDITS_DAILY_LIMIT` sobrescrevem em runtime.exs.
+config :rampa, :audit_limits, per_ip_per_hour: 5, daily: 50
+
+# Faixas confiáveis para o `X-Forwarded-For` (`TRUSTED_PROXIES`, em runtime.exs). Vazia: vale
+# sempre o IP da conexão.
+config :rampa, :trusted_proxies, ""
+
+# Fusos (o dia do teto diário e os horários das mensagens são os de São Paulo). Base de
+# fusos embutida no pacote `tz`, sem atualização pela rede.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
+# Mensagens ao usuário em português do Brasil (`RampaWeb.ErrorMessages`).
+config :rampa, RampaWeb.Gettext, default_locale: "pt_BR"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

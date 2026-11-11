@@ -52,6 +52,9 @@ defmodule Rampa.MixProject do
       {:bandit, "~> 1.5"},
       {:oban, "~> 2.24"},
       {:req, "~> 0.7.5"},
+      {:idna, "~> 7.1"},
+      {:tz, "~> 0.28"},
+      {:open_api_spex, "~> 3.22"},
       {:mox, "~> 1.3", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]

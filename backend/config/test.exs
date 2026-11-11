@@ -23,6 +23,9 @@ config :rampa, RampaWeb.Endpoint,
 # Jobs não rodam sozinhos nos testes; use Oban.Testing
 config :rampa, Oban, testing: :manual
 
+# Segredo do hash do IP (RF-RA002) fixo nos testes.
+config :rampa, :ip_hash_secret, "test-ip-hash-secret-nao-usar-em-producao"
+
 config :rampa, :scanner_client, Rampa.Scanner.ClientMock
 config :rampa, :dns_resolver, Rampa.Security.ResolverMock
 

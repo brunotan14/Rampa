@@ -102,7 +102,10 @@ defmodule Rampa.Security.URLGuardTest do
           {"http://0x08.8.8.8/", "http://8.8.8.8/"},
           {"http://134744072/", "http://8.8.8.8/"},
           {"http://[2606:4700:4700:0:0:0:0:1111]/", "http://[2606:4700:4700::1111]/"},
-          {"http://xn--ao-5ja.com.br/", "http://xn--ao-5ja.com.br/"}
+          {"http://xn--ao-5ja.com.br/", "http://xn--ao-5ja.com.br/"},
+          {"ação.com.br", "https://xn--ao-siap.com.br/"},
+          {"https://AÇÃO.com.br:443/contato#topo", "https://xn--ao-siap.com.br/contato"},
+          {"https://a_b.ação.com.br/", "https://a_b.xn--ao-siap.com.br/"}
         ] do
       test "#{inspect(input)} vira #{expected}" do
         assert {:ok, unquote(expected)} = validate(unquote(input))
@@ -128,7 +131,8 @@ defmodule Rampa.Security.URLGuardTest do
           "https://%6cocalhost/",
           "https://exemplo..com/",
           "https://-.com/x y",
-          "https://ação.com.br/"
+          "https://xn--zz.com/",
+          "https://-ação.com/"
         ] do
       test "#{inspect(input)} é recusada como inválida" do
         assert {:error, :invalid_url} = validate(unquote(input))
@@ -138,6 +142,15 @@ defmodule Rampa.Security.URLGuardTest do
     test "URL longa demais é recusada" do
       assert {:error, :invalid_url} =
                validate("https://exemplo.com/" <> String.duplicate("a", 2_100))
+    end
+
+    test "javascript: com texto fora do ASCII continua sendo esquema não suportado" do
+      assert {:error, :unsupported_scheme} = validate("javascript:alert('ação')")
+    end
+
+    test "IDN que vira nome interno ou IP proibido é bloqueado sem consultar o DNS" do
+      assert {:error, :blocked_address} = validate("http://ｌｏｃａｌｈｏｓｔ/")
+      assert {:error, :blocked_address} = validate("http://①②⑦.0.0.1/")
     end
 
     test "valor que não é texto é recusado" do
@@ -223,13 +236,16 @@ defmodule Rampa.Security.URLGuardTest do
       raw = Map.get(test_case, "allowlist", [])
       # A lista passa pela mesma interpretação da variável de ambiente, como no scanner.
       allowlist = Allowlist.parse(raw)
+      normalized = Map.get(test_case, "normalized")
 
       test "#{url} #{if raw != [], do: "(allowlist #{Enum.join(raw, ",")}) "}→ #{expected}" do
         result = validate(unquote(url), allowlist: unquote(allowlist))
 
-        case unquote(expected) do
-          "ok" -> assert {:ok, _normalized} = result
-          reason -> assert {:error, String.to_existing_atom(reason)} == result
+        case {unquote(expected), unquote(normalized)} do
+          # IDN: o mesmo resultado do WHATWG URL no scanner.
+          {"ok", nil} -> assert {:ok, _normalized} = result
+          {"ok", normalized} -> assert {:ok, ^normalized} = result
+          {reason, _} -> assert {:error, String.to_existing_atom(reason)} == result
         end
       end
     end

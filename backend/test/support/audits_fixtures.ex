@@ -2,11 +2,12 @@ defmodule Rampa.AuditsFixtures do
   @moduledoc """
   Dados de teste para auditorias, inseridos direto no banco.
 
-  Só para testes: em produção a auditoria nasce em `POST /api/audits`, depois da validação
-  de URL e da proteção contra SSRF, e a página em `Rampa.Audits.add_page/2`.
+  Só para testes: em produção a auditoria nasce em `Rampa.Audits.create_audit/3`
+  (`POST /api/audits`), depois da validação de URL e da proteção contra SSRF, e a página em
+  `Rampa.Audits.add_page/2`.
   """
 
-  alias Rampa.Audits.{Audit, Page, PageTask}
+  alias Rampa.Audits.{Audit, Finding, Page, PageTask}
   alias Rampa.Repo
 
   @scanner_fixtures Path.expand("fixtures/scanner", __DIR__)
@@ -72,6 +73,32 @@ defmodule Rampa.AuditsFixtures do
 
   defp scan_task_defaults(_scanned, _error),
     do: %{status: :done, attempt: 1, started_at: now(), finished_at: now()}
+
+  @doc "Achado de uma página, inserido direto. Padrão: `image-alt` do axe, crítico, confirmado."
+  def finding_fixture(%Page{} = page, attrs \\ %{}) do
+    Repo.insert!(
+      struct!(
+        Finding,
+        Map.merge(
+          %{
+            page_id: page.id,
+            audit_id: page.audit_id,
+            source: :axe,
+            rule_id: "image-alt",
+            wcag_criteria: ["1.1.1"],
+            severity: :critical,
+            needs_review: false,
+            selector: "img",
+            html_snippet: ~s(<img src="a.png">),
+            message: "Imagens precisam de texto alternativo",
+            raw: %{"segredo" => "não sai na API"},
+            crop_path: "recortes/a.png"
+          },
+          attrs
+        )
+      )
+    )
+  end
 
   @doc """
   Resposta real do scanner para uma fixture (`img-sem-alt`, `limpa`, `contraste-incerto`),

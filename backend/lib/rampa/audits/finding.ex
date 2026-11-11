@@ -49,6 +49,12 @@ defmodule Rampa.Audits.Finding do
     timestamps(type: :utc_datetime)
   end
 
+  @spec sources() :: [source()]
+  def sources, do: @sources
+
+  @spec severities() :: [severity()]
+  def severities, do: @severities
+
   @doc "Tamanho máximo do trecho de HTML guardado, em bytes (RNF-RA005)."
   @spec html_snippet_max_bytes() :: pos_integer()
   def html_snippet_max_bytes, do: @html_snippet_max_bytes

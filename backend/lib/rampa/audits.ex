@@ -3,8 +3,12 @@ defmodule Rampa.Audits do
   Auditorias, páginas, tarefas e achados (PRD §8) e o ciclo de vida deles
   (regras em `Rampa.Audits.Rules`).
 
-  Este módulo ainda não cria auditorias: elas só podem nascer em `POST /api/audits`, depois
-  da validação de URL e da proteção contra SSRF (RF-RA001, RF-RA002).
+  ## Criação
+
+  `create_audit/3` é o único ponto de entrada de uma auditoria nova (`POST /api/audits`). Ela
+  mesma passa a URL pelo `Rampa.Security.URLGuard` (RF-RA001, RF-RA002), como
+  `add_page/2`: não existe caminho que crie auditoria ou página sem a proteção contra SSRF.
+  O limite de taxa e o teto diário ficam em `Rampa.Audits.Limits`.
 
   ## Tarefas e conclusão
 
@@ -30,7 +34,18 @@ defmodule Rampa.Audits do
 
   require Logger
 
-  alias Rampa.Audits.{Audit, AxeMapper, Finding, Page, PageData, PageTask, Rules, ScanPageJob}
+  alias Rampa.Audits.{
+    Audit,
+    AxeMapper,
+    Finding,
+    Limits,
+    Page,
+    PageData,
+    PageTask,
+    Rules,
+    ScanPageJob
+  }
+
   alias Rampa.Repo
   alias Rampa.Security.URLGuard
 
@@ -44,6 +59,18 @@ defmodule Rampa.Audits do
   # job no M4; até lá, uma tarefa delas presa é fechada como falha pela reconciliação.
   @task_workers %{scan: ScanPageJob}
 
+  # M1 (RF-RA001): toda auditoria tem uma página só. O M5 libera o `page_limit` pedido.
+  @m1_page_limit 1
+  @page_limit_range 1..25
+
+  # `Idempotency-Key`: de 1 a 128 caracteres ASCII visíveis; vale por 24 h.
+  @idempotency_key ~r/\A[\x21-\x7E]{1,128}\z/
+  @idempotency_ttl_seconds 86_400
+
+  # Paginação dos achados.
+  @findings_default_limit 50
+  @findings_max_limit 100
+
   # Estados do Oban em que o job ainda vai rodar ou está rodando: os mesmos da chave única.
   @live_job_states Enum.map(Oban.Job.unique_states(:incomplete), &Atom.to_string/1)
 
@@ -55,6 +82,323 @@ defmodule Rampa.Audits do
           | :already_finished
           | :page_limit_reached
           | :duplicate_url
+
+  @type requester :: %{required(:ip_hash) => String.t()}
+  @type create_error ::
+          URLGuard.reason()
+          | :invalid_page_limit
+          | :invalid_idempotency_key
+          | {:rate_limited, DateTime.t()}
+          | {:daily_limit_reached, DateTime.t()}
+          | :idempotency_conflict
+
+  ## Criação de auditorias
+
+  @doc """
+  Cria uma auditoria `queued` para `raw_url` com a primeira página, a tarefa `scan` e o
+  `ScanPageJob`, numa transação só (PRD §7, passo 1). Devolve a auditoria.
+
+  `requester` identifica quem pede, só pelo hash do IP (`%{ip_hash: ...}`,
+  `Rampa.Security.IPHash`).
+
+  Opções:
+
+    * `:page_limit`: o limite pedido. Se vier, tem de ser um inteiro de 1 a 25, senão
+      `{:error, :invalid_page_limit}`. **No M1 a auditoria é sempre criada com
+      `page_limit = 1`** (RF-RA001); o M5 passa a usar o valor pedido;
+    * `:idempotency_key`: o cabeçalho `Idempotency-Key`, de 1 a 128 caracteres ASCII
+      visíveis (senão `{:error, :invalid_idempotency_key}`). A mesma chave do mesmo
+      solicitante em até 24 h devolve a auditoria já criada, sem criar outra nem contar no
+      limite. Depois de 24 h a chave é liberada e a próxima requisição cria uma auditoria
+      nova;
+    * `:limits`: sobrescreve `:per_ip_per_hour` e `:daily` (`Rampa.Audits.Limits.config/1`);
+    * `:now`: o instante de referência (testes).
+
+  Ordem: a forma da requisição (`page_limit`, chave) é conferida primeiro; uma chave já
+  usada devolve a auditoria sem consultar o DNS; depois a URL passa pelo `URLGuard` (com o
+  DNS) **fora da transação**, e só então a transação abre e toma as travas consultivas
+  (`Rampa.Audits.Limits`: solicitante, depois global). Com as travas, a chave é procurada
+  de novo, e os limites são contados: por hora (`{:error, {:rate_limited, retry_at}}`) e do
+  dia (`{:error, {:daily_limit_reached, retry_at}}`). `retry_at` é o horário a partir do
+  qual dá para tentar de novo, em UTC.
+
+  Recusas da URL: as de `Rampa.Security.URLGuard.validate/2`.
+  """
+  @spec create_audit(String.t(), requester(), keyword()) ::
+          {:ok, Audit.t()} | {:error, create_error() | Ecto.Changeset.t()}
+  def create_audit(raw_url, %{ip_hash: ip_hash}, opts \\ []) when is_binary(ip_hash) do
+    key = Keyword.get(opts, :idempotency_key)
+    now = opts |> Keyword.get_lazy(:now, &now/0) |> DateTime.truncate(:second)
+
+    with :ok <- check_page_limit(Keyword.get(opts, :page_limit)),
+         :ok <- check_idempotency_key(key) do
+      case find_idempotent(ip_hash, key, now) do
+        %Audit{} = audit -> {:ok, audit}
+        nil -> validate_and_insert(raw_url, %{ip_hash: ip_hash, key: key}, opts, now)
+      end
+    end
+  end
+
+  # O DNS do `URLGuard` roda aqui, fora da transação e antes das travas.
+  defp validate_and_insert(raw_url, request, opts, now) do
+    with {:ok, url} <- URLGuard.validate(raw_url) do
+      limits = Limits.config(Keyword.get(opts, :limits, []))
+      insert_audit(Map.put(request, :url, url), limits, now)
+    end
+  end
+
+  defp check_page_limit(nil), do: :ok
+  defp check_page_limit(limit) when is_integer(limit) and limit in @page_limit_range, do: :ok
+  defp check_page_limit(_invalid), do: {:error, :invalid_page_limit}
+
+  defp check_idempotency_key(nil), do: :ok
+
+  defp check_idempotency_key(key) when is_binary(key) do
+    if Regex.match?(@idempotency_key, key), do: :ok, else: {:error, :invalid_idempotency_key}
+  end
+
+  defp check_idempotency_key(_invalid), do: {:error, :invalid_idempotency_key}
+
+  defp insert_audit(request, limits, now) do
+    Repo.transact(fn ->
+      :ok = Limits.lock_requester(request.ip_hash)
+
+      case claim_idempotency_key(request.ip_hash, request.key, now) do
+        %Audit{} = audit -> {:ok, audit}
+        nil -> insert_within_limits(request, limits, now)
+      end
+    end)
+    |> case do
+      # Conflito no índice único da chave: outra requisição com a mesma chave ganhou. Não
+      # acontece com a trava do solicitante, mas o índice é a última palavra.
+      {:error, :idempotency_conflict} -> idempotent_winner(request, now)
+      result -> result
+    end
+  end
+
+  defp idempotent_winner(request, now) do
+    case find_idempotent(request.ip_hash, request.key, now) do
+      %Audit{} = audit -> {:ok, audit}
+      nil -> {:error, :idempotency_conflict}
+    end
+  end
+
+  defp insert_within_limits(request, limits, now) do
+    attrs = %{
+      start_url: request.url,
+      page_limit: @m1_page_limit,
+      requester_ip_hash: request.ip_hash,
+      idempotency_key: request.key
+    }
+
+    changeset =
+      attrs
+      |> Audit.create_changeset()
+      |> Ecto.Changeset.change(inserted_at: now, updated_at: now)
+
+    with :ok <- Limits.check_hourly(request.ip_hash, limits.per_ip_per_hour, now),
+         :ok <- Limits.lock_global(),
+         :ok <- Limits.check_daily(limits.daily, now),
+         {:ok, audit} <- insert_new_audit(changeset),
+         {:ok, _page, audit} <- append_page(audit, request.url, now) do
+      {:ok, audit}
+    end
+  end
+
+  defp insert_new_audit(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, audit} ->
+        {:ok, audit}
+
+      {:error, %Ecto.Changeset{errors: errors} = changeset} ->
+        if Keyword.has_key?(errors, :idempotency_key),
+          do: {:error, :idempotency_conflict},
+          else: {:error, changeset}
+    end
+  end
+
+  # Auditoria da chave ainda válida (até 24 h), sem trava.
+  defp find_idempotent(_ip_hash, nil, _now), do: nil
+
+  defp find_idempotent(ip_hash, key, now) do
+    Repo.one(
+      from a in idempotency_query(ip_hash, key),
+        where: a.inserted_at > ^DateTime.add(now, -@idempotency_ttl_seconds)
+    )
+  end
+
+  # Com a trava do solicitante: devolve a auditoria da chave ainda válida; se a chave venceu,
+  # libera-a na auditoria antiga para a nova poder usá-la.
+  defp claim_idempotency_key(_ip_hash, nil, _now), do: nil
+
+  defp claim_idempotency_key(ip_hash, key, now) do
+    case find_idempotent(ip_hash, key, now) do
+      %Audit{} = audit ->
+        audit
+
+      nil ->
+        Repo.update_all(idempotency_query(ip_hash, key), set: [idempotency_key: nil])
+        nil
+    end
+  end
+
+  defp idempotency_query(ip_hash, key) do
+    from a in Audit, where: a.requester_ip_hash == ^ip_hash and a.idempotency_key == ^key
+  end
+
+  ## Consulta
+
+  @type severity_totals :: %{Finding.severity() => non_neg_integer()}
+  @type summary :: %{
+          audit: Audit.t(),
+          totals_by_severity: severity_totals(),
+          needs_review_count: non_neg_integer()
+        }
+
+  @doc """
+  Resumo de uma auditoria (`GET /api/audits/:id`, mínimo do M1): a auditoria, os totais
+  por severidade **só dos achados confirmados** (`needs_review = false`) e quantos achados
+  pedem revisão. UUID inválido ou inexistente: `{:error, :audit_not_found}`.
+  """
+  @spec get_audit_summary(String.t()) :: {:ok, summary()} | {:error, :audit_not_found}
+  def get_audit_summary(id) do
+    with {:ok, audit} <- fetch_audit(id) do
+      counts =
+        from(f in Finding,
+          where: f.audit_id == ^audit.id,
+          group_by: [f.needs_review, f.severity],
+          select: {f.needs_review, f.severity, count()}
+        )
+        |> Repo.all()
+
+      totals =
+        for {false, severity, count} <- counts,
+            reduce: Map.new(Finding.severities(), &{&1, 0}),
+            do: (acc -> Map.put(acc, severity, count))
+
+      needs_review = for {true, _severity, count} <- counts, reduce: 0, do: (acc -> acc + count)
+
+      {:ok, %{audit: audit, totals_by_severity: totals, needs_review_count: needs_review}}
+    end
+  end
+
+  @type findings_page :: %{data: [Finding.t()], next_cursor: String.t() | nil}
+
+  @doc """
+  Achados de uma auditoria (`GET /api/audits/:id/findings`), em páginas, na ordem
+  `(inserted_at, id)`.
+
+  `params` são os parâmetros da requisição (chaves em texto), todos opcionais:
+
+    * `"severity"` (`critical`, `serious`, `moderate`, `minor`), `"source"` (`axe`, `ai`,
+      `heuristic`) e `"needs_review"` (`true`, `false`): valor fora disso devolve
+      `{:error, :invalid_filter}`;
+    * `"limit"`: de 1 a #{@findings_max_limit}, padrão #{@findings_default_limit}
+      (`{:error, :invalid_limit}`);
+    * `"cursor"`: o `next_cursor` da página anterior, opaco (`{:error, :invalid_cursor}`).
+      Paginação por chave (keyset): achado gravado depois de a lista começar entra no fim,
+      sem repetir nem pular os anteriores.
+
+  `next_cursor` é `nil` na última página. Auditoria inexistente: `{:error, :audit_not_found}`.
+  """
+  @spec list_findings(String.t(), map()) ::
+          {:ok, findings_page()}
+          | {:error, :audit_not_found | :invalid_filter | :invalid_limit | :invalid_cursor}
+  def list_findings(audit_id, params) when is_map(params) do
+    with {:ok, audit} <- fetch_audit(audit_id),
+         {:ok, filters} <- findings_filters(params),
+         {:ok, limit} <- findings_limit(params["limit"]),
+         {:ok, after_key} <- decode_cursor(params["cursor"]) do
+      rows =
+        from(f in Finding,
+          where: f.audit_id == ^audit.id,
+          where: ^filters,
+          order_by: [asc: f.inserted_at, asc: f.id],
+          limit: ^(limit + 1)
+        )
+        |> after_cursor(after_key)
+        |> Repo.all()
+
+      {data, rest} = Enum.split(rows, limit)
+      next_cursor = if rest == [], do: nil, else: encode_cursor(List.last(data))
+
+      {:ok, %{data: data, next_cursor: next_cursor}}
+    end
+  end
+
+  defp fetch_audit(id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         %Audit{} = audit <- Repo.get(Audit, uuid) do
+      {:ok, audit}
+    else
+      _not_found -> {:error, :audit_not_found}
+    end
+  end
+
+  defp findings_filters(params) do
+    [
+      {"severity", :severity, Map.new(Finding.severities(), &{Atom.to_string(&1), &1})},
+      {"source", :source, Map.new(Finding.sources(), &{Atom.to_string(&1), &1})},
+      {"needs_review", :needs_review, %{"true" => true, "false" => false}}
+    ]
+    |> Enum.reduce_while({:ok, dynamic(true)}, fn filter, {:ok, acc} ->
+      case add_filter(acc, filter, params) do
+        {:ok, acc} -> {:cont, {:ok, acc}}
+        :error -> {:halt, {:error, :invalid_filter}}
+      end
+    end)
+  end
+
+  defp add_filter(acc, {param, field, values}, params) do
+    with {:ok, raw} <- Map.fetch(params, param),
+         {:ok, value} <- Map.fetch(values, raw) do
+      {:ok, dynamic([f], ^acc and field(f, ^field) == ^value)}
+    else
+      :error -> if Map.has_key?(params, param), do: :error, else: {:ok, acc}
+    end
+  end
+
+  defp findings_limit(nil), do: {:ok, @findings_default_limit}
+
+  defp findings_limit(raw) when is_binary(raw) do
+    case Integer.parse(raw) do
+      {limit, ""} when limit in 1..@findings_max_limit -> {:ok, limit}
+      _invalid -> {:error, :invalid_limit}
+    end
+  end
+
+  defp findings_limit(_invalid), do: {:error, :invalid_limit}
+
+  # Cursor: `<inserted_at em segundos Unix>:<id>` em Base64 de URL, sem preenchimento. O
+  # cliente não precisa (nem deve) interpretar.
+  defp encode_cursor(%Finding{inserted_at: inserted_at, id: id}),
+    do: Base.url_encode64("#{DateTime.to_unix(inserted_at)}:#{id}", padding: false)
+
+  defp decode_cursor(nil), do: {:ok, nil}
+
+  defp decode_cursor(cursor) when is_binary(cursor) do
+    with {:ok, decoded} <- Base.url_decode64(cursor, padding: false),
+         [unix, id] <- String.split(decoded, ":"),
+         {unix, ""} <- Integer.parse(unix),
+         {:ok, inserted_at} <- DateTime.from_unix(unix),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      {:ok, {inserted_at, id}}
+    else
+      _invalid -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor(_invalid), do: {:error, :invalid_cursor}
+
+  defp after_cursor(query, nil), do: query
+
+  defp after_cursor(query, {inserted_at, id}) do
+    where(
+      query,
+      [f],
+      f.inserted_at > ^inserted_at or (f.inserted_at == ^inserted_at and f.id > ^id)
+    )
+  end
 
   ## Criação de páginas e tarefas
 
@@ -79,12 +423,22 @@ defmodule Rampa.Audits do
 
   defp insert_page(audit_id, url) do
     with {:ok, audit} <- lock_audit(audit_id),
-         :ok <- check_new_page(audit, url),
+         {:ok, page, _audit} <- append_page(audit, url, now()) do
+      {:ok, page}
+    end
+  end
+
+  # Página `queued`, tarefa `scan` `pending` e `ScanPageJob`, com a regra de conclusão.
+  # Recebe a auditoria travada (ou recém-criada na mesma transação) e a URL já validada pelo
+  # `URLGuard`. Usada por `add_page/2` e `create_audit/3`. Devolve a página e a auditoria
+  # com os contadores atualizados.
+  defp append_page(audit, url, now) do
+    with :ok <- check_new_page(audit, url),
          {:ok, page} <- Repo.insert(Page.create_changeset(audit, url)),
          {:ok, _task} <- Repo.insert(PageTask.create_changeset(page, %{kind: :scan})),
          {:ok, _job} <- Oban.insert(ScanPageJob.new(%{"page_id" => page.id})),
-         {:ok, _audit} <- settle(audit, now()) do
-      {:ok, page}
+         {:ok, audit} <- settle(audit, now) do
+      {:ok, page, audit}
     end
   end
 

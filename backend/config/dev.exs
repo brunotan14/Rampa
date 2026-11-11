@@ -49,6 +49,9 @@ config :rampa, RampaWeb.Endpoint,
 # configured to run both http and https servers on
 # different ports.
 
+# Segredo do hash do IP (RF-RA002) fixo em dev; `IP_HASH_SECRET` sobrescreve em runtime.exs.
+config :rampa, :ip_hash_secret, "dev-ip-hash-secret-nao-usar-em-producao"
+
 # Enable dev routes for dashboard and mailbox
 config :rampa, dev_routes: true
 
