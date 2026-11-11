@@ -15,10 +15,12 @@ defmodule Rampa.Application do
 
     # RF-RA002: em produção, `SSRF_ALLOWLIST` preenchida impede a subida; sem
     # `IP_HASH_SECRET` ou com `TRUSTED_PROXIES` inválida, o app não sobe em nenhum ambiente.
-    # A release `:e2e` sem o marcador `RAMPA_E2E=1` segue as regras de produção.
+    # A release `:e2e` sem o marcador `RAMPA_E2E=1` segue as regras de produção. Em produção,
+    # origens do websocket inválidas (`PHX_ALLOWED_ORIGINS`) também impedem a subida.
     with :ok <- Allowlist.check_startup(env, Allowlist.hosts()),
          :ok <- IPHash.check_startup(env, IPHash.secret()),
-         :ok <- TrustedProxies.load(env, Application.get_env(:rampa, :trusted_proxies)) do
+         :ok <- TrustedProxies.load(env, Application.get_env(:rampa, :trusted_proxies)),
+         :ok <- RampaWeb.Origins.load(Application.get_env(:rampa, :allowed_origins)) do
       start_children()
     end
   end
@@ -44,6 +46,8 @@ defmodule Rampa.Application do
       {Phoenix.PubSub, name: Rampa.PubSub},
       # Tarefas sem link com quem chamou (ex.: consultas de DNS do `Resolver.Inet`).
       {Task.Supervisor, name: Rampa.TaskSupervisor},
+      # Canais `audit:<id>` abertos por conexão (limite em `RampaWeb.AuditChannel`).
+      {Registry, keys: :duplicate, name: RampaWeb.AuditChannel.Registry},
       {Oban, Application.fetch_env!(:rampa, Oban)},
       # Start to serve requests, typically the last entry
       RampaWeb.Endpoint

@@ -22,6 +22,9 @@ config :rampa, RampaWeb.Endpoint,
   pubsub_server: Rampa.PubSub,
   live_view: [signing_salt: "TzSg/1OS"]
 
+# Canal `audit:<id>` (RF-RA004): no máximo tantos canais por conexão (`RampaWeb.AuditChannel`).
+config :rampa, :audit_channel, max_per_connection: 10
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",

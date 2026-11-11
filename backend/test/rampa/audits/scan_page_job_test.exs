@@ -783,4 +783,57 @@ defmodule Rampa.Audits.ScanPageJobTest do
 
     assert {:cancel, :page_not_found} = perform_job(ScanPageJob, %{"page_id" => "nao-e-uuid"})
   end
+
+  # RF-RA004: o job publica os eventos depois de cada transição, pelo canal de domínio.
+  describe "eventos do canal" do
+    alias Rampa.Audits.Events
+    alias Rampa.Audits.Events.Event
+
+    defp received do
+      receive do
+        {:audit_event, %Event{name: name}} -> [name | received()]
+      after
+        0 -> []
+      end
+    end
+
+    test "varredura com sucesso: status_changed, page_scanned e audit_completed" do
+      page = page_fixture()
+      :ok = Events.subscribe(page.audit_id)
+      expect_scan(page, {:ok, scanner_response("img-sem-alt")})
+
+      assert :ok = perform(page)
+
+      assert received() == [:status_changed, :page_scanned, :audit_completed]
+    end
+
+    @tag :capture_log
+    test "falha passageira com tentativa sobrando: só status_changed, nada de falha" do
+      page = page_fixture()
+      :ok = Events.subscribe(page.audit_id)
+      expect_scan(page, {:error, %{code: :timeout, detail: "lento"}})
+
+      assert {:error, :timeout} = perform(page, attempt: 1)
+      assert received() == [:status_changed]
+
+      # Na última tentativa, a falha fecha a página e a auditoria.
+      expect_scan(page, {:error, %{code: :timeout, detail: "lento"}})
+      assert {:cancel, :timeout} = perform(page, attempt: 2)
+      assert received() == [:page_failed, :audit_failed]
+    end
+
+    @tag :capture_log
+    test "falha definitiva: page_failed e audit_failed uma vez só" do
+      page = page_fixture()
+      :ok = Events.subscribe(page.audit_id)
+      expect_scan(page, {:error, %{code: :http_error, detail: "404"}})
+
+      assert {:cancel, :http_error} = perform(page, attempt: 1)
+      assert received() == [:status_changed, :page_failed, :audit_failed]
+
+      # O job repetido não varre nem publica nada.
+      assert {:cancel, :already_finished} = perform(page, attempt: 1)
+      assert received() == []
+    end
+  end
 end

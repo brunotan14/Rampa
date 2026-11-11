@@ -8,6 +8,10 @@ defmodule Rampa.Audits.Audit do
   `requester_ip_hash` (HMAC do IP, `Rampa.Security.IPHash`) e `idempotency_key` (cabeçalho
   `Idempotency-Key`) servem ao limite de taxa e à idempotência do `POST /api/audits`; nunca
   saem pela API.
+
+  `revision` é a versão do andamento (RF-RA004): sobe a cada escrita de `Rampa.Audits` com a
+  auditoria travada, nunca por changeset de fora. O cliente aplica o estado de maior
+  `revision`, venha do canal `audit:<id>` ou da API.
   """
 
   use Ecto.Schema
@@ -38,6 +42,7 @@ defmodule Rampa.Audits.Audit do
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
     field :expires_at, :utc_datetime
+    field :revision, :integer, default: 0
 
     has_many :pages, Page
     has_many :findings, Finding

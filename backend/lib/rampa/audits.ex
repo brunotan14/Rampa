@@ -28,6 +28,19 @@ defmodule Rampa.Audits do
   Auditoria em estado final (`completed`, `failed`, `cancelled`), tarefa já terminada ou, ao
   acrescentar tarefa, página já terminada não mudam mais: a função devolve
   `{:error, :already_finished}`.
+
+  ## Andamento e eventos (RF-RA004)
+
+  Toda escrita que muda o andamento da auditoria passa por um ponto único, `commit_progress`,
+  com a auditoria travada: ele sobe a `revision` (sempre, mesmo sem outra mudança), grava, lê o
+  snapshot (`revision` e `progress`) na mesma transação e deriva os eventos do diff de estado
+  (`Rampa.Audits.Events.diff/4`). A transação devolve os eventos junto com o resultado, e eles
+  são publicados (`Rampa.Audits.Events.publish/1`) **só depois do commit**: transação desfeita
+  não publica nada.
+
+  O snapshot (`get_progress/1`, `get_audit_summary/1` e o de cada evento) é lido numa
+  instrução SQL só, com a linha da auditoria e os agregados dos achados juntos: nunca sai
+  `revision` N+1 com os totais de N.
   """
 
   import Ecto.Query
@@ -37,6 +50,7 @@ defmodule Rampa.Audits do
   alias Rampa.Audits.{
     Audit,
     AxeMapper,
+    Events,
     Finding,
     Limits,
     Page,
@@ -184,10 +198,17 @@ defmodule Rampa.Audits do
       end
     end)
     |> case do
+      {:ok, {%Audit{} = audit, events}} ->
+        :ok = Events.publish(events)
+        {:ok, audit}
+
       # Conflito no índice único da chave: outra requisição com a mesma chave ganhou. Não
       # acontece com a trava do solicitante, mas o índice é a última palavra.
-      {:error, :idempotency_conflict} -> idempotent_winner(request, clock.())
-      result -> result
+      {:error, :idempotency_conflict} ->
+        idempotent_winner(request, clock.())
+
+      result ->
+        result
     end
   end
 
@@ -214,8 +235,8 @@ defmodule Rampa.Audits do
     with :ok <- Limits.check_hourly(request.ip_hash, limits.per_ip_per_hour, now),
          :ok <- Limits.check_daily(limits.daily, now),
          {:ok, audit} <- insert_new_audit(changeset),
-         {:ok, _page, audit} <- append_page(audit, request.url, now) do
-      {:ok, audit}
+         {:ok, _page, audit, events} <- append_page(audit, request.url, now) do
+      {:ok, {audit, events}}
     end
   end
 
@@ -271,30 +292,71 @@ defmodule Rampa.Audits do
         }
 
   @doc """
-  Resumo de uma auditoria (`GET /api/audits/:id`, mínimo do M1): a auditoria, os totais
-  por severidade **só dos achados confirmados** (`needs_review = false`) e quantos achados
-  pedem revisão. UUID inválido ou inexistente: `{:error, :audit_not_found}`.
+  Resumo de uma auditoria (`GET /api/audits/:id`, mínimo do M1): a auditoria (com a
+  `revision`), os totais por severidade **só dos achados confirmados** (`needs_review =
+  false`) e quantos achados pedem revisão. Lido numa instrução só (`snapshot_query/1`): a
+  `revision` e os totais são do mesmo instante. UUID inválido ou inexistente:
+  `{:error, :audit_not_found}`.
   """
   @spec get_audit_summary(String.t()) :: {:ok, summary()} | {:error, :audit_not_found}
   def get_audit_summary(id) do
-    with {:ok, audit} <- fetch_audit(id) do
-      counts =
-        from(f in Finding,
-          where: f.audit_id == ^audit.id,
-          group_by: [f.needs_review, f.severity],
-          select: {f.needs_review, f.severity, count()}
-        )
-        |> Repo.all()
-
-      totals =
-        for {false, severity, count} <- counts,
-            reduce: Map.new(Finding.severities(), &{&1, 0}),
-            do: (acc -> Map.put(acc, severity, count))
-
-      needs_review = for {true, _severity, count} <- counts, reduce: 0, do: (acc -> acc + count)
-
+    with {:ok, audit, totals, needs_review} <- read_snapshot(id) do
       {:ok, %{audit: audit, totals_by_severity: totals, needs_review_count: needs_review}}
     end
+  end
+
+  @doc """
+  Andamento atual de uma auditoria, para o join do canal `audit:<id>` (RF-RA004): a
+  `revision` e o `progress` absoluto (`Rampa.Audits.Events.progress/0`), lidos numa
+  instrução só. UUID inválido ou inexistente: `{:error, :audit_not_found}`.
+  """
+  @spec get_progress(String.t()) :: {:ok, Events.snapshot()} | {:error, :audit_not_found}
+  def get_progress(id) do
+    with {:ok, audit, totals, needs_review} <- read_snapshot(id) do
+      {:ok, %{revision: audit.revision, progress: progress(audit, totals, needs_review)}}
+    end
+  end
+
+  # A linha da auditoria e os agregados dos achados numa instrução SQL só: no `READ
+  # COMMITTED`, uma instrução enxerga um único instante, então a `revision` nunca vem de um
+  # commit e os totais de outro. Dentro de uma transação, enxerga as próprias escritas.
+  defp read_snapshot(id) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {%Audit{} = audit, totals, needs_review} <- Repo.one(snapshot_query(uuid)) do
+      {:ok, audit, totals, needs_review}
+    else
+      _not_found -> {:error, :audit_not_found}
+    end
+  end
+
+  defp snapshot_query(audit_id) do
+    from a in Audit,
+      left_join: f in Finding,
+      on: f.audit_id == a.id,
+      where: a.id == ^audit_id,
+      group_by: a.id,
+      select: {
+        a,
+        %{
+          critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
+          serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
+          moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
+          minor: filter(count(f.id), f.severity == :minor and not f.needs_review)
+        },
+        filter(count(f.id), f.needs_review)
+      }
+  end
+
+  defp progress(%Audit{} = audit, totals, needs_review) do
+    %{
+      status: audit.status,
+      pages_found: audit.pages_found,
+      pages_scanned: audit.pages_scanned,
+      pages_failed: audit.pages_failed,
+      totals_by_severity: totals,
+      needs_review_count: needs_review,
+      error: audit.error
+    }
   end
 
   @type findings_page :: %{data: [Finding.t()], next_cursor: String.t() | nil}
@@ -441,28 +503,28 @@ defmodule Rampa.Audits do
           {:ok, Page.t()} | {:error, add_page_error() | Ecto.Changeset.t()}
   def add_page(audit_id, url) do
     with {:ok, url} <- URLGuard.validate(url) do
-      Repo.transact(fn -> insert_page(audit_id, url) end)
+      transact_and_publish(fn -> insert_page(audit_id, url) end)
     end
   end
 
   defp insert_page(audit_id, url) do
     with {:ok, audit} <- lock_audit(audit_id),
-         {:ok, page, _audit} <- append_page(audit, url, now()) do
-      {:ok, page}
+         {:ok, page, _audit, events} <- append_page(audit, url, now()) do
+      {:ok, {page, events}}
     end
   end
 
   # Página `queued`, tarefa `scan` `pending` e `ScanPageJob`, com a regra de conclusão.
   # Recebe a auditoria travada (ou recém-criada na mesma transação) e a URL já validada pelo
-  # `URLGuard`. Usada por `add_page/2` e `create_audit/3`. Devolve a página e a auditoria
-  # com os contadores atualizados.
+  # `URLGuard`. Usada por `add_page/2` e `create_audit/3`. Devolve a página, a auditoria
+  # com os contadores atualizados e os eventos a publicar depois do commit.
   defp append_page(audit, url, now) do
     with :ok <- check_new_page(audit, url),
          {:ok, page} <- Repo.insert(Page.create_changeset(audit, url)),
          {:ok, _task} <- Repo.insert(PageTask.create_changeset(page, %{kind: :scan})),
          {:ok, _job} <- Oban.insert(ScanPageJob.new(%{"page_id" => page.id})),
-         {:ok, audit} <- settle(audit, now) do
-      {:ok, page, audit}
+         {:ok, audit, events} <- settle(audit, now) do
+      {:ok, page, audit, events}
     end
   end
 
@@ -478,7 +540,7 @@ defmodule Rampa.Audits do
           | {:error, transition_error() | :invalid_kind | :duplicate_task | Ecto.Changeset.t()}
   def add_task(page_id, kind) do
     if kind in PageTask.kinds(),
-      do: Repo.transact(fn -> insert_task(page_id, kind) end),
+      do: transact_and_publish(fn -> insert_task(page_id, kind) end),
       else: {:error, :invalid_kind}
   end
 
@@ -487,9 +549,9 @@ defmodule Rampa.Audits do
          :ok <- check_page_open(page),
          :ok <- check_new_kind(tasks, kind),
          {:ok, task} <- Repo.insert(PageTask.create_changeset(page, %{kind: kind})),
-         {:ok, _page} <- refresh_page(page, tasks ++ [task]),
-         {:ok, _audit} <- settle(audit, now()) do
-      {:ok, task}
+         {:ok, refreshed} <- refresh_page(page, tasks ++ [task]),
+         {:ok, _audit, events} <- settle(audit, now(), {page, refreshed}) do
+      {:ok, {task, events}}
     end
   end
 
@@ -507,7 +569,7 @@ defmodule Rampa.Audits do
   @spec start_task(Ecto.UUID.t(), PageTask.kind(), pos_integer()) ::
           {:ok, PageTask.t()} | {:error, transition_error() | Ecto.Changeset.t()}
   def start_task(page_id, kind, job_attempt) do
-    Repo.transact(fn ->
+    transact_and_publish(fn ->
       now = now()
 
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
@@ -521,15 +583,14 @@ defmodule Rampa.Audits do
                started_at: now,
                finished_at: nil
              }),
-           {:ok, page} <- refresh_page(page, replace(tasks, task)),
-           {:ok, _audit} <-
-             Repo.update(
-               Audit.progress_changeset(audit, %{
-                 status: :running,
-                 started_at: audit.started_at || now
-               })
+           {:ok, started} <- refresh_page(page, replace(tasks, task)),
+           {:ok, _audit, events} <-
+             commit_progress(
+               audit,
+               %{status: :running, started_at: audit.started_at || now},
+               {page, started}
              ) do
-        {:ok, %{task | page: page}}
+        {:ok, {%{task | page: started}, events}}
       end
     end)
   end
@@ -559,8 +620,11 @@ defmodule Rampa.Audits do
              | Ecto.Changeset.t()}
   def record_scan_result(%Page{id: page_id}, result) do
     case PageData.sanitize(result) do
-      %{"axe" => %{} = axe} = result -> Repo.transact(fn -> save_scan(page_id, result, axe) end)
-      _invalid -> {:error, :invalid_scan_result}
+      %{"axe" => %{} = axe} = result ->
+        transact_and_publish(fn -> save_scan(page_id, result, axe) end)
+
+      _invalid ->
+        {:error, :invalid_scan_result}
     end
   end
 
@@ -573,10 +637,11 @@ defmodule Rampa.Audits do
   @spec fail_task(Ecto.UUID.t(), PageTask.kind(), atom() | String.t()) ::
           {:ok, Page.t()} | {:error, transition_error() | Ecto.Changeset.t()}
   def fail_task(page_id, kind, code) when is_atom(code) or is_binary(code) do
-    Repo.transact(fn ->
+    transact_and_publish(fn ->
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
-           {:ok, task} <- fetch_open_task(tasks, kind) do
-        fail_locked(audit, page, tasks, task, to_string(code), now())
+           {:ok, task} <- fetch_open_task(tasks, kind),
+           {:ok, page, events} <- fail_locked(audit, page, tasks, task, to_string(code), now()) do
+        {:ok, {page, events}}
       end
     end)
   end
@@ -704,13 +769,13 @@ defmodule Rampa.Audits do
   end
 
   defp reconcile_task({task_id, page_id}, criteria) do
-    Repo.transact(fn ->
+    transact_and_publish(fn ->
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
            %PageTask{} = task <- Enum.find(tasks, &(&1.id == task_id)),
            true <- stale?(task, tasks, criteria) do
         resolve_stale(audit, page, tasks, task, criteria)
       else
-        _not_stale -> {:ok, :unchanged}
+        _not_stale -> {:ok, {:unchanged, []}}
       end
     end)
     |> case do
@@ -758,11 +823,13 @@ defmodule Rampa.Audits do
   defp requeue_allowed?(%PageTask{status: :pending}, _job, _criteria), do: true
 
   # O job entra antes de a tarefa mudar: se já existe um vivo (a chave única acusa conflito),
-  # nada muda. A página só volta a `queued` com um job novo de fato.
+  # nada muda. A página só volta a `queued` com um job novo de fato. Reenfileirar não muda o
+  # andamento da auditoria (contadores, status, achados): não passa por `commit_progress` e
+  # não publica evento.
   defp requeue(page, tasks, task, job) do
     case Oban.insert(job) do
       {:ok, %Oban.Job{conflict?: true}} ->
-        {:ok, :unchanged}
+        {:ok, {:unchanged, []}}
 
       {:ok, _job} ->
         with {:ok, task} <-
@@ -773,7 +840,7 @@ defmodule Rampa.Audits do
               "(#{task.requeues}ª vez)"
           )
 
-          {:ok, :requeued}
+          {:ok, {:requeued, []}}
         end
 
       {:error, reason} ->
@@ -782,9 +849,9 @@ defmodule Rampa.Audits do
   end
 
   defp fail_stale(audit, page, tasks, task, now) do
-    with {:ok, _page} <- fail_locked(audit, page, tasks, task, "stale", now) do
+    with {:ok, _page, events} <- fail_locked(audit, page, tasks, task, "stale", now) do
       Logger.warning("reconciliação: tarefa #{task.kind} da página #{page.id} presa, fechada")
-      {:ok, :failed}
+      {:ok, {:failed, events}}
     end
   end
 
@@ -796,11 +863,12 @@ defmodule Rampa.Audits do
     with {:ok, audit, page, tasks} <- lock_chain(page_id),
          {:ok, task} <- fetch_open_task(tasks, :scan),
          {:ok, task} <- update_task(task, %{status: :done, error: nil, finished_at: now}),
-         {:ok, page} <- refresh_page(page, replace(tasks, task), scan_attrs(result, axe, now)),
-         {_deleted, _} <- Repo.delete_all(axe_findings_query(page.id)),
-         {:ok, _count} <- insert_findings(page, axe, DateTime.utc_now()),
-         {:ok, _audit} <- settle(audit, now) do
-      {:ok, page}
+         {:ok, scanned} <-
+           refresh_page(page, replace(tasks, task), scan_attrs(result, axe, now)),
+         {_deleted, _} <- Repo.delete_all(axe_findings_query(scanned.id)),
+         {:ok, _count} <- insert_findings(scanned, axe, DateTime.utc_now()),
+         {:ok, _audit, events} <- settle(audit, now, {page, scanned}) do
+      {:ok, {scanned, events}}
     end
   end
 
@@ -855,9 +923,9 @@ defmodule Rampa.Audits do
 
   defp fail_locked(audit, page, tasks, task, error, now) do
     with {:ok, tasks} <- close_failed(tasks, task, error, now),
-         {:ok, page} <- refresh_page(page, tasks),
-         {:ok, _audit} <- settle(audit, now, page) do
-      {:ok, page}
+         {:ok, closed} <- refresh_page(page, tasks),
+         {:ok, _audit, events} <- settle(audit, now, {page, closed}) do
+      {:ok, closed, events}
     end
   end
 
@@ -902,9 +970,11 @@ defmodule Rampa.Audits do
   # Regra de conclusão. Recebe a auditoria travada e fora de estado final; recalcula os
   # contadores a partir das páginas (repetir não conta duas vezes) e encerra a auditoria quando
   # não há tarefa aberta: `completed` se ao menos uma página terminou `done`, `failed` se
-  # nenhuma. O erro da auditoria `failed` é o da página que acabou de falhar (`closing`), a
-  # última; sem ela, o da página falha mais recente. Não consulta o Oban.
-  defp settle(%Audit{} = audit, now, closing \\ nil) do
+  # nenhuma. O erro da auditoria `failed` é o da página que acabou de falhar (`closing`, a
+  # página depois da transição), a última; sem ela, o da página falha mais recente. Não
+  # consulta o Oban. `pages` é a página de antes e de depois da transição (ou `{nil, nil}`),
+  # para os eventos. Devolve a auditoria gravada e os eventos.
+  defp settle(%Audit{} = audit, now, {_before, closing} = pages \\ {nil, nil}) do
     open_tasks =
       Repo.aggregate(
         from(t in PageTask,
@@ -937,9 +1007,73 @@ defmodule Rampa.Audits do
         :failed -> %{status: :failed, error: failed_error(audit, closing), finished_at: now}
       end
 
-    audit
-    |> Audit.progress_changeset(Map.merge(counters, final))
-    |> Repo.update()
+    commit_progress(audit, Map.merge(counters, final), pages)
+  end
+
+  # Ponto único de escrita do andamento da auditoria (sempre com ela travada, e só por aqui).
+  # Sobe a `revision` sempre, mesmo que nada mais mude (um changeset sem mudança não emitiria
+  # SQL e a `revision` ficaria parada), grava, lê o snapshot na mesma transação e deriva os
+  # eventos do diff entre o estado de antes e o de depois. Os eventos da transação
+  # compartilham a `revision` e o `progress`; quem publica é `transact_and_publish/1`, depois
+  # do commit.
+  defp commit_progress(%Audit{} = audit, attrs, {page_before, page_after}) do
+    changeset =
+      audit
+      |> Audit.progress_changeset(attrs)
+      |> Ecto.Changeset.force_change(:revision, audit.revision + 1)
+
+    with {:ok, _updated} <- Repo.update(changeset),
+         {:ok, updated, totals, needs_review} <- read_snapshot(audit.id) do
+      progress = progress(updated, totals, needs_review)
+
+      events =
+        audit
+        |> Events.diff(updated, page_before, page_after)
+        |> Enum.map(fn {name, data} ->
+          %Events.Event{
+            name: name,
+            audit_id: updated.id,
+            revision: updated.revision,
+            progress: progress,
+            data: event_data(name, data)
+          }
+        end)
+
+      {:ok, updated, events}
+    end
+  end
+
+  # `page_scanned` leva as contagens da página: confirmados por severidade e os que pedem
+  # revisão, como os totais da auditoria.
+  defp event_data(:page_scanned, %{page_id: page_id} = data) do
+    {counts, needs_review} =
+      from(f in Finding,
+        where: f.page_id == ^page_id,
+        group_by: [f.needs_review, f.severity],
+        select: {f.needs_review, f.severity, count()}
+      )
+      |> Repo.all()
+      |> Enum.reduce({Map.new(Finding.severities(), &{&1, 0}), 0}, fn
+        {false, severity, count}, {counts, review} -> {Map.put(counts, severity, count), review}
+        {true, _severity, count}, {counts, review} -> {counts, review + count}
+      end)
+
+    Map.merge(data, %{counts_by_severity: counts, needs_review_count: needs_review})
+  end
+
+  defp event_data(_name, data), do: data
+
+  # Roda `fun` numa transação que devolve `{:ok, {resultado, eventos}}` e publica os eventos
+  # **depois do commit**. Transação desfeita (`{:error, _}` ou exceção) não publica nada.
+  defp transact_and_publish(fun) do
+    case Repo.transact(fun) do
+      {:ok, {result, events}} ->
+        :ok = Events.publish(events)
+        {:ok, result}
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   defp failed_error(_audit, %Page{status: :failed, error: error}), do: error

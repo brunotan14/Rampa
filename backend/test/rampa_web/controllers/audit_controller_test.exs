@@ -283,7 +283,7 @@ defmodule RampaWeb.AuditControllerTest do
       body = conn |> get(~p"/api/audits/#{audit.id}") |> json_response(200)
 
       assert Map.keys(body) |> Enum.sort() ==
-               Enum.sort(~w(id status start_url page_limit pages_found pages_scanned
+               Enum.sort(~w(id revision status start_url page_limit pages_found pages_scanned
                             pages_failed totals_by_severity needs_review_count error
                             started_at finished_at inserted_at))
 
@@ -314,6 +314,11 @@ defmodule RampaWeb.AuditControllerTest do
 
       assert %{"status" => "completed", "pages_scanned" => 1, "pages_failed" => 0} = summary
       assert summary["totals_by_severity"]["critical"] >= 1
+
+      # RF-RA004: a mesma revision do canal, que subiu na criação, no início e no fim do scan.
+      assert {:ok, %{revision: revision}} = Rampa.Audits.get_progress(id)
+      assert summary["revision"] == revision
+      assert revision == 3
       assert is_binary(summary["started_at"]) and is_binary(summary["finished_at"])
 
       %{"data" => findings} =

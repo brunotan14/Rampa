@@ -141,6 +141,16 @@ defmodule RampaWeb.ErrorMessages do
     )
   end
 
+  ## Canal `audit:<id>` (RF-RA004)
+
+  def message("channel_limit_reached", _bindings) do
+    dgettext(
+      "errors",
+      "Esta conexão já acompanha auditorias demais ao mesmo tempo. Feche outras abas do " <>
+        "Rampa e recarregue a página."
+    )
+  end
+
   ## Erros genéricos de HTTP
 
   def message("bad_request", _bindings),

@@ -9,7 +9,10 @@ defmodule Rampa.ErrorCodes do
     * `RampaWeb.ErrorMessages`: a mensagem em português de cada código (`all/0`);
     * `RampaWeb.FallbackController` e `RampaWeb.ErrorJSON`: o status HTTP (`status/1`,
       `http_code/1`);
-    * `RampaWeb.Schemas`: os `enum` da especificação OpenAPI (`api/1`, `page/0`).
+    * `RampaWeb.Schemas`: os `enum` da especificação OpenAPI (`api/1`, `page/0`);
+    * `RampaWeb.AuditChannel`: as recusas do join no canal `audit:<id>` (`channel/0`), que o
+      schema `shared/channel-events.schema.json` lista no `enum` de `JoinError` (conferido em
+      `test/rampa_web/channels/channel_contract_test.exs`).
 
   O teste de contrato (`test/rampa_web/api_spec_test.exs`) falha se um código daqui não tem
   mensagem própria ou não aparece no `enum` da resposta certa.
@@ -58,6 +61,10 @@ defmodule Rampa.ErrorCodes do
     ]
   }
 
+  # Recusas do join no canal `audit:<id>` (RF-RA004). Sem status HTTP: voltam na resposta do
+  # join, no mesmo formato `{ "error": { "code", "message" } }`.
+  @channel [:audit_not_found, :channel_limit_reached]
+
   # Erros que não passam por controller (rota inexistente, JSON malformado, exceção).
   @http [
     bad_request: 400,
@@ -81,6 +88,10 @@ defmodule Rampa.ErrorCodes do
   @doc "Códigos de `pages.error` e `audits.error`."
   @spec page() :: [atom()]
   def page, do: @page
+
+  @doc "Recusas do join no canal `audit:<id>`."
+  @spec channel() :: [atom()]
+  def channel, do: @channel
 
   @doc "Erros da operação, com o status HTTP."
   @spec api(operation()) :: [{atom(), pos_integer()}]
@@ -113,6 +124,7 @@ defmodule Rampa.ErrorCodes do
   def all do
     (@page ++
        Enum.flat_map(@api, fn {_op, errors} -> Keyword.keys(errors) end) ++
+       @channel ++
        Keyword.keys(@http))
     |> Enum.uniq()
   end

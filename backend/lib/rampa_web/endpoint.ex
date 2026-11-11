@@ -11,9 +11,20 @@ defmodule RampaWeb.Endpoint do
     same_site: "Lax"
   ]
 
-  socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+  # Tempo real (RF-RA004): canal `audit:<id>`. Só websocket; o cliente só manda join e
+  # heartbeat, então o quadro é pequeno. `check_origin` vem da configuração do endpoint
+  # (`config/runtime.exs` em produção, `RampaWeb.Origins`).
+  socket "/socket", RampaWeb.AuditSocket,
+    websocket: [max_frame_size: 8_192, compress: false],
+    longpoll: false
+
+  # O Rampa não usa LiveView: este socket existe só para o LiveDashboard de dev
+  # (`/dev/dashboard`). Fora de dev, seria um websocket com sessão sem função.
+  if Application.compile_env(:rampa, :dev_routes) do
+    socket "/live", Phoenix.LiveView.Socket,
+      websocket: [connect_info: [session: @session_options]],
+      longpoll: [connect_info: [session: @session_options]]
+  end
 
   # Serve at "/" the static files from "priv/static" directory.
   #
