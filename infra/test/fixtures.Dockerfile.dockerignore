@@ -1,0 +1,6 @@
+# Contexto do `infra/test/fixtures.Dockerfile` (a raiz do repositório).
+*
+!infra/test/fixtures-nginx.conf
+!scanner/test/fixtures/*.html
+!e2e/integrado/fixtures/
+**/.DS_Store

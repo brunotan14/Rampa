@@ -14,6 +14,7 @@ const pkg = JSON.parse(read("../package.json")) as {
 };
 
 const ci = read("../../.github/workflows/ci.yml");
+const e2eDockerfile = read("../../e2e/Dockerfile");
 const e2ePkg = JSON.parse(read("../../e2e/package.json")) as { devDependencies?: Record<string, string> };
 
 const IMAGE_FROM = /^FROM\s+mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-\S+/m;
@@ -61,5 +62,16 @@ describe("versões da imagem do scanner", () => {
       e2ePkg.devDependencies?.["@playwright/test"],
       "o @playwright/test do e2e/package.json precisa ser a versão da imagem: o E2E roda nela no CI.",
     ).toBe(tag);
+  });
+
+  it("o runner do E2E integrado (e2e/Dockerfile) usa a mesma imagem, com o mesmo digest", () => {
+    const image = /^FROM\s+(mcr\.microsoft\.com\/playwright:\S+)/m;
+    const scannerImage = image.exec(dockerfile)?.[1];
+    const runnerImage = image.exec(e2eDockerfile)?.[1];
+    expect(runnerImage, "e2e/Dockerfile precisa de um FROM mcr.microsoft.com/playwright:<tag>@sha256:<digest>").toBeDefined();
+    expect(
+      runnerImage,
+      `o e2e/Dockerfile usa ${runnerImage ?? "?"}, e o scanner/Dockerfile usa ${scannerImage ?? "?"}: atualize os dois juntos.`,
+    ).toBe(scannerImage);
   });
 });

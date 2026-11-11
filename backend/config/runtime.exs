@@ -56,16 +56,17 @@ if config_env() != :test do
 end
 
 # Segredo do HMAC do IP de quem pede auditorias (`Rampa.Security.IPHash`). Obrigatório em
-# produção: sem ele o app não sobe. Dev e test têm valor fixo, que a variável sobrescreve
-# em dev.
+# produção e na release `:e2e` do Compose de teste: sem ele o app não sobe. Dev e test têm
+# valor fixo, que a variável sobrescreve em dev.
 case {config_env(), System.get_env("IP_HASH_SECRET")} do
   {:test, _secret} -> :ok
-  {:prod, secret} -> config :rampa, :ip_hash_secret, secret
+  {env, secret} when env in [:prod, :e2e] -> config :rampa, :ip_hash_secret, secret
   {_dev, nil} -> :ok
   {_dev, secret} -> config :rampa, :ip_hash_secret, secret
 end
 
-if config_env() == :prod do
+# `:e2e` é a release do Compose de teste (config/e2e.exs): mesmas variáveis obrigatórias.
+if config_env() in [:prod, :e2e] do
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

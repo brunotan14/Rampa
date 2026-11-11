@@ -5,12 +5,16 @@
 #   cada major chega num PR próprio, para uma falha na CI apontar qual atualização quebrou.
 # - `@types/node` não sobe de major sozinho: ele acompanha a major do Node, que é decidida pela
 #   imagem do scanner (`.nvmrc`).
-# - A imagem do Playwright não é atualizada aqui (sem ecossistema `docker`) e o pacote
+# - As imagens Docker não são atualizadas aqui (sem ecossistema `docker`): as do backend
+#   (`backend/Dockerfile`, acompanham `OTP_VERSION` e `ELIXIR_VERSION` do `ci.yml`), a do
+#   `fixtures` (`infra/test/fixtures.Dockerfile`) e a do PostgreSQL sobem à mão, com o digest
+#   conferido por `docker buildx imagetools inspect <tag>`.
+# - A imagem do Playwright não é atualizada aqui e o pacote
 #   `playwright` é ignorado no scanner: os dois sobem juntos, à mão, porque
 #   `scanner/test/toolchain.test.ts` falha se divergirem.
 #
 # Para subir o Playwright (um PR só):
-# 1. Troque a tag em `scanner/Dockerfile` e nos dois `container.image` de `.github/workflows/ci.yml`,
+# 1. Troque a tag (e o digest) em `scanner/Dockerfile`, `e2e/Dockerfile` e nos dois `container.image` de `.github/workflows/ci.yml`,
 #    o `playwright` em `scanner/package.json` e o `@playwright/test` em `e2e/package.json`
 #    (`npm install --prefix scanner playwright@<versão> --save-exact`).
 # 2. Confira o Node da imagem: `docker run --rm <imagem> node --version`.

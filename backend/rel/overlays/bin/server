@@ -1,0 +1,6 @@
+#!/bin/sh
+# Sobe o app com o servidor HTTP ligado.
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+PHX_SERVER=true exec ./rampa start

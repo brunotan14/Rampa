@@ -1,0 +1,7 @@
+# O `e2e/Dockerfile` leva só as dependências, a configuração integrada e os specs integrados.
+*
+!package.json
+!package-lock.json
+!playwright.integrado.config.ts
+!integrado/
+**/.DS_Store
