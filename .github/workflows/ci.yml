@@ -29,7 +29,8 @@ jobs:
       MIX_ENV: test
     services:
       postgres:
-        image: postgres:17
+        # Fixado por digest (a tag pode ser regravada); atualizar à mão junto com o Compose.
+        image: postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -95,7 +96,7 @@ jobs:
     # (a instalação pelo `--with-deps` dependia dos espelhos do Ubuntu e falhava junto com eles).
     # `scanner/test/toolchain.test.ts` garante que a tag acompanha o pacote `playwright`.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
       options: --user 1001
     defaults:
       run:
@@ -130,7 +131,7 @@ jobs:
     # (a instalação pelo `--with-deps` dependia dos espelhos do Ubuntu e falhava junto com eles).
     # A tag acompanha o `@playwright/test` do `e2e/package.json` (a mesma versão do scanner).
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
       options: --user 1001
     needs: [frontend]
     steps:
@@ -158,3 +159,16 @@ jobs:
             e2e/playwright-report
             e2e/test-results
           retention-days: 14
+
+  # Barra no PR dependência nova (npm, mix, actions) com vulnerabilidade conhecida de severidade
+  # moderada ou maior. Só faz sentido em PR: compara a base com a branch.
+  dependency-review:
+    name: Revisão de dependências
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
