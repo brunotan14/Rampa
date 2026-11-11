@@ -89,6 +89,15 @@ jobs:
           cache: npm
           cache-dependency-path: scanner/package-lock.json
       - run: npm ci
+      # Contrato do scanner: regenera os tipos a partir de `shared/scanner-contract.schema.json`
+      # e falha se `scanner/src/contract.gen.ts` estiver desatualizado (rode
+      # `make scanner-contract` e versione o arquivo).
+      - name: Contrato do scanner atualizado
+        working-directory: .
+        run: |
+          git ls-files --error-unmatch shared/scanner-contract.schema.json scanner/src/contract.gen.ts
+          make scanner-contract
+          git diff --exit-code scanner/src/contract.gen.ts
       - run: npx playwright install --with-deps chromium
       - run: npm run lint
       - run: npm run typecheck

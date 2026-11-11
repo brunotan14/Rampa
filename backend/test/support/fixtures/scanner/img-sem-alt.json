@@ -1,4 +1,5 @@
 {
+  "contract_version": "1",
   "final_url": "https://exemplo.com/img-sem-alt.html",
   "http_status": 200,
   "title": "Imagem sem texto alternativo",
@@ -36,7 +37,8 @@
             "failureSummary": "Fix any of the following:\n  Element does not have an alt attribute\n  aria-label attribute does not exist or is empty\n  aria-labelledby attribute does not exist, references elements that do not exist or references elements that are empty\n  Element has no title attribute\n  Element's default semantics were not overridden with role=\"none\" or role=\"presentation\"",
             "impact": "critical"
           }
-        ]
+        ],
+        "nodes_total": 1
       }
     ],
     "incomplete": []

@@ -6,7 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright";
 import type { FastifyInstance } from "fastify";
 import { launchBrowser } from "../src/browser.js";
-import { buildServer, type ScanResult, type ServerOptions } from "../src/server.js";
+import { buildServer, type ServerOptions } from "../src/server.js";
+import { CONTRACT_LIMITS, CONTRACT_VERSION, type ScanResponse } from "../src/contract.gen.js";
+import { scanOn } from "./support/contract.js";
 import { fixturesPolicy } from "./support/policy.js";
 
 const fixturesDir = new URL("./fixtures/", import.meta.url);
@@ -26,6 +28,18 @@ const fixtureNames = readdirSync(fixturesDir)
   .map((file) => file.replace(/\.html$/, ""))
   .sort();
 
+// Páginas montadas no teste, para os cortes do contrato (`src/contract.ts`).
+const LONG_TITLE = "Título ".repeat(200);
+const MANY_IMAGES = 30;
+const pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+const generatedPages: Record<string, string> = {
+  "/__titulo-longo": `<!doctype html><html lang="pt-BR"><title>${LONG_TITLE}</title><main><h1>Oi</h1></main>`,
+  "/__muitas-imagens": `<!doctype html><html lang="pt-BR"><title>Muitas imagens</title><main><h1>Galeria</h1>${Array.from(
+    { length: MANY_IMAGES },
+    (_, i) => `<img src="${pixel}" data-i="${i}" width="1" height="1">`,
+  ).join("")}</main>`,
+};
+
 let browser: Browser;
 let app: FastifyInstance;
 let fixtures: Server;
@@ -39,6 +53,11 @@ beforeAll(async () => {
     if (req.url === "/__lento") {
       // Documento que não chega: segura a navegação até o prazo total estourar.
       hanging.add(res);
+      return;
+    }
+    const generated = generatedPages[req.url ?? ""];
+    if (generated) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(generated);
       return;
     }
     try {
@@ -70,7 +89,7 @@ afterAll(async () => {
 });
 
 async function scan(url: string) {
-  return app.inject({ method: "POST", url: "/scan", payload: { url } });
+  return scanOn(app, url);
 }
 
 describe("GET /health", () => {
@@ -106,7 +125,7 @@ describe("POST /scan com cada fixture", () => {
 
     const res = await scan(`${fixturesUrl}/${name}.html`);
     expect(res.statusCode).toBe(200);
-    const body = res.json<ScanResult>();
+    const body = res.json<ScanResponse>();
 
     expect(body.final_url).toBe(`${fixturesUrl}/${name}.html`);
     expect(body.title).toBe(expected.title);
@@ -130,14 +149,15 @@ describe("POST /scan com cada fixture", () => {
 describe("POST /scan", () => {
   it("envia só os campos do contrato para cada regra e nó do axe", async () => {
     const res = await scan(`${fixturesUrl}/img-sem-alt.html`);
-    const { axe } = res.json<ScanResult>();
+    const { axe } = res.json<ScanResponse>();
 
     expect(Object.keys(axe).sort()).toEqual(["incomplete", "version", "violations"]);
     const rule = axe.violations.find((r) => r.id === "image-alt");
     expect(rule).toBeDefined();
     expect(Object.keys(rule!).sort()).toEqual(
-      ["description", "help", "helpUrl", "id", "impact", "nodes", "tags"].sort(),
+      ["description", "help", "helpUrl", "id", "impact", "nodes", "nodes_total", "tags"].sort(),
     );
+    expect(rule!.nodes_total).toBe(rule!.nodes.length);
     expect(rule!.tags).toEqual(expect.arrayContaining(["wcag2a", "wcag111"]));
 
     const node = rule!.nodes[0]!;
@@ -156,14 +176,14 @@ describe("POST /scan", () => {
   it("devolve http_error sem rodar o axe quando a página responde com erro", async () => {
     const res = await scan(`${fixturesUrl}/nao-existe.html`);
     expect(res.statusCode).toBe(502);
-    expect(res.json()).toEqual({ error: "http_error", detail: "HTTP 404" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "http_error", detail: "HTTP 404" });
   });
 
   it("devolve navigation_failed quando a página não abre", async () => {
     // Nome público que o DNS de teste não resolve.
     const res = await scan(`http://nao-resolve.exemplo.com:${fixturesPort}/`);
     expect(res.statusCode).toBe(502);
-    expect(res.json()).toEqual({ error: "navigation_failed", detail: "getaddrinfo ENOTFOUND nao-resolve.exemplo.com" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "navigation_failed", detail: "getaddrinfo ENOTFOUND nao-resolve.exemplo.com" });
   });
 
   it("devolve navigation_failed quando a conexão é recusada", async () => {
@@ -174,7 +194,7 @@ describe("POST /scan", () => {
 
     const offline = buildServer(browser, { ssrf: fixturesPolicy(port) });
     try {
-      const res = await offline.inject({ method: "POST", url: "/scan", payload: { url: `http://fixtures:${port}/` } });
+      const res = await scanOn(offline, `http://fixtures:${port}/`);
       expect(res.statusCode).toBe(502);
       expect(res.json().error).toBe("navigation_failed");
       expect(res.json().detail).toMatch(/ECONNREFUSED/);
@@ -189,10 +209,10 @@ describe("limite total da análise", () => {
     const quick = buildServer(browser, serverOptions({ totalTimeoutMs: 500 }));
     try {
       const started = Date.now();
-      const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/__lento` } });
+      const res = await scanOn(quick, `${fixturesUrl}/__lento`);
 
       expect(res.statusCode).toBe(504);
-      expect(res.json()).toEqual({ error: "timeout", detail: "análise passou de 500 ms" });
+      expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "timeout", detail: "análise passou de 500 ms" });
       expect(Date.now() - started).toBeLessThan(5_000);
       // O contexto foi fechado: a navegação pendente foi abortada.
       expect(browser.contexts()).toHaveLength(0);
@@ -204,7 +224,7 @@ describe("limite total da análise", () => {
   it("não interfere numa análise que termina dentro do prazo", async () => {
     const quick = buildServer(browser, serverOptions({ totalTimeoutMs: 20_000 }));
     try {
-      const res = await quick.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
+      const res = await scanOn(quick, `${fixturesUrl}/limpa.html`);
       expect(res.statusCode).toBe(200);
     } finally {
       await quick.close();
@@ -223,12 +243,65 @@ describe("falha depois da navegação", () => {
       }),
     );
     try {
-      const res = await broken.inject({ method: "POST", url: "/scan", payload: { url: `${fixturesUrl}/limpa.html` } });
+      const res = await scanOn(broken, `${fixturesUrl}/limpa.html`);
       expect(res.statusCode).toBe(502);
-      expect(res.json()).toEqual({ error: "analysis_failed", detail: "Execution context was destroyed" });
+      expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "analysis_failed", detail: "Execution context was destroyed" });
       expect(browser.contexts()).toHaveLength(0);
     } finally {
       await broken.close();
+    }
+  });
+});
+
+describe("limites do contrato", () => {
+  it("corta o título longo da página", async () => {
+    const res = await scan(`${fixturesUrl}/__titulo-longo`);
+    expect(res.statusCode).toBe(200);
+    const { title } = res.json<ScanResponse>();
+    expect(LONG_TITLE.trim().length).toBeGreaterThan(CONTRACT_LIMITS.title);
+    expect(title).toBe(LONG_TITLE.trim().slice(0, CONTRACT_LIMITS.title));
+  });
+
+  it("devolve só os primeiros nós de uma regra, com o total", async () => {
+    const res = await scan(`${fixturesUrl}/__muitas-imagens`);
+    expect(res.statusCode).toBe(200);
+    const rule = res.json<ScanResponse>().axe.violations.find((r) => r.id === "image-alt");
+
+    expect(rule?.nodes_total).toBe(MANY_IMAGES);
+    expect(rule?.nodes).toHaveLength(CONTRACT_LIMITS.nodes);
+    expect(rule?.nodes[0]?.html).toContain('data-i="0"');
+  });
+
+  it("corta HTML, resumo, seletores e listas que vêm da coleta", async () => {
+    const huge = "x".repeat(10_000);
+    const node = { target: [huge, Array(20).fill("#host")], html: huge, failureSummary: huge, impact: "serious" as const };
+    const rule = {
+      id: "color-contrast",
+      impact: "serious" as const,
+      tags: ["wcag2aa", "wcag143"],
+      description: "d",
+      help: "h",
+      helpUrl: "https://dequeuniversity.com/rules/axe/4.14/color-contrast",
+      nodes: Array(500).fill(node),
+      nodes_total: 500,
+    };
+    const big = buildServer(
+      browser,
+      serverOptions({ analyze: async () => ({ version: "4.14.0", violations: Array(150).fill(rule), incomplete: [] }) }),
+    );
+    try {
+      const res = await scanOn(big, `${fixturesUrl}/limpa.html`);
+      expect(res.statusCode).toBe(200);
+      const { axe } = res.json<ScanResponse>();
+      expect(axe.violations).toHaveLength(CONTRACT_LIMITS.rules);
+      const [first] = axe.violations;
+      expect(first?.nodes).toHaveLength(CONTRACT_LIMITS.nodes);
+      expect(first?.nodes_total).toBe(500);
+      expect(first?.nodes[0]?.html).toHaveLength(CONTRACT_LIMITS.html);
+      expect(first?.nodes[0]?.failureSummary).toHaveLength(CONTRACT_LIMITS.failureSummary);
+      expect(first?.nodes[0]?.target).toEqual([huge.slice(0, CONTRACT_LIMITS.selector), Array(CONTRACT_LIMITS.shadowLevels).fill("#host")]);
+    } finally {
+      await big.close();
     }
   });
 });

@@ -1,4 +1,5 @@
 {
+  "contract_version": "1",
   "final_url": "https://exemplo.com/contraste-incerto.html",
   "http_status": 200,
   "title": "Contraste incerto",
@@ -34,7 +35,8 @@
             "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background image",
             "impact": "serious"
           }
-        ]
+        ],
+        "nodes_total": 1
       }
     ]
   }

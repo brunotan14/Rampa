@@ -18,12 +18,16 @@ defmodule Rampa.Audits.ScanPageJob do
   Tentativas (`max_attempts: 2`):
 
     * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
-      `invalid_url`, `resource_limit`, `http_error` e `invalid_request` fecham a tarefa
-      `failed` na hora;
+      `invalid_url`, `resource_limit`, `http_error`, `invalid_request` e
+      `invalid_scan_result` fecham a tarefa `failed` na hora. `invalid_scan_result` é uma
+      resposta com a versão certa do contrato, mas fora do schema, ou um achado que o
+      changeset recusa na gravação: o mesmo scanner devolveria o mesmo formato quebrado;
     * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
-      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner, a
-      gravação recusada (`invalid_scan_result`), o prazo da varredura estourado (`timeout`) e
-      exceções ou `exit` (`internal_error`). A tarefa fica `running` entre as tentativas. Na
+      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner,
+      `contract_mismatch` (versão do contrato diferente, como durante um deploy em que o
+      scanner e o app trocam em momentos diferentes), o prazo da varredura estourado
+      (`timeout`) e exceções ou `exit` (`internal_error`). A tarefa fica `running` entre as
+      tentativas. Na
       última (do job, ou da tarefa, que continua contando depois de um reenfileiramento pela
       reconciliação) a tarefa fecha `failed` com o código;
     * sempre que a tarefa é fechada `failed`, o job devolve `{:cancel, code}`: não há o que
@@ -65,7 +69,8 @@ defmodule Rampa.Audits.ScanPageJob do
     :unresolvable,
     :resource_limit,
     :http_error,
-    :invalid_request
+    :invalid_request,
+    :invalid_scan_result
   ]
 
   @impl Oban.Worker

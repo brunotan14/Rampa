@@ -536,8 +536,10 @@ defmodule Rampa.Audits do
   Grava o resultado do scanner e fecha a tarefa `scan` `done`: os fatos da página, um achado
   por nó do axe e a regra de conclusão, numa transação.
 
-  O resultado é saneado antes (`Rampa.Audits.PageData`): sem NUL e com o título cortado em
-  #{@title_max_bytes} bytes. Resultado sem o campo `axe` devolve
+  Espera um resultado que já passou pelo schema do contrato
+  (`Rampa.Scanner.Contract`, conferido em `Rampa.Scanner.HTTP`). Ele é saneado antes
+  (`Rampa.Audits.PageData`): sem NUL e com o título cortado em #{@title_max_bytes} bytes.
+  Como defesa para quem chama sem passar pelo cliente, resultado sem o campo `axe` devolve
   `{:error, :invalid_scan_result}`; achado que não passa no changeset devolve
   `{:error, changeset}` e nada é gravado.
 

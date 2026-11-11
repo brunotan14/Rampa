@@ -21,6 +21,7 @@
               "analysis_failed",
               "invalid_request",
               "unavailable",
+              "contract_mismatch",
               "invalid_scan_result",
               "internal_error",
               "stale",

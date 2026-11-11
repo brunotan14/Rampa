@@ -37,7 +37,11 @@ defmodule Rampa.Scanner.HTTPTest do
       stub(fn conn ->
         conn
         |> Plug.Conn.put_status(status)
-        |> Req.Test.json(%{"error" => Atom.to_string(code), "detail" => "detalhe"})
+        |> Req.Test.json(%{
+          "contract_version" => "1",
+          "error" => Atom.to_string(code),
+          "detail" => "detalhe"
+        })
       end)
 
       assert HTTP.scan("https://exemplo.com/") == {:error, %{code: code, detail: "detalhe"}}
@@ -76,9 +80,55 @@ defmodule Rampa.Scanner.HTTPTest do
              {:error, %{code: :unavailable, detail: "scanner respondeu HTTP 500"}}
   end
 
-  test "scan/1 devolve unavailable para resposta 200 sem o campo axe" do
-    stub(&Req.Test.json(&1, %{"title" => "x"}))
+  describe "respostas fora do contrato" do
+    test "200 sem um campo obrigatório é invalid_scan_result" do
+      stub(&Req.Test.json(&1, Map.delete(scanner_response("limpa"), "axe")))
 
-    assert {:error, %{code: :unavailable}} = HTTP.scan("https://exemplo.com/")
+      assert {:error, %{code: :invalid_scan_result, detail: detail}} =
+               HTTP.scan("https://exemplo.com/")
+
+      assert detail =~ "axe"
+    end
+
+    test "200 sem contract_version (scanner antigo) é contract_mismatch" do
+      stub(&Req.Test.json(&1, Map.delete(scanner_response("limpa"), "contract_version")))
+
+      assert {:error, %{code: :contract_mismatch}} = HTTP.scan("https://exemplo.com/")
+    end
+
+    test "200 com outra versão do contrato é contract_mismatch" do
+      stub(&Req.Test.json(&1, Map.put(scanner_response("limpa"), "contract_version", "2")))
+
+      assert {:error, %{code: :contract_mismatch, detail: detail}} =
+               HTTP.scan("https://exemplo.com/")
+
+      assert detail =~ ~s(recebida "2")
+    end
+
+    test "200 que não é JSON é invalid_scan_result" do
+      stub(&Plug.Conn.send_resp(&1, 200, "<html>ok</html>"))
+
+      assert {:error, %{code: :invalid_scan_result}} = HTTP.scan("https://exemplo.com/")
+    end
+
+    test "erro do contrato sem versão é contract_mismatch" do
+      stub(fn conn ->
+        conn
+        |> Plug.Conn.put_status(504)
+        |> Req.Test.json(%{"error" => "timeout", "detail" => "detalhe"})
+      end)
+
+      assert {:error, %{code: :contract_mismatch}} = HTTP.scan("https://exemplo.com/")
+    end
+
+    test "erro do contrato sem detail é invalid_scan_result" do
+      stub(fn conn ->
+        conn
+        |> Plug.Conn.put_status(502)
+        |> Req.Test.json(%{"contract_version" => "1", "error" => "http_error"})
+      end)
+
+      assert {:error, %{code: :invalid_scan_result}} = HTTP.scan("https://exemplo.com/")
+    end
   end
 end

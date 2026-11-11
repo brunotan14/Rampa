@@ -1,12 +1,16 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { errors, type Browser, type BrowserContext, type Page } from "playwright";
-import { runAxe, type AxeFacts } from "./axe.js";
+import { runAxe } from "./axe.js";
+import { scanError, scanResponse } from "./contract.js";
+import { SCAN_REQUEST_SCHEMA, type AxeFacts, type ScanError, type ScanErrorCode, type ScanRequest, type ScanResponse } from "./contract.gen.js";
 import { trackDocument, type DocumentTracker } from "./document.js";
 import { classifyRequests, type RouteState } from "./ssrf/intercept.js";
 import { checkUrl, defaultPolicy, type BlockReason, type SsrfPolicy } from "./ssrf/policy.js";
 import { DEFAULT_PROXY_LIMITS, startScanProxy, type ProxyLimits, type ScanProxy } from "./ssrf/proxy.js";
 
-// Serviço sem estado (PRD §7): recebe uma URL e devolve fatos sobre a página.
+// Serviço sem estado (PRD §7): recebe uma URL e devolve fatos sobre a página. O contrato
+// (pedido, resposta, erros e limites) é `shared/scanner-contract.schema.json`; os tipos vêm de
+// `contract.gen.ts`, gerado dele, e os cortes que mantêm a resposta nos limites, de `contract.ts`.
 // Proteção contra SSRF (RF-RA002, `ssrf/`): cada varredura tem um proxy de saída próprio,
 // que valida toda conexão, e um route que classifica e conta. O navegador precisa vir de
 // `launchBrowser`, que tira do Chromium a saída de rede fora do proxy.
@@ -16,42 +20,6 @@ const NAVIGATION_TIMEOUT_MS = 30_000;
 // Janela, depois de aberta a página, para a navegação que ela dispara sozinha terminar.
 const SETTLE_WINDOW_MS = 2_000;
 export const DEFAULT_TOTAL_TIMEOUT_MS = 90_000;
-
-interface ScanBody {
-  url: string;
-}
-
-export interface ScanResult {
-  final_url: string;
-  http_status: number | null;
-  title: string;
-  axe: AxeFacts;
-  // Requisições recusadas pela proteção contra SSRF fora do documento principal (endereço,
-  // nome ou porta): as que o route recusou e as que só o proxy viu (saltos de
-  // redirecionamento, WebSocket, workers), cada uma contada uma vez.
-  blocked_requests: number;
-}
-
-// `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação
-// do documento principal vai para endereço proibido ou porta fora de 80/443.
-// `invalid_url` (422): URL com credenciais ou host inválido.
-// `resource_limit` (422): a página passou do teto de dados ou de conexões da varredura.
-// `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total.
-// `navigation_failed` (502): a página não abriu. `http_error` (502): o documento respondeu >= 400.
-// `analysis_failed` (502): a página abriu, mas a coleta falhou depois (axe, título).
-export type ScanErrorCode =
-  | "blocked_address"
-  | "invalid_url"
-  | "resource_limit"
-  | "timeout"
-  | "http_error"
-  | "navigation_failed"
-  | "analysis_failed";
-
-export interface ScanError {
-  error: ScanErrorCode;
-  detail: string;
-}
 
 export interface ServerOptions {
   // Tempo máximo de uma análise, da abertura da página à resposta.
@@ -67,11 +35,12 @@ export interface ServerOptions {
   limits?: Partial<ProxyLimits>;
 }
 
-type Outcome = { code: 200; body: ScanResult } | { code: 422 | 502 | 504; body: ScanError };
+// Status HTTP de cada código de erro: descrição de `ScanErrorCode` no schema do contrato.
+type Outcome = { code: 200; body: ScanResponse } | { code: 422 | 502 | 504; body: ScanError };
 
 const fail = (code: 422 | 502 | 504, error: ScanErrorCode, detail: string): Outcome => ({
   code,
-  body: { error, detail },
+  body: scanError(error, detail),
 });
 
 // URL recusada pelo `checkUrl`: endereço proibido ou URL inválida.
@@ -155,29 +124,22 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     // são de sub-recursos que o route não recusou, então nada é contado duas vezes.
     return {
       code: 200,
-      body: {
+      body: scanResponse({
         final_url: finalUrl,
         http_status: status,
         ...facts,
         blocked_requests: route.blockedRequests + proxy.blocks.length,
-      },
+      }),
     };
   }
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  app.post<{ Body: ScanBody }>(
+  // Pedido fora do schema: 400 do Fastify, fora do contrato (o backend trata como
+  // `invalid_request`). Campo desconhecido é descartado pelo `removeAdditional` do Fastify.
+  app.post<{ Body: ScanRequest }>(
     "/scan",
-    {
-      schema: {
-        body: {
-          type: "object",
-          required: ["url"],
-          additionalProperties: true,
-          properties: { url: { type: "string", pattern: "^https?://" } },
-        },
-      },
-    },
+    { schema: { body: SCAN_REQUEST_SCHEMA } },
     async (request, reply) => {
       // Recusa cedo, sem abrir o navegador; o route e o proxy conferem de novo cada conexão.
       const check = checkUrl(request.body.url, policy);

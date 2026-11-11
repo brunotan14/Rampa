@@ -40,6 +40,7 @@ make test    # unitários: ExUnit (backend), Vitest (frontend e scanner)
 make e2e     # Playwright + axe
 make lint    # formatação, lint e tipos
 make openapi # regenera o contrato da API em shared/openapi.json (o CI confere se está atualizado)
+make scanner-contract # regenera scanner/src/contract.gen.ts a partir de shared/scanner-contract.schema.json (o CI confere)
 ```
 
 ## Licença

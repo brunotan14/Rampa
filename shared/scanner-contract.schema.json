@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScanReply",
+  "description": "Contrato entre o backend (Phoenix) e o scanner (PRD §7), fonte única da verdade. O scanner gera os tipos TypeScript a partir dele (`make scanner-contract`, `scanner/src/contract.gen.ts`) e os testes validam as respostas reais de POST /scan; o backend o embute na compilação (`Rampa.Scanner.Contract`) e valida toda resposta antes de gravar. A raiz descreve o corpo de uma resposta de POST /scan com código do contrato: `ScanResponse` (HTTP 200) ou `ScanError`. O erro de validação do pedido (HTTP 400 do Fastify) fica fora do contrato.",
+  "$comment": "Versão do contrato (`ContractVersion`): sobe só em mudança incompatível (campo obrigatório novo, campo removido ou renomeado, tipo trocado, limite reduzido, valor novo num `enum` de resposta, significado alterado). Campo opcional novo na resposta, limite ampliado que o backend aceita ou texto de `description` não sobem a versão. Ao subir: o scanner e o backend mudam juntos no mesmo PR, e durante o deploy o backend trata a versão diferente como erro passageiro (`contract_mismatch`).",
+  "oneOf": [{ "$ref": "#/definitions/ScanResponse" }, { "$ref": "#/definitions/ScanError" }],
+  "definitions": {
+    "ContractVersion": {
+      "title": "ContractVersion",
+      "description": "Versão do contrato. Presente em toda resposta, de sucesso ou de erro.",
+      "type": "string",
+      "const": "1"
+    },
+    "ScanRequest": {
+      "title": "ScanRequest",
+      "description": "Corpo de POST /scan. O scanner valida o pedido com este schema; campo desconhecido é descartado.",
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "description": "URL a varrer, já validada pelo backend (RF-RA002). O scanner confere de novo.",
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 2048
+        },
+        "options": {
+          "description": "Reservado para as análises do M4 (PRD §7). Ignorado pelo scanner na versão 1.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tab_limit": { "type": "integer", "minimum": 1 },
+            "max_images": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "ScanResponse": {
+      "title": "ScanResponse",
+      "description": "Resposta de sucesso (HTTP 200): fatos sobre a página. O scanner corta o que vem da página nos limites deste schema antes de responder (RNF-RA003); o backend ainda corta o que grava (RNF-RA005).",
+      "type": "object",
+      "required": ["contract_version", "final_url", "http_status", "title", "axe", "blocked_requests"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": { "$ref": "#/definitions/ContractVersion" },
+        "final_url": {
+          "description": "URL analisada, depois dos redirecionamentos e da navegação que a página dispara sozinha. Cortada em 8192 caracteres.",
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 8192
+        },
+        "http_status": {
+          "description": "Status HTTP do documento analisado; `null` se o navegador não informou. Status >= 400 não chega aqui: vira o erro `http_error`.",
+          "type": ["integer", "null"],
+          "minimum": 100,
+          "maximum": 399
+        },
+        "title": {
+          "description": "Título da página, cortado em 512 caracteres (o backend grava até 512 bytes, então nada do que ele guardaria se perde).",
+          "type": "string",
+          "maxLength": 512
+        },
+        "axe": { "$ref": "#/definitions/AxeFacts" },
+        "blocked_requests": {
+          "description": "Requisições fora do documento principal recusadas pela proteção contra SSRF (endereço, nome ou porta), no route ou só no proxy, cada uma contada uma vez. Satura em 10000.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "AxeFacts": {
+      "title": "AxeFacts",
+      "description": "Resultado do axe-core (RF-RA003), só com os campos do contrato. O scanner não decide severidade.",
+      "type": "object",
+      "required": ["version", "violations", "incomplete"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "violations": {
+          "description": "Regras que falharam. O axe roda 70 regras com as tags do RF-RA003; o teto é folga.",
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/definitions/AxeRule" }
+        },
+        "incomplete": {
+          "description": "Regras que o axe não conseguiu decidir (viram achados com `needs_review`).",
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/definitions/AxeRule" }
+        }
+      }
+    },
+    "AxeRule": {
+      "title": "AxeRule",
+      "description": "Uma regra do axe com os nós afetados. Os textos (`description`, `help`, `helpUrl`, `tags`) são do axe, não da página.",
+      "type": "object",
+      "required": ["id", "impact", "tags", "description", "help", "helpUrl", "nodes", "nodes_total"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "impact": { "$ref": "#/definitions/AxeImpact" },
+        "tags": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 64 }
+        },
+        "description": { "type": "string", "maxLength": 1024 },
+        "help": { "type": "string", "maxLength": 1024 },
+        "helpUrl": { "type": "string", "maxLength": 2048 },
+        "nodes": {
+          "description": "Os primeiros 20 nós afetados, na ordem do axe. 20 exemplos bastam para localizar o problema no relatório; a pontuação conta regras, não nós (PRD §10.6).",
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/definitions/AxeNode" }
+        },
+        "nodes_total": {
+          "description": "Quantos nós a regra tinha antes do corte em `nodes`.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "AxeNode": {
+      "title": "AxeNode",
+      "description": "Um elemento afetado. `html`, `target` e `failureSummary` trazem conteúdo da página e têm limite.",
+      "type": "object",
+      "required": ["target", "html", "failureSummary", "impact"],
+      "additionalProperties": false,
+      "properties": {
+        "target": { "$ref": "#/definitions/AxeTarget" },
+        "html": {
+          "description": "HTML do elemento, cortado em 2048 caracteres. Um caractere ocupa pelo menos um byte, então o corte do backend em 2 KB (RNF-RA005) continua igual.",
+          "type": "string",
+          "maxLength": 2048
+        },
+        "failureSummary": {
+          "description": "Resumo do axe sobre o que falhou; pode citar valores de atributos da página. Cortado em 2048 caracteres.",
+          "type": ["string", "null"],
+          "maxLength": 2048
+        },
+        "impact": { "$ref": "#/definitions/AxeImpact" }
+      }
+    },
+    "AxeTarget": {
+      "title": "AxeTarget",
+      "description": "Seletores do elemento: um item por nível de iframe, do documento principal para dentro. Um item que é lista indica shadow DOM, do host para dentro. No máximo 8 níveis de cada, com seletores de até 512 caracteres.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "anyOf": [
+          { "$ref": "#/definitions/AxeSelector" },
+          {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": { "$ref": "#/definitions/AxeSelector" }
+          }
+        ]
+      }
+    },
+    "AxeSelector": {
+      "title": "AxeSelector",
+      "type": "string",
+      "maxLength": 512
+    },
+    "AxeImpact": {
+      "title": "AxeImpact",
+      "description": "Impacto segundo o axe; `null` quando o axe não informa (comum em `incomplete`).",
+      "type": ["string", "null"],
+      "enum": ["minor", "moderate", "serious", "critical", null]
+    },
+    "ScanError": {
+      "title": "ScanError",
+      "description": "Resposta de erro (HTTP 422, 502 ou 504, conforme o código).",
+      "type": "object",
+      "required": ["contract_version", "error", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": { "$ref": "#/definitions/ContractVersion" },
+        "error": { "$ref": "#/definitions/ScanErrorCode" },
+        "detail": {
+          "description": "Explicação técnica para log, em texto livre; pode citar a página. Cortada em 2048 caracteres.",
+          "type": "string",
+          "maxLength": 2048
+        }
+      }
+    },
+    "ScanErrorCode": {
+      "title": "ScanErrorCode",
+      "description": "Códigos de erro do scanner, com o status HTTP de cada um. `blocked_address` (422): a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url` (422): URL com credenciais ou host inválido. `resource_limit` (422): a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout` (504): a página não carregou em 30 s ou a análise passou do limite total. `http_error` (502): o documento respondeu com status >= 400 (`detail`: \"HTTP 404\"); o axe não roda. `navigation_failed` (502): a página não abriu. `analysis_failed` (502): a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).",
+      "type": "string",
+      "enum": [
+        "blocked_address",
+        "invalid_url",
+        "resource_limit",
+        "timeout",
+        "http_error",
+        "navigation_failed",
+        "analysis_failed"
+      ]
+    }
+  }
+}

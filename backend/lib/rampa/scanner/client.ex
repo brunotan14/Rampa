@@ -1,11 +1,12 @@
 defmodule Rampa.Scanner.Client do
   @moduledoc """
-  Contrato com o serviço scanner (PRD §7). A implementação é escolhida por
-  configuração (`:scanner_client`), para os testes usarem Mox.
+  Contrato com o serviço scanner (PRD §7; schema canônico em
+  `shared/scanner-contract.schema.json`, embutido em `Rampa.Scanner.Contract`). A
+  implementação é escolhida por configuração (`:scanner_client`), para os testes usarem Mox.
 
   `scan/1` devolve o corpo da resposta de `POST /scan` (mapa com chaves em texto, como veio
-  do JSON) ou um erro com um código. Os dois últimos são do backend; os outros vêm do
-  scanner:
+  do JSON, já validado contra o schema) ou um erro com um código. Os sete primeiros vêm do
+  scanner (`ScanErrorCode` no schema); os outros são do backend:
 
     * `:blocked_address`: o endereço, um redirecionamento ou uma navegação do documento
       principal vai para endereço proibido (RF-RA002);
@@ -18,8 +19,11 @@ defmodule Rampa.Scanner.Client do
       destruído por redirecionamento via script);
     * `:invalid_request`: o scanner recusou o pedido (4xx sem código do contrato), um erro
       do lado do backend que não melhora com nova tentativa;
-    * `:unavailable`: o scanner não respondeu, respondeu 5xx sem código do contrato ou
-      devolveu uma resposta fora do contrato.
+    * `:unavailable`: o scanner não respondeu ou respondeu 5xx sem código do contrato;
+    * `:contract_mismatch`: a resposta veio sem `contract_version` ou com outra versão
+      (scanner e backend em versões diferentes, como durante um deploy);
+    * `:invalid_scan_result`: a resposta tem a versão certa, mas está fora do schema (campo
+      obrigatório faltando, tipo errado, acima de um limite).
   """
 
   @type error_code ::
@@ -32,6 +36,8 @@ defmodule Rampa.Scanner.Client do
           | :analysis_failed
           | :invalid_request
           | :unavailable
+          | :contract_mismatch
+          | :invalid_scan_result
   @type scan_error :: %{code: error_code(), detail: String.t()}
 
   @callback health() :: :ok | {:error, term()}

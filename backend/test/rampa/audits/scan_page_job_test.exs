@@ -342,7 +342,14 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros definitivos" do
-    for code <- [:blocked_address, :invalid_url, :resource_limit, :http_error, :invalid_request] do
+    for code <- [
+          :blocked_address,
+          :invalid_url,
+          :resource_limit,
+          :http_error,
+          :invalid_request,
+          :invalid_scan_result
+        ] do
       @tag :capture_log
       test "#{code} marca a página e a auditoria como falhas e cancela o job" do
         code = unquote(code)
@@ -364,7 +371,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   describe "erros passageiros do scanner" do
-    for code <- [:timeout, :navigation_failed, :analysis_failed, :unavailable] do
+    for code <- [:timeout, :navigation_failed, :analysis_failed, :unavailable, :contract_mismatch] do
       @tag :capture_log
       test "#{code} tenta de novo sem marcar falha na primeira tentativa" do
         code = unquote(code)
@@ -407,26 +414,19 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
   end
 
+  # Gravação recusada é definitiva: com o resultado já validado pelo contrato, o mesmo
+  # resultado seria recusado de novo.
   describe "gravação recusada" do
     @tag :capture_log
-    test "achado inválido não grava nada e tenta de novo" do
+    test "achado inválido não grava nada e marca a falha na primeira tentativa" do
       page = page_fixture()
       expect_scan(page, {:ok, invalid_response()})
 
-      assert {:error, :invalid_scan_result} = perform(page, attempt: 1)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1)
 
-      assert %Page{status: :scanning, axe_version: nil} = reload(page)
-      assert findings(page) == []
-    end
+      assert %Page{status: :failed, error: "invalid_scan_result", axe_version: nil} =
+               reload(page)
 
-    @tag :capture_log
-    test "na última tentativa marca a página e a auditoria como falhas" do
-      page = page_fixture()
-      expect_scan(page, {:ok, invalid_response()})
-
-      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
-
-      assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
       assert %Audit{status: :failed, error: "invalid_scan_result"} = audit_of(page)
       assert findings(page) == []
     end
@@ -436,7 +436,7 @@ defmodule Rampa.Audits.ScanPageJobTest do
       page = page_fixture()
       expect_scan(page, {:ok, Map.delete(scanner_response("limpa"), "axe")})
 
-      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 2)
+      assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1)
 
       assert %Page{status: :failed, error: "invalid_scan_result"} = reload(page)
     end

@@ -113,7 +113,7 @@ msgstr ""
 msgid "A API só responde em JSON."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:207
+#: lib/rampa_web/error_messages.ex:214
 #, elixir-autogen, elixir-format
 msgid "A análise ficou parada por tempo demais e foi encerrada."
 msgstr ""
@@ -143,7 +143,7 @@ msgstr ""
 msgid "A requisição está malformada."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:214
+#: lib/rampa_web/error_messages.ex:221
 #, elixir-autogen, elixir-format
 msgid "A varredura da página falhou, então as análises que dependem dela não rodaram."
 msgstr ""
@@ -248,7 +248,7 @@ msgstr ""
 msgid "O serviço de análise recusou esta página."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:221
+#: lib/rampa_web/error_messages.ex:228
 #, elixir-autogen, elixir-format
 msgid "Ocorreu um erro inesperado. Tente de novo em alguns instantes."
 msgstr ""
@@ -271,4 +271,9 @@ msgstr ""
 #: lib/rampa_web/error_messages.ex:90
 #, elixir-autogen, elixir-format
 msgid "Este Idempotency-Key já foi usado para auditar outro endereço. Use uma chave nova para cada auditoria."
+msgstr ""
+
+#: lib/rampa_web/error_messages.ex:207
+#, elixir-autogen, elixir-format
+msgid "O serviço de análise estava sendo atualizado e não concluiu esta página. Tente uma nova auditoria em alguns minutos."
 msgstr ""
