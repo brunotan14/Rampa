@@ -4,7 +4,7 @@ Auditor de acessibilidade web com IA, em português do Brasil.
 
 Você informa o endereço de um site. O Rampa percorre as páginas, roda o [axe-core](https://github.com/dequelabs/axe-core) em cada uma e usa IA para avaliar o que a verificação automática não consegue decidir: se o texto alternativo descreve a imagem, se um link faz sentido fora do contexto, se a ordem de foco pelo teclado é lógica e se os títulos representam o conteúdo. O relatório liga cada problema aos critérios da WCAG 2.2 e do eMAG, explicando quem é afetado e como corrigir.
 
-> **Em construção.** O projeto está no primeiro marco: a fundação técnica. Ainda não audita sites.
+> **Em construção.** O primeiro marco de auditoria está pronto: pela API, o Rampa audita uma página com o axe-core, com proteção contra SSRF e limite de uso (veja a documentação em `/api/openapi.json`). A interface do relatório e as análises de IA vêm nos próximos marcos.
 
 O Rampa não certifica conformidade: a verificação automática não substitui a avaliação com pessoas e tecnologias assistivas.
 
