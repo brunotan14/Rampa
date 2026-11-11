@@ -8,8 +8,9 @@ defmodule RampaWeb.Origins do
   teste). Valor inválido, ou `*`, impede a subida.
 
   O valor chega cru de `config/runtime.exs` (`:allowed_origins`) e é interpretado **uma vez
-  só**, na subida (`load/1`, chamada em `Rampa.Application.start/2`), e guardado em
-  `:persistent_term`. O endpoint consulta `allowed?/1` (`check_origin: {RampaWeb.Origins,
+  só**, na subida, e guardado em `:persistent_term`: este módulo é um filho da árvore de
+  supervisão, logo antes do `RampaWeb.Endpoint`, que carrega as origens (`load/1`) e não deixa
+  processo vivo (`:ignore`). Valor inválido faz `start_link/0` devolver erro, e o app não sobe. O endpoint consulta `allowed?/1` (`check_origin: {RampaWeb.Origins,
   :allowed?, []}`). Em dev (`check_origin: false`, proxy do Vite) e nos testes nada é
   carregado.
 
@@ -42,6 +43,23 @@ defmodule RampaWeb.Origins do
       {:error, invalid} -> {:error, ["PHX_HOST=#{inspect(host)}" | invalid]}
       {{:ok, app}, []} -> {:ok, Enum.uniq([app | for({_entry, {:ok, o}} <- parsed, do: o)])}
       {_app, invalid} -> {:error, invalid}
+    end
+  end
+
+  @doc false
+  def child_spec(_arg),
+    do: %{id: __MODULE__, start: {__MODULE__, :start_link, []}, restart: :transient}
+
+  @doc """
+  Carrega as origens de `config :rampa, :allowed_origins` na subida, antes do endpoint.
+  Devolve `:ignore` (nenhum processo fica vivo) ou `{:error, {:invalid_allowed_origins,
+  motivo}}`, que impede a subida do app.
+  """
+  @spec start_link() :: :ignore | {:error, {:invalid_allowed_origins, String.t()}}
+  def start_link do
+    case load(Application.get_env(:rampa, :allowed_origins)) do
+      :ok -> :ignore
+      {:error, reason} -> {:error, {:invalid_allowed_origins, reason}}
     end
   end
 

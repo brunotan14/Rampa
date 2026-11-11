@@ -93,9 +93,39 @@ defmodule RampaWeb.OriginsTest do
       refute Origins.allowed?(URI.parse("null"))
     end
 
+    test "na árvore de supervisão: filho antes do endpoint, sem processo vivo" do
+      children = Supervisor.which_children(Rampa.Supervisor)
+      ids = children |> Enum.map(&elem(&1, 0)) |> Enum.reverse()
+
+      assert {RampaWeb.Origins, :undefined, :worker, _modules} =
+               List.keyfind(children, RampaWeb.Origins, 0)
+
+      assert Enum.find_index(ids, &(&1 == RampaWeb.Origins)) <
+               Enum.find_index(ids, &(&1 == RampaWeb.Endpoint))
+    end
+
+    test "start_link/0: configuração inválida impede a subida; válida não deixa processo" do
+      previous = Application.get_env(:rampa, :allowed_origins)
+      on_exit(fn -> restore_env(previous) end)
+
+      Application.put_env(:rampa, :allowed_origins, host: "app", extra: "*")
+
+      capture_log(fn ->
+        assert {:error, {:invalid_allowed_origins, reason}} = Origins.start_link()
+        assert reason =~ "sem curinga"
+      end)
+
+      Application.put_env(:rampa, :allowed_origins, host: "app", extra: nil)
+      assert :ignore = Origins.start_link()
+      assert Origins.allowed?(URI.parse("https://app"))
+    end
+
     test "sem load/1, recusa tudo" do
       :persistent_term.erase(@key)
       refute Origins.allowed?(URI.parse("https://rampa.exemplo.com.br"))
     end
   end
+
+  defp restore_env(nil), do: Application.delete_env(:rampa, :allowed_origins)
+  defp restore_env(value), do: Application.put_env(:rampa, :allowed_origins, value)
 end

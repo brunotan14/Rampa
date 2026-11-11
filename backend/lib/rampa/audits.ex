@@ -31,12 +31,18 @@ defmodule Rampa.Audits do
 
   ## Andamento e eventos (RF-RA004)
 
-  Toda escrita que muda o andamento da auditoria passa por um ponto único, `commit_progress`,
-  com a auditoria travada: ele sobe a `revision` (sempre, mesmo sem outra mudança), grava, lê o
-  snapshot (`revision` e `progress`) na mesma transação e deriva os eventos do diff de estado
-  (`Rampa.Audits.Events.diff/4`). A transação devolve os eventos junto com o resultado, e eles
-  são publicados (`Rampa.Audits.Events.publish/1`) **só depois do commit**: transação desfeita
-  não publica nada.
+  Toda escrita que muda um campo do `progress` da auditoria (status, contadores, erro,
+  achados) passa por um ponto único, `commit_progress`, com a auditoria travada: ele sobe a
+  `revision` (sempre, mesmo sem outra mudança), grava e deriva os eventos do diff de estado
+  (`Rampa.Audits.Events.diff/4`). Só se houver evento ele lê o snapshot (`revision` e
+  `progress`), na mesma transação. Reenfileirar uma tarefa (reconciliação) não muda nenhum
+  campo do `progress` e não sobe a `revision`.
+
+  A transação devolve os eventos junto com o resultado, e eles são publicados
+  (`Rampa.Audits.Events.publish/1`) **só depois do commit**: transação desfeita não publica
+  nada. `publish/1` levanta `ArgumentError` dentro de uma transação, de propósito: chamar uma
+  transição pública destas dentro de outra transação é **erro de uso**, porque o commit
+  interno seria só um savepoint e os eventos sairiam antes do commit de verdade.
 
   O snapshot (`get_progress/1`, `get_audit_summary/1` e o de cada evento) é lido numa
   instrução SQL só, com a linha da auditoria e os agregados dos achados juntos: nunca sai
@@ -187,29 +193,27 @@ defmodule Rampa.Audits do
   # As duas travas vêm antes de qualquer leitura ou escrita: nenhuma trava de linha é
   # segurada enquanto se espera trava consultiva (ver `Rampa.Audits.Limits`).
   defp insert_audit(request, limits, clock) do
-    Repo.transact(fn ->
+    transact_and_publish(fn ->
       :ok = Limits.lock_requester(request.ip_hash)
       :ok = Limits.lock_global()
       now = clock.()
 
       case claim_idempotency_key(request.ip_hash, request.key, now) do
-        %Audit{} = audit -> replay(audit, request.url)
+        %Audit{} = audit -> replay_in_transaction(audit, request.url)
         nil -> insert_within_limits(request, limits, now)
       end
     end)
     |> case do
-      {:ok, {%Audit{} = audit, events}} ->
-        :ok = Events.publish(events)
-        {:ok, audit}
-
       # Conflito no índice único da chave: outra requisição com a mesma chave ganhou. Não
       # acontece com a trava do solicitante, mas o índice é a última palavra.
-      {:error, :idempotency_conflict} ->
-        idempotent_winner(request, clock.())
-
-      result ->
-        result
+      {:error, :idempotency_conflict} -> idempotent_winner(request, clock.())
+      result -> result
     end
+  end
+
+  # A repetição idempotente não muda nada: nenhum evento a publicar.
+  defp replay_in_transaction(audit, url) do
+    with {:ok, audit} <- replay(audit, url), do: {:ok, {audit, []}}
   end
 
   defp idempotent_winner(request, now) do
@@ -322,30 +326,40 @@ defmodule Rampa.Audits do
   # commit e os totais de outro. Dentro de uma transação, enxerga as próprias escritas.
   defp read_snapshot(id) do
     with {:ok, uuid} <- Ecto.UUID.cast(id),
-         {%Audit{} = audit, totals, needs_review} <- Repo.one(snapshot_query(uuid)) do
+         {%Audit{} = audit, counts} <- Repo.one(snapshot_query(uuid)) do
+      {totals, needs_review} = split_counts(counts)
       {:ok, audit, totals, needs_review}
     else
       _not_found -> {:error, :audit_not_found}
     end
   end
 
+  # A auditoria e as contagens dos achados dela, na mesma instrução (`finding_counts/2` como
+  # subconsulta: um agregado sem `GROUP BY` devolve sempre uma linha, zerada sem achados).
   defp snapshot_query(audit_id) do
     from a in Audit,
-      left_join: f in Finding,
-      on: f.audit_id == a.id,
+      cross_join: c in subquery(finding_counts(:audit_id, audit_id)),
       where: a.id == ^audit_id,
-      group_by: a.id,
-      select: {
-        a,
-        %{
-          critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
-          serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
-          moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
-          minor: filter(count(f.id), f.severity == :minor and not f.needs_review)
-        },
-        filter(count(f.id), f.needs_review)
+      select: {a, c}
+  end
+
+  # A única contagem de achados do andamento, por auditoria (`:audit_id`) ou por página
+  # (`:page_id`): confirmados (`needs_review = false`) por severidade e os que pedem
+  # revisão. Usada pelo snapshot e pelo `page_scanned`, para os dois nunca divergirem.
+  defp finding_counts(scope, id) when scope in [:audit_id, :page_id] do
+    from f in Finding,
+      where: field(f, ^scope) == ^id,
+      select: %{
+        critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
+        serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
+        moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
+        minor: filter(count(f.id), f.severity == :minor and not f.needs_review),
+        needs_review: filter(count(f.id), f.needs_review)
       }
   end
+
+  defp split_counts(%{needs_review: needs_review} = counts),
+    do: {Map.delete(counts, :needs_review), needs_review}
 
   defp progress(%Audit{} = audit, totals, needs_review) do
     %{
@@ -1012,8 +1026,9 @@ defmodule Rampa.Audits do
 
   # Ponto único de escrita do andamento da auditoria (sempre com ela travada, e só por aqui).
   # Sobe a `revision` sempre, mesmo que nada mais mude (um changeset sem mudança não emitiria
-  # SQL e a `revision` ficaria parada), grava, lê o snapshot na mesma transação e deriva os
-  # eventos do diff entre o estado de antes e o de depois. Os eventos da transação
+  # SQL e a `revision` ficaria parada), grava e deriva os eventos do diff entre o estado de
+  # antes e o que o `UPDATE` devolveu. Só se houver evento lê o snapshot, na mesma transação
+  # (o agregado dos achados não roda à toa com a auditoria travada). Os eventos da transação
   # compartilham a `revision` e o `progress`; quem publica é `transact_and_publish/1`, depois
   # do commit.
   defp commit_progress(%Audit{} = audit, attrs, {page_before, page_after}) do
@@ -1022,42 +1037,36 @@ defmodule Rampa.Audits do
       |> Audit.progress_changeset(attrs)
       |> Ecto.Changeset.force_change(:revision, audit.revision + 1)
 
-    with {:ok, _updated} <- Repo.update(changeset),
-         {:ok, updated, totals, needs_review} <- read_snapshot(audit.id) do
-      progress = progress(updated, totals, needs_review)
+    with {:ok, updated} <- Repo.update(changeset) do
+      case Events.diff(audit, updated, page_before, page_after) do
+        [] -> {:ok, updated, []}
+        changes -> build_events(updated, changes)
+      end
+    end
+  end
+
+  defp build_events(%Audit{} = updated, changes) do
+    with {:ok, snapshot, totals, needs_review} <- read_snapshot(updated.id) do
+      progress = progress(snapshot, totals, needs_review)
 
       events =
-        audit
-        |> Events.diff(updated, page_before, page_after)
-        |> Enum.map(fn {name, data} ->
+        Enum.map(changes, fn {name, data} ->
           %Events.Event{
             name: name,
-            audit_id: updated.id,
-            revision: updated.revision,
+            audit_id: snapshot.id,
+            revision: snapshot.revision,
             progress: progress,
             data: event_data(name, data)
           }
         end)
 
-      {:ok, updated, events}
+      {:ok, snapshot, events}
     end
   end
 
-  # `page_scanned` leva as contagens da página: confirmados por severidade e os que pedem
-  # revisão, como os totais da auditoria.
+  # `page_scanned` leva as contagens da página, com a mesma consulta dos totais da auditoria.
   defp event_data(:page_scanned, %{page_id: page_id} = data) do
-    {counts, needs_review} =
-      from(f in Finding,
-        where: f.page_id == ^page_id,
-        group_by: [f.needs_review, f.severity],
-        select: {f.needs_review, f.severity, count()}
-      )
-      |> Repo.all()
-      |> Enum.reduce({Map.new(Finding.severities(), &{&1, 0}), 0}, fn
-        {false, severity, count}, {counts, review} -> {Map.put(counts, severity, count), review}
-        {true, _severity, count}, {counts, review} -> {counts, review + count}
-      end)
-
+    {counts, needs_review} = :page_id |> finding_counts(page_id) |> Repo.one() |> split_counts()
     Map.merge(data, %{counts_by_severity: counts, needs_review_count: needs_review})
   end
 

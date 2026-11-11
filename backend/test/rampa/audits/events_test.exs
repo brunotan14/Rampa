@@ -254,6 +254,72 @@ defmodule Rampa.Audits.EventsTest do
     end
   end
 
+  describe "agregado dos achados só quando há evento" do
+    # Consultas deste processo que leem a tabela `findings`, pela telemetria do Ecto.
+    setup do
+      test_pid = self()
+      handler = "consultas-#{inspect(test_pid)}"
+
+      :ok =
+        :telemetry.attach(
+          handler,
+          [:rampa, :repo, :query],
+          fn _event, _measurements, metadata, _config ->
+            if self() == test_pid and metadata.query =~ ~s(FROM "findings"),
+              do: send(test_pid, {:findings_query, metadata.query})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+    end
+
+    test "transição sem evento sobe a revision sem ler os achados" do
+      page = page_fixture()
+      assert {:ok, _task} = Audits.start_task(page.id, :scan, 1)
+      assert_received {:findings_query, _query}
+      flush_findings_queries()
+
+      before = revision(page.audit_id)
+      assert {:ok, _task} = Audits.start_task(page.id, :scan, 2)
+      assert {:ok, _task} = Audits.add_task(page.id, :alt_text)
+
+      assert revision(page.audit_id) == before + 2
+      refute_received {:findings_query, _query}
+    end
+
+    test "transição com evento lê o agregado na mesma transação" do
+      page = page_fixture()
+      assert {:ok, _task} = Audits.start_task(page.id, :scan, 1)
+      assert_received {:findings_query, _query}
+    end
+  end
+
+  defp flush_findings_queries do
+    receive do
+      {:findings_query, _query} -> flush_findings_queries()
+    after
+      0 -> :ok
+    end
+  end
+
+  describe "uma contagem só" do
+    test "page_scanned de uma página única conta igual aos totais da auditoria" do
+      page = page_fixture()
+      :ok = Events.subscribe(page.audit_id)
+      assert {:ok, _task} = Audits.start_task(page.id, :scan, 1)
+
+      assert {:ok, _page} =
+               Audits.record_scan_result(page, scanner_response("contraste-incerto"))
+
+      assert_received {:audit_event, %Event{name: :page_scanned, data: data, progress: progress}}
+
+      assert data.counts_by_severity == progress.totals_by_severity
+      assert data.needs_review_count == progress.needs_review_count
+      assert data.needs_review_count > 0
+    end
+  end
+
   describe "snapshot" do
     test "get_progress/1: revision e progress absolutos; id inválido ou inexistente" do
       audit = audit_fixture(%{status: :running, revision: 3, pages_found: 2})

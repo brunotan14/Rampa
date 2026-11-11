@@ -10,7 +10,8 @@ defmodule RampaWeb.AuditChannel do
   `audit_not_found`, igual para os dois casos. Auditoria já encerrada aceita join: o snapshot
   já é o estado final, e nenhum evento chega depois. Os parâmetros do join são ignorados.
 
-  Ordem, para não perder evento entre o snapshot e a inscrição: o canal se inscreve **antes**
+  Ordem: id canônico (sem banco), limite por conexão, inscrição e snapshot. Para não perder
+  evento entre o snapshot e a inscrição, o canal se inscreve **antes**
   no tópico interno da auditoria (`Rampa.Audits.Events.topic/1`) e só então lê o snapshot
   (`Rampa.Audits.get_progress/1`), que volta na resposta do join (`revision` e `progress`). O
   join roda no próprio processo do canal: os eventos publicados depois da inscrição ficam na
@@ -45,10 +46,10 @@ defmodule RampaWeb.AuditChannel do
 
   @impl Phoenix.Channel
   def join("audit:" <> id, _params, socket) do
-    with :ok <- check_limit(socket),
-         {:ok, audit_id} <- canonical_id(id),
+    with {:ok, audit_id} <- canonical_id(id),
+         :ok <- check_limit(socket),
          :ok <- Events.subscribe(audit_id),
-         {:ok, snapshot} <- Audits.get_progress(audit_id) do
+         {:ok, snapshot} <- snapshot(audit_id, socket) do
       :telemetry.execute(
         [:rampa, :audit_channel, :snapshot],
         %{revision: snapshot.revision},
@@ -83,6 +84,19 @@ defmodule RampaWeb.AuditChannel do
     case Ecto.UUID.cast(id) do
       {:ok, ^id} -> {:ok, id}
       _invalid -> {:error, :audit_not_found}
+    end
+  end
+
+  # Auditoria inexistente: a vaga é devolvida antes da recusa, sem esperar o `Registry`
+  # limpar a entrada do processo que vai terminar.
+  defp snapshot(audit_id, socket) do
+    case Audits.get_progress(audit_id) do
+      {:ok, snapshot} ->
+        {:ok, snapshot}
+
+      {:error, :audit_not_found} = error ->
+        :ok = Registry.unregister(@registry, socket.transport_pid)
+        error
     end
   end
 

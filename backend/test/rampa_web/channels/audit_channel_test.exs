@@ -120,6 +120,34 @@ defmodule RampaWeb.AuditChannelTest do
       assert {:ok, _reply, _socket} = join_audit(List.last(audits).id, other)
     end
 
+    test "no limite, id inválido ainda é audit_not_found: o id é conferido antes do limite" do
+      socket = socket(AuditSocket)
+      for _ <- 1..10, do: assert({:ok, _reply, _socket} = join_audit(audit_fixture().id, socket))
+
+      assert {:error, reply} = join_audit("nao-e-uuid", socket)
+      assert %{"error" => %{"code" => "audit_not_found"}} = assert_contract(:join_error, reply)
+    end
+
+    test "auditoria inexistente devolve a vaga antes da recusa" do
+      socket = socket(AuditSocket)
+      for _ <- 1..9, do: assert({:ok, _reply, _socket} = join_audit(audit_fixture().id, socket))
+
+      # Com a partição do `Registry` suspensa, a entrada de um processo que termina não é
+      # limpa: só o desregistro explícito do canal devolve a vaga.
+      partition = Process.whereis(Module.concat(RampaWeb.AuditChannel.Registry, "PIDPartition0"))
+      :ok = :sys.suspend(partition)
+
+      try do
+        assert {:error, reply} = join_audit(Ecto.UUID.generate(), socket)
+        assert %{"error" => %{"code" => "audit_not_found"}} = assert_contract(:join_error, reply)
+        assert Registry.count_match(RampaWeb.AuditChannel.Registry, self(), :_) == 9
+      after
+        :sys.resume(partition)
+      end
+
+      assert {:ok, _reply, _socket} = join_audit(audit_fixture().id, socket)
+    end
+
     test "um canal que sai libera a vaga" do
       socket = socket(AuditSocket)
       audits = for _ <- 1..11, do: audit_fixture()
