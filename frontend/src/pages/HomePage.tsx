@@ -1,5 +1,5 @@
 import { PageTitle } from "../components/PageTitle";
-import { t } from "../i18n/pt-BR";
+import { t } from "../i18n";
 
 export function HomePage() {
   return (

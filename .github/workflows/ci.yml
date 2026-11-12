@@ -81,6 +81,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Tipos da API e do canal: regenera `src/api/schema.gen.ts` (de `shared/openapi.json`) e
+      # `src/api/channel.gen.ts` (de `shared/channel-events.schema.json`) e falha se estiverem
+      # desatualizados (rode `make api-types` e versione). O mesmo script do `make ci`.
+      - name: Tipos da API e do canal atualizados
+        working-directory: .
+        run: infra/ci/check-contract.sh frontend
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test

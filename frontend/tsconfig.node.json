@@ -17,6 +17,7 @@
   },
   "include": [
     "vite.config.ts",
-    "eslint.config.js"
+    "eslint.config.js",
+    "scripts"
   ]
 }

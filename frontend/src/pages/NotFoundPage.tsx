@@ -1,6 +1,6 @@
-import { Link } from "react-router";
+import { Link } from "../components/Link";
 import { PageTitle } from "../components/PageTitle";
-import { t } from "../i18n/pt-BR";
+import { t } from "../i18n";
 
 export function NotFoundPage() {
   return (
@@ -8,7 +8,9 @@ export function NotFoundPage() {
       <PageTitle>{t.notFound.title}</PageTitle>
       <p>{t.notFound.text}</p>
       <p>
-        <Link to="/">{t.notFound.back}</Link>
+        <Link href="/" standalone>
+          {t.notFound.back}
+        </Link>
       </p>
     </>
   );

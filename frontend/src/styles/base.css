@@ -52,12 +52,6 @@ a:visited { color: var(--link-visited); }
 .rp-skip:visited { color: var(--ink-inverse); }
 .rp-skip:focus, .rp-skip:focus-visible { transform: none; }
 
-.rp-header { border-bottom: var(--border-1) solid var(--line); background: var(--surface-raised); }
-.rp-header .rp-container { display: flex; align-items: center; min-height: var(--space-16); }
-
-.rp-brand { display: inline-flex; align-items: center; min-height: var(--target-comfort); }
-.rp-brand img { display: block; height: 32px; width: auto; }
-
 .rp-main { padding-block: var(--space-12); }
 
 .rp-h1 {
