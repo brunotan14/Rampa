@@ -4,11 +4,12 @@
 // tela em construção (`feat/tela-relatorio`). Quem acompanhou o fim ao vivo continua na tela de
 // progresso, ouve a conclusão uma vez e chega ao relatório pelo botão "Ver relatório".
 //
-// Leitor de tela: a única região viva é a do `ScanProgress` (marcos de 25% e a conclusão).
-// Contadores, etapas, feed e a linha de conexão não falam sozinhos.
+// Leitor de tela: a única região viva é a `LiveRegion` desta tela, montada vazia desde o
+// primeiro quadro (inclusive carregando) e fora das trocas de estado: fala os marcos de 25%
+// do `ScanProgress` e a conclusão. Contadores, etapas, feed e a linha de conexão não falam.
 import { useEffect, useRef, useState, type Ref } from "react";
 import { useParams } from "react-router";
-import { announcementFor, isFinalStatus, progressFromSummary, useAuditChannel, type ConnectionState, type PageActivity } from "../api/channel";
+import { isFinalStatus, progressFromSummary, useAuditChannel, type ConnectionState, type PageActivity } from "../api/channel";
 import { isApiError } from "../api/client";
 import { useAudit, usePages } from "../api/hooks";
 import type { AuditStatus, AuditSummary, ChannelProgress, PageSummary } from "../api/types";
@@ -16,6 +17,7 @@ import { ActivityFeed, type ActivityItem } from "../components/ActivityFeed";
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
 import { Link } from "../components/Link";
+import { LiveRegion } from "../components/LiveRegion";
 import { PageTitle } from "../components/PageTitle";
 import { ScanProgress, type ScanStatus } from "../components/ScanProgress";
 import { ScanSteps } from "../components/ScanSteps";
@@ -111,66 +113,69 @@ function feedItems(pages: readonly PageActivity[], list: readonly PageSummary[] 
   });
 }
 
+/** Intervalo mínimo entre buscas da lista de páginas para o feed (caminho e hora). */
+export const PAGES_REFRESH_MS = 5_000;
+/** Tentativas por página ausente da lista antes de desistir do caminho dela. */
+export const PAGES_MAX_TRIES = 3;
+
+type View = "loading" | "not-found" | "error" | "report" | "progress";
+
 function AuditView({ auditId }: { auditId: string }) {
   const summary = useAudit(auditId);
   const channel = useAuditChannel(auditId);
   const progress = channel.progress ?? (summary.data ? progressFromSummary(summary.data) : null);
 
-  // A auditoria esteve em andamento enquanto a tela estava aberta: o fim fica na tela de
-  // progresso (com a conclusão anunciada), não troca sozinho para o relatório.
+  // Acompanhada ao vivo: só quando o estado do canal (join, evento ou o GET do próprio hook)
+  // mostrou a auditoria aberta. O resumo em cache pode ser velho (o prefetch da tela inicial
+  // diz `queued`) e não conta: auditoria já encerrada vai direto ao relatório, sem anúncio.
   const [liveSeen, setLiveSeen] = useState(false);
-  if (progress !== null && !isFinalStatus(progress.status) && !liveSeen) setLiveSeen(true);
+  if (channel.progress !== null && !isFinalStatus(channel.progress.status) && !liveSeen) setLiveSeen(true);
   const [showReport, setShowReport] = useState(false);
+  const [milestone, setMilestone] = useState("");
   const reportTitle = useRef<HTMLHeadingElement>(null);
-
-  // "Ver relatório": o foco vai para o título do relatório, como numa troca de rota.
-  useEffect(() => {
-    if (showReport) reportTitle.current?.focus();
-  }, [showReport]);
 
   const host = hostOf(summary.data?.start_url);
   const summaryError = isApiError(summary.error) ? summary.error : null;
   const notFound = channel.error?.code === "audit_not_found" || summaryError?.code === "audit_not_found";
+  // Join recusado por outro motivo (ex.: limite de canais): a tela segue pelo resumo e pelo GET
+  // periódico do hook, com um aviso de que não há atualização ao vivo.
+  const offline = channel.error !== null && !notFound;
 
-  if (notFound) {
-    return (
-      <>
-        <PageTitle>{t.audit.notFoundTitle}</PageTitle>
-        <StateMessage
-          kind="erro"
-          title={t.audit.notFoundState}
-          text={channel.error?.message ?? summaryError?.message}
-          actions={
-            <Link href="/" standalone>
-              {t.audit.newAudit}
-            </Link>
-          }
-        />
-      </>
-    );
-  }
+  const view: View = notFound
+    ? "not-found"
+    : progress === null
+      ? summary.isError
+        ? "error"
+        : "loading"
+      : showReport || (isFinalStatus(progress.status) && progress.status === "completed" && !liveSeen)
+        ? "report"
+        : "progress";
 
-  if (channel.error !== null) {
-    return (
-      <>
-        <PageTitle>{t.audit.loadErrorTitle}</PageTitle>
-        <StateMessage
-          kind="erro"
-          title={t.audit.loadErrorTitle}
-          text={channel.error.message}
-          actions={
-            <Link href="/" standalone>
-              {t.audit.newAudit}
-            </Link>
-          }
-        />
-      </>
-    );
-  }
+  // Da tela de progresso para o relatório ("Ver relatório" ou a auditoria que já tinha
+  // terminado): o foco vai para o novo título, como numa troca de rota.
+  const previousView = useRef<View>(view);
+  useEffect(() => {
+    if (view === "report" && previousView.current === "progress") reportTitle.current?.focus();
+    previousView.current = view;
+  }, [view]);
 
-  if (progress === null) {
-    if (summary.isError) {
-      return (
+  return (
+    <>
+      {view === "not-found" ? (
+        <>
+          <PageTitle>{t.audit.notFoundTitle}</PageTitle>
+          <StateMessage
+            kind="erro"
+            title={t.audit.notFoundState}
+            text={channel.error?.message ?? summaryError?.message}
+            actions={
+              <Link href="/" standalone>
+                {t.audit.newAudit}
+              </Link>
+            }
+          />
+        </>
+      ) : view === "error" ? (
         <>
           <PageTitle>{t.audit.loadErrorTitle}</PageTitle>
           <StateMessage
@@ -184,37 +189,29 @@ function AuditView({ auditId }: { auditId: string }) {
             }
           />
         </>
-      );
-    }
-    return (
-      <>
-        <PageTitle>{t.audit.loadingTitle}</PageTitle>
-        <StateMessage kind="carregando" title={t.audit.loading} />
-      </>
-    );
-  }
-
-  if (showReport || (progress.status === "completed" && !liveSeen)) {
-    return <ReportPlaceholder host={host} progress={progress} titleRef={reportTitle} />;
-  }
-
-  const announcement =
-    channel.announcement ??
-    (liveSeen && channel.progress !== null && isFinalStatus(channel.progress.status)
-      ? announcementFor(channel.progress)
-      : null);
-
-  return (
-    <ProgressView
-      auditId={auditId}
-      host={host}
-      summary={summary.data}
-      progress={progress}
-      connection={channel.connection}
-      pages={channel.pages}
-      announcement={announcement}
-      onViewReport={() => setShowReport(true)}
-    />
+      ) : view === "loading" || progress === null ? (
+        <>
+          <PageTitle>{t.audit.loadingTitle}</PageTitle>
+          <StateMessage kind="carregando" title={t.audit.loading} />
+        </>
+      ) : view === "report" ? (
+        <ReportPlaceholder host={host} progress={progress} titleRef={reportTitle} />
+      ) : (
+        <ProgressView
+          auditId={auditId}
+          host={host}
+          summary={summary.data}
+          progress={progress}
+          connection={channel.connection}
+          offline={offline}
+          pages={channel.pages}
+          onMilestone={setMilestone}
+          onViewReport={() => setShowReport(true)}
+        />
+      )}
+      {/* Fora das trocas de estado acima: a mesma região do primeiro ao último quadro. */}
+      <LiveRegion text={channel.announcement ?? milestone} />
+    </>
   );
 }
 
@@ -266,8 +263,9 @@ function ProgressView({
   summary,
   progress,
   connection,
+  offline,
   pages,
-  announcement,
+  onMilestone,
   onViewReport,
 }: {
   auditId: string;
@@ -275,8 +273,9 @@ function ProgressView({
   summary: AuditSummary | undefined;
   progress: ChannelProgress;
   connection: ConnectionState;
+  offline: boolean;
   pages: readonly PageActivity[];
-  announcement: string | null;
+  onMilestone: (text: string) => void;
   onViewReport: () => void;
 }) {
   const pageList = usePages(auditId);
@@ -285,20 +284,34 @@ function ProgressView({
   const title = host ? t.audit.title[key](host) : t.audit.titleNoHost[key];
   const step = currentStep(progress.status);
 
-  // Página nova no feed sem caminho conhecido: busca a lista de páginas de novo, uma vez por
-  // página (o canal só manda o id, PRD §9).
-  const asked = useRef(new Set<string>());
+  // Página no feed sem caminho conhecido (o canal só manda o id, PRD §9): a lista de páginas é
+  // buscada de novo, no máximo uma vez a cada `PAGES_REFRESH_MS`, por mais páginas que
+  // cheguem. Página que continua fora da lista (ou busca que falhou) tenta de novo na janela
+  // seguinte, até `PAGES_MAX_TRIES` vezes. No fim da auditoria o hook do canal busca a lista
+  // mais uma vez.
+  const tries = useRef(new Map<string, number>());
+  const lastFetch = useRef(0);
+  const [wake, setWake] = useState(0);
   const known = pageList.data?.data;
   const fetching = pageList.isFetching;
   const refetch = pageList.refetch;
+  const updatedAt = Math.max(pageList.dataUpdatedAt, pageList.errorUpdatedAt);
   useEffect(() => {
     if (fetching) return;
     const ids = new Set(known?.map((p) => p.id));
-    const missing = pages.filter((p) => !ids.has(p.pageId) && !asked.current.has(p.pageId));
+    const missing = pages
+      .map((p) => p.pageId)
+      .filter((id) => !ids.has(id) && (tries.current.get(id) ?? 0) < PAGES_MAX_TRIES);
     if (missing.length === 0) return;
-    for (const p of missing) asked.current.add(p.pageId);
+    const wait = Math.max(lastFetch.current, updatedAt) + PAGES_REFRESH_MS - Date.now();
+    if (wait > 0) {
+      const timer = setTimeout(() => setWake((n) => n + 1), wait);
+      return () => clearTimeout(timer);
+    }
+    lastFetch.current = Date.now();
+    for (const id of missing) tries.current.set(id, (tries.current.get(id) ?? 0) + 1);
     void refetch();
-  }, [pages, known, fetching, refetch]);
+  }, [pages, known, fetching, refetch, updatedAt, wake]);
 
   const started = summary ? new Date(summary.inserted_at) : null;
 
@@ -313,6 +326,16 @@ function ProgressView({
         )}
       </div>
 
+      {offline && (
+        // Visível e lido na ordem da página; não é região viva (a única é a da tela).
+        <div className="rp-notice">
+          <Icon name="info" />
+          <p>
+            <strong>{t.audit.connection.offlineTitle}.</strong> {t.audit.connection.offlineText}
+          </p>
+        </div>
+      )}
+
       <ScanSteps label={t.audit.steps.label} steps={t.audit.steps.items} current={step.current} stopped={step.stopped} />
 
       <div className="rp-split rp-split--reverse rp-audit__live">
@@ -323,8 +346,8 @@ function ProgressView({
           scanned={progress.pages_scanned}
           failed={progress.pages_failed}
           errorMessage={progress.error?.message ?? null}
-          announcement={announcement}
-          connection={final ? undefined : <ConnectionLine state={connection} />}
+          onMilestone={onMilestone}
+          connection={final || offline ? undefined : <ConnectionLine state={connection} />}
           actions={
             progress.status === "completed" ? (
               <Button onClick={onViewReport}>{t.audit.viewReport}</Button>

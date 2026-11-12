@@ -1,7 +1,9 @@
 // design/components/ActivityFeed: o que a varredura acabou de fazer, o mais recente no topo.
 // De propósito NÃO é região viva (nem `role="log"`): uma varredura gera dezenas de eventos por
 // minuto. Quem usa leitor de tela navega até o feed quando quiser; os anúncios ficam com o
-// `ScanProgress`. Mostra no máximo os 6 últimos.
+// `ScanProgress`. Mostra no máximo os 6 últimos, o mais recente primeiro, numa `<ul>`: a ordem
+// fica clara pela hora de cada item, e números de uma `<ol>` só dos 6 últimos (6, 5, 4...)
+// diriam a quem usa leitor de tela uma posição que não é a real na varredura.
 import { useId } from "react";
 import { Icon, type IconName } from "./Icon";
 
@@ -30,7 +32,7 @@ export function ActivityFeed({ title, items, empty }: { title: string; items: re
       {shown.length === 0 ? (
         <p className="rp-feed__empty">{empty}</p>
       ) : (
-        <ol className="rp-feed__list" reversed>
+        <ul className="rp-feed__list">
           {shown.map((item) => (
             <li key={item.id} className={`rp-feed__item rp-feed__item--${item.status}`}>
               <Icon name={ICONS[item.status]} />
@@ -44,7 +46,7 @@ export function ActivityFeed({ title, items, empty }: { title: string; items: re
               )}
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </section>
   );

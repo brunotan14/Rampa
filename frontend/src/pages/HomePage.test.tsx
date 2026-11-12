@@ -107,6 +107,22 @@ describe("HomePage", () => {
     expect(await axeViolations(container)).toEqual([]);
   });
 
+  it("o mesmo erro duas vezes seguidas é anunciado de novo (alerta novo) e o foco volta ao campo", async () => {
+    fetchMock.mockImplementation(async () => apiRefusal(422, "unresolvable", "Não encontramos este domínio."));
+    renderRoute("/");
+    await userEvent.type(screen.getByRole("textbox"), "nao-existe.exemplo");
+    await userEvent.click(screen.getByRole("button", { name: "Auditar" }));
+    const first = await screen.findByRole("alert");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: "Auditar" }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    const second = await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveFocus());
+    expect(second).not.toBe(first);
+    expect(second).toHaveTextContent("Não encontramos este domínio.");
+  });
+
   it("vazio: pede o endereço sem chamar a API", async () => {
     renderRoute("/");
     await userEvent.click(screen.getByRole("button", { name: "Auditar" }));

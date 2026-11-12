@@ -470,6 +470,26 @@ describe("useAuditChannel", () => {
     expect(auditGets()).toBe(1);
   });
 
+  it("join recusado por limite de canais: o estado continua chegando pelo GET periódico", async () => {
+    let summary = auditSummary({ revision: 2, status: "running", pages_scanned: 0 });
+    routes({ [`/api/audits/${AUDIT_ID}`]: () => summary, [`/api/audits/${AUDIT_ID}/pages`]: () => ({ data: [] }) });
+    const { result, channel } = setup();
+    act(() => channel().refuse({ error: { code: "channel_limit_reached", message: "Limite." } }));
+    await advance(0);
+    expect(result.current.error).toMatchObject({ code: "channel_limit_reached" });
+    expect(result.current.progress).toMatchObject({ status: "running" });
+    expect(auditGets()).toBe(1);
+
+    summary = auditSummary({ revision: 5, status: "completed", pages_scanned: 1 });
+    await advance(SILENCE_MS + BATCH_MS);
+    expect(auditGets()).toBe(2);
+    expect(result.current.progress).toMatchObject({ status: "completed", pages_scanned: 1 });
+    expect(result.current.announcement).toBe("Auditoria concluída: 0 problemas em 1 página.");
+    // Encerrada, para de buscar.
+    await advance(SILENCE_MS * 3);
+    expect(auditGets()).toBe(2);
+  });
+
   it("depois de um join recusado, a limpeza não sai do canal de novo", () => {
     const { channel, unmount } = setup();
     act(() => channel().refuse({ error: { code: "channel_limit_reached", message: "Limite." } }));

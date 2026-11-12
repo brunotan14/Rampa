@@ -2,8 +2,10 @@ import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FakeSocket } from "../../test/fakeSocket";
 import { AUDIT_ID, PAGE_ID, auditSummary, progress } from "../../test/fixtures";
-import { axeViolations, jsonResponse, renderRoute } from "../../test/render";
-import { BATCH_MS } from "../api/channel";
+import { axeViolations, jsonResponse, renderRoute, testQueryClient } from "../../test/render";
+import { BATCH_MS, SILENCE_MS } from "../api/channel";
+import { queryKeys } from "../api/queryKeys";
+import { PAGES_MAX_TRIES, PAGES_REFRESH_MS } from "./AuditPage";
 import type { AuditSummary, ChannelProgress, PageSummary } from "../api/types";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -33,6 +35,10 @@ afterEach(() => {
 });
 
 const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+/** Avança em passos de 250 ms: o React só aplica os estados no fim de cada `act`. */
+async function advanceInSteps(ms: number) {
+  for (let elapsed = 0; elapsed < ms; elapsed += 250) await advance(Math.min(250, ms - elapsed));
+}
 const summaryGets = () => fetchMock.mock.calls.filter(([url]) => String(url) === SUMMARY_URL).length;
 
 async function open(path = PATH) {
@@ -54,7 +60,12 @@ function stat(term: string) {
   return dt.nextElementSibling as HTMLElement;
 }
 
-const live = () => screen.getByRole("status");
+/** A única região viva da tela (o carregando do `StateMessage` também é `status`, sem aria-live). */
+const live = () => {
+  const region = document.querySelector<HTMLElement>('[role="status"][aria-live="polite"]');
+  if (!region) throw new Error("sem região viva");
+  return region;
+};
 
 /** Todos os textos que a região viva teve, na ordem (cada troca de conteúdo). */
 function recordLive() {
@@ -111,7 +122,7 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(router.state.location.pathname).toBe(PATH);
     expect(summaryGets()).toBe(gets);
     // 4 páginas em 2 s: no máximo o primeiro marco (40%), nunca uma frase por página.
-    expect(said).toEqual(["40% concluído. 2 de 5 páginas analisadas."]);
+    expect(said).toEqual(["40% concluído. 2 de 5 páginas verificadas."]);
   });
 
   it("CA2: ao terminar, a região viva diz 'Auditoria concluída: N problemas em M páginas' uma única vez", async () => {
@@ -135,12 +146,38 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(screen.queryByText("Ao vivo")).not.toBeInTheDocument();
   });
 
-  it("CA2: se o GET dizia 'em andamento' e o primeiro snapshot do canal já vem concluído, a conclusão também é anunciada", async () => {
-    const { channel } = await open();
+  it("resumo em cache velho ('na fila', do prefetch) e join já concluído: vai direto ao relatório, sem anunciar", async () => {
+    const socket = new FakeSocket();
+    const client = testQueryClient();
+    client.setQueryData(queryKeys.audit(AUDIT_ID), auditSummary({ status: "queued", pages_found: 1 }));
+    renderRoute(PATH, { socket, client });
+    await advance(0);
+    expect(screen.getByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeInTheDocument();
     const said = recordLive();
-    act(() => channel().reply(at(3, { status: "completed", pages_scanned: 5 })));
+    act(() => socket.last.reply(at(3, { status: "completed", pages_found: 1, pages_scanned: 1 })));
+    await advance(BATCH_MS * 4);
+    expect(screen.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeInTheDocument();
+    expect(said).toEqual([]);
+    expect(live()).toBeEmptyDOMElement();
+  });
+
+  it("a região viva existe vazia desde o primeiro quadro (carregando) e o texto chega depois", async () => {
+    let release: (r: Response) => void = () => undefined;
+    fetchMock.mockImplementation((input) =>
+      String(input) === SUMMARY_URL ? new Promise<Response>((resolve) => (release = resolve)) : Promise.resolve(jsonResponse({ data: [] })),
+    );
+    const { channel } = await open();
+    expect(screen.getByRole("heading", { level: 1, name: "Carregando auditoria" })).toBeInTheDocument();
+    const region = live();
+    expect(region).toBeEmptyDOMElement();
+
+    act(() => channel().reply(at(1, { pages_found: 1 })));
+    act(() => channel().push("audit_completed", { ...at(2, { status: "completed", pages_found: 1, pages_scanned: 1 }), score: null }));
     await advance(BATCH_MS);
-    expect(said).toEqual(["Auditoria concluída: 0 problemas em 5 páginas."]);
+    // A mesma região (não uma nova, já com o texto), agora com a conclusão.
+    expect(live()).toBe(region);
+    expect(region).toHaveTextContent("Auditoria concluída: 0 problemas em 1 página.");
+    release(jsonResponse(summary));
   });
 
   it("CA3: a conexão cai (aviso visível) e, ao voltar, os contadores mostram o estado real", async () => {
@@ -162,7 +199,7 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(stat("Com falha")).toHaveTextContent("1");
     expect(stat("Sérios")).toHaveTextContent("4");
     // A queda e a volta não falam; o salto de 20% para 80% é um marco só.
-    expect(said).toEqual(["80% concluído. 3 de 5 páginas analisadas."]);
+    expect(said).toEqual(["80% concluído. 4 de 5 páginas verificadas, 1 com falha."]);
   });
 
   it("falha: o motivo aparece na tela, a parada é anunciada uma vez e há caminho para uma nova auditoria", async () => {
@@ -202,7 +239,7 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeInTheDocument();
     expect(screen.getByText("A auditoria terminou: 1 problema em 1 página.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Fazer uma nova auditoria" })).toBeInTheDocument();
-    expect(container.querySelector("[aria-live]")).toBeNull();
+    expect(live()).toBeEmptyDOMElement();
     vi.useRealTimers();
     expect(await axeViolations(container)).toEqual([]);
   });
@@ -250,7 +287,8 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
       }),
     );
     await advance(BATCH_MS);
-    await advance(0);
+    // A lista foi buscada ao abrir (sem a página); a próxima busca respeita a janela.
+    await advanceInSteps(PAGES_REFRESH_MS + BATCH_MS);
     const feed = screen.getByRole("region", { name: "Atividade" });
     expect(within(feed).getByRole("listitem")).toHaveTextContent("/contato analisada: 2 problemas");
     expect(within(feed).getByRole("listitem").querySelector("time")).toHaveAttribute("datetime", "2026-11-12T14:00:05.000Z");
@@ -272,9 +310,10 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
     await open();
     expect(screen.getByRole("heading", { level: 1, name: "Carregando auditoria" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Carregando a auditoria…");
+    const loading = screen.getAllByRole("status").find((el) => !el.hasAttribute("aria-live"));
+    expect(loading).toHaveTextContent("Carregando a auditoria…");
     await advance(10_000);
-    expect(screen.getByRole("status")).toHaveTextContent(/Está demorando mais do que o normal/);
+    expect(loading).toHaveTextContent(/Está demorando mais do que o normal/);
   });
 
   it("sem rede e sem canal: erro com a mensagem do cliente e botão para tentar de novo", async () => {
@@ -289,10 +328,97 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeInTheDocument();
   });
 
-  it("canal recusado por limite de canais: mostra a mensagem", async () => {
+  it("canal recusado por limite de canais: a tela segue pelo resumo, com aviso, e o GET periódico mantém os números", async () => {
     const { channel } = await open();
     act(() => channel().refuse({ error: { code: "channel_limit_reached", message: "Esta conexão já acompanha auditorias demais." } }));
     await advance(0);
-    expect(screen.getByRole("alert")).toHaveTextContent("Esta conexão já acompanha auditorias demais.");
+    expect(screen.getByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/Sem atualização ao vivo/).closest("div")).toHaveTextContent(
+      "Sem atualização ao vivo. Os números são atualizados a cada 30 segundos.",
+    );
+    expect(screen.queryByText("Ao vivo")).not.toBeInTheDocument();
+
+    summary = auditSummary({ status: "running", pages_found: 5, pages_scanned: 3, revision: 4 });
+    await advance(SILENCE_MS + BATCH_MS);
+    expect(stat("Analisadas")).toHaveTextContent("3");
+  });
+
+  it("canal recusado e auditoria encerrada: mostra o relatório", async () => {
+    summary = auditSummary({ status: "completed", pages_found: 1, pages_scanned: 1 });
+    const { channel } = await open();
+    act(() => channel().refuse({ error: { code: "channel_limit_reached", message: "Limite." } }));
+    await advance(BATCH_MS);
+    expect(screen.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeInTheDocument();
+  });
+
+  it("feed: 20 páginas seguidas buscam a lista no máximo uma vez a cada 5 s, mais uma no fim", async () => {
+    const { channel } = await open();
+    act(() => channel().reply(at(1, { pages_found: 20 })));
+    for (let n = 1; n <= 20; n++) {
+      const id = `${PAGE_ID.slice(0, -2)}${String(n).padStart(2, "0")}`;
+      pages = [...pages, { ...pageOf(id), url: `https://exemplo.com.br/p${n}` }];
+      act(() =>
+        channel().push("page_scanned", {
+          ...at(1 + n, { pages_found: 20, pages_scanned: n }),
+          page_id: id,
+          counts_by_severity: zero,
+          needs_review_count: 0,
+        }),
+      );
+      await advance(BATCH_MS);
+    }
+    // 10 s de varredura: a do abrir mais uma por janela de 5 s.
+    expect(pagesGets()).toBeLessThanOrEqual(3);
+    act(() => channel().push("audit_completed", { ...at(30, { status: "completed", pages_found: 20, pages_scanned: 20 }), score: null }));
+    await advanceInSteps(BATCH_MS + PAGES_REFRESH_MS);
+    expect(pagesGets()).toBeLessThanOrEqual(4);
+    const feed = screen.getByRole("region", { name: "Atividade" });
+    expect(within(feed).getAllByRole("listitem")[0]).toHaveTextContent("/p20 analisada");
+  });
+
+  it("feed: página ausente da lista (ou busca que falhou) tenta de novo na janela seguinte, até o limite", async () => {
+    const { channel } = await open();
+    act(() => channel().reply(at(1, {})));
+    act(() =>
+      channel().push("page_scanned", { ...at(2, { pages_scanned: 1 }), page_id: PAGE_ID, counts_by_severity: zero, needs_review_count: 0 }),
+    );
+    await advanceInSteps(BATCH_MS + PAGES_REFRESH_MS);
+    const afterFirstTry = pagesGets();
+    expect(within(screen.getByRole("region", { name: "Atividade" })).getByRole("listitem")).toHaveTextContent("Página analisada");
+
+    // A página entra na lista depois: a próxima janela traz o caminho.
+    pages = [{ ...pageOf(PAGE_ID), url: "https://exemplo.com.br/contato" }];
+    await advanceInSteps(PAGES_REFRESH_MS);
+    expect(pagesGets()).toBe(afterFirstTry + 1);
+    expect(within(screen.getByRole("region", { name: "Atividade" })).getByRole("listitem")).toHaveTextContent("/contato analisada");
+
+    // Uma página que nunca aparece desiste depois de PAGES_MAX_TRIES buscas.
+    const ghost = "99999999-2222-4333-8444-555555555555";
+    act(() =>
+      channel().push("page_scanned", { ...at(3, { pages_scanned: 2, pages_found: 5 }), page_id: ghost, counts_by_severity: zero, needs_review_count: 0 }),
+    );
+    await advance(BATCH_MS);
+    const before = pagesGets();
+    await advanceInSteps(PAGES_REFRESH_MS * (PAGES_MAX_TRIES + 3));
+    expect(pagesGets() - before).toBe(PAGES_MAX_TRIES);
   });
 });
+
+function pageOf(id: string): PageSummary {
+  return {
+    id,
+    url: "https://exemplo.com.br/",
+    final_url: null,
+    title: null,
+    status: "done",
+    http_status: 200,
+    error: null,
+    scanned_at: null,
+    counts_by_severity: zero,
+    needs_review_count: 0,
+    passed_count: null,
+  };
+}
+
+const pagesGets = () => fetchMock.mock.calls.filter(([url]) => String(url) === PAGES_URL).length;

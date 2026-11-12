@@ -199,8 +199,10 @@ export const ptBR = {
       scanned: "Analisadas",
       failed: "Com falha",
       // 04-conteudo.md, "Anúncios para leitor de tela": a cada 25%, no máximo uma vez a cada 10 s.
-      milestone: (pct: number, scanned: number, found: number) =>
-        `${formatNumber(pct)}% concluído. ${formatNumber(scanned)} de ${plural(found, "página analisada", "páginas analisadas")}.`,
+      // Os números são os mesmos do percentual (páginas terminadas, com e sem falha).
+      milestone: (pct: number, finished: number, found: number, failed: number) =>
+        `${formatNumber(pct)}% concluído. ${formatNumber(finished)} de ${plural(found, "página verificada", "páginas verificadas")}` +
+        (failed > 0 ? `, ${formatNumber(failed)} com falha.` : "."),
       leaveHint: "Você pode sair desta página e voltar pelo mesmo endereço: a auditoria continua.",
       failedFallback: "Não conseguimos continuar a auditoria.",
     },
@@ -208,6 +210,9 @@ export const ptBR = {
       connecting: "Conectando ao andamento ao vivo…",
       open: "Ao vivo",
       reconnecting: "Sem conexão. Tentando reconectar; os números podem estar atrasados.",
+      // Join recusado (ex.: `channel_limit_reached`): o resumo é buscado a cada 30 s.
+      offlineTitle: "Sem atualização ao vivo",
+      offlineText: "Os números são atualizados a cada 30 segundos.",
     },
     findings: {
       titleRunning: "Problemas encontrados até agora",

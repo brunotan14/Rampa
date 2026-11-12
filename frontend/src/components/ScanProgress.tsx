@@ -1,10 +1,10 @@
 // design/components/ScanProgress: a varredura ao vivo sem inundar o leitor de tela. A barra e
-// os contadores mudam a cada lote do canal (500 ms), mas não são regiões vivas. A ÚNICA região
-// viva da tela é a deste componente, montada vazia desde o início, e fala só:
-//   - nos marcos de 25% (no máximo uma vez a cada 10 s), enquanto a varredura anda;
-//   - no fim, com o `announcement` de `useAuditChannel` (uma vez só; a conclusão vence o marco).
+// os contadores mudam a cada lote do canal (500 ms), mas não são regiões vivas. O componente
+// decide os marcos de 25% (no máximo um a cada 10 s, nunca 100%) e os entrega por
+// `onMilestone`; quem fala é a ÚNICA região viva da tela (`LiveRegion`), que a tela monta vazia
+// desde o primeiro quadro e que não some quando este componente sai (a conclusão vence o marco).
 // Código de referência: design/05-implementacao.md, "3. Progresso da varredura".
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { t } from "../i18n";
 import { CountUp } from "./CountUp";
 import { Icon } from "./Icon";
@@ -23,8 +23,8 @@ export interface ScanProgressProps {
   failed: number;
   /** Motivo da parada (`progress.error.message`). */
   errorMessage?: string | null;
-  /** Texto final para a região viva (o `announcement` do canal). */
-  announcement: string | null;
+  /** Recebe o texto de cada marco de 25%, para a região viva da tela. */
+  onMilestone?: (text: string) => void;
   /** Linha de estado da conexão, ao lado do título. */
   connection?: ReactNode;
   actions?: ReactNode;
@@ -44,7 +44,7 @@ export function ScanProgress({
   scanned,
   failed,
   errorMessage,
-  announcement,
+  onMilestone,
   connection,
   actions,
   announceEvery = ANNOUNCE_EVERY,
@@ -58,18 +58,18 @@ export function ScanProgress({
 
   // Marco já atingido quando a tela abriu: não é anunciado (só os que vierem depois).
   const last = useRef({ step: Math.floor(pct / announceEvery), at: 0 });
-  const [milestone, setMilestone] = useState("");
 
   useEffect(() => {
-    if (!running) return;
+    if (!running || !onMilestone) return;
     const step = Math.floor(pct / announceEvery);
     const now = Date.now();
     // 100% não é marco: o fim é anunciado pela conclusão.
     if (step > last.current.step && pct < 100 && now - last.current.at >= minGapMs) {
       last.current = { step, at: now };
-      setMilestone(t.audit.scan.milestone(pct, scanned, found));
+      // Os mesmos números do percentual: páginas terminadas (com e sem falha) de encontradas.
+      onMilestone(t.audit.scan.milestone(pct, finished, found, failed));
     }
-  }, [pct, running, announceEvery, minGapMs, scanned, found]);
+  }, [pct, running, announceEvery, minGapMs, finished, found, failed, onMilestone]);
 
   const progressText = indeterminate
     ? t.audit.scan.progressIndeterminate
@@ -135,7 +135,7 @@ export function ScanProgress({
       </dl>
 
       {status === "failed" && (
-        // Sem `role="alert"`: a parada é anunciada uma vez, pela região viva abaixo.
+        // Sem `role="alert"`: a parada é anunciada uma vez, pela região viva da tela.
         <div className="rp-scan__error">
           <Icon name="critico" />
           <p>
@@ -144,11 +144,6 @@ export function ScanProgress({
           </p>
         </div>
       )}
-
-      {/* Única região viva da tela, sempre montada (vazia no início). */}
-      <div className="rp-sr" role="status" aria-live="polite" aria-atomic="true">
-        {announcement ?? milestone}
-      </div>
 
       <div className="rp-scan__foot">
         {(status === "queued" || status === "discovering" || running) && (

@@ -4,7 +4,7 @@
 // é do M3), sem o link para um relatório de exemplo, que ainda não existe.
 // Fora no M2: auditorias recentes (RF-RA018, `feat/recentes-e-retencao`), Entrar e Planos (pós-MVP).
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { getAudit, isApiError } from "../api/client";
 import { useCreateAudit } from "../api/hooks";
@@ -43,6 +43,7 @@ export function HomePage() {
   const create = useCreateAudit();
   const [opening, setOpening] = useState(false);
   const [failure, setFailure] = useState<{ error: UrlFieldError; key: number } | null>(null);
+  const errorCount = useRef(0);
 
   function start(url: string) {
     setFailure(null);
@@ -58,7 +59,12 @@ export function HomePage() {
             .catch(() => undefined);
           void navigate(`/auditorias/${id}`);
         },
-        onError: (error) => setFailure((previous) => ({ error: createAuditError(error), key: (previous?.key ?? 0) + 1 })),
+        // Um número novo a cada erro (nunca volta a 1): o alerta é remontado e anunciado de novo,
+        // e o foco volta ao campo, mesmo com o mesmo texto.
+        onError: (error) => {
+          errorCount.current += 1;
+          setFailure({ error: createAuditError(error), key: errorCount.current });
+        },
       },
     );
   }

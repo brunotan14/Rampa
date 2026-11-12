@@ -16,6 +16,8 @@ describe("ActivityFeed", () => {
     const { container } = render(<ActivityFeed title="Atividade" items={items} empty="Esperando…" />);
     expect(screen.getByRole("region", { name: "Atividade" })).toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(FEED_MAX);
+    // Lista sem números: os 6 últimos de uma varredura maior não são as posições 6 a 1.
+    expect(screen.getByRole("list").tagName).toBe("UL");
     expect(container.querySelector("[aria-live], [role=log], [role=status], [role=alert]")).toBeNull();
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("/p0 analisada: 0 problemas14:00:00");
     expect(await axeViolations(container)).toEqual([]);

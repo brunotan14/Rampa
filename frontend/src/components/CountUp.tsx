@@ -18,7 +18,9 @@ export function CountUp({ value, duration = COUNT_MS }: { value: number; duratio
       setShown(n);
     };
     if (!motion || origin === value) {
-      shownRef.current = value;
+      // Sem animação, o estado também acompanha o valor: se a preferência mudar depois, a
+      // contagem parte do número certo (e não de um valor antigo).
+      show(value);
       return;
     }
     const start = performance.now();

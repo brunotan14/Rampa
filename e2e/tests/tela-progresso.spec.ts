@@ -150,7 +150,30 @@ test.describe("Tela de progresso (RF-RA004)", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeVisible();
     await expect(page.getByText("A auditoria terminou: 2 problemas em 1 página.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Fazer uma nova auditoria" })).toHaveAttribute("href", "/");
-    await expect(page.locator("[aria-live]")).toHaveCount(0);
+    // A região viva existe (montada vazia desde o primeiro quadro), mas nada é anunciado.
+    await expect(page.locator("[aria-live]")).toHaveCount(1);
+    await expect(page.locator("[aria-live]")).toBeEmpty();
+    expect(await axeViolations(page)).toEqual([]);
+  });
+
+  test("canal recusado (limite de canais): a tela segue pelo resumo, com o aviso de sem atualização ao vivo", async ({ page }) => {
+    const state = { revision: 1, progress: progress({ pages_found: 5, pages_scanned: 2 }) };
+    await mockAuditApi(page, state);
+    await page.routeWebSocket(/\/socket\/websocket/, (ws) => {
+      ws.onMessage((raw) => {
+        const [joinRef, ref, topic, event] = JSON.parse(String(raw)) as [string, string, string, string];
+        if (event === "phx_join") {
+          ws.send(JSON.stringify([joinRef, ref, topic, "phx_reply", { status: "error", response: { error: { code: "channel_limit_reached", message: "Limite de canais." } } }]));
+        } else if (event === "heartbeat") {
+          ws.send(JSON.stringify([null, ref, "phoenix", "phx_reply", { status: "ok", response: {} }]));
+        }
+      });
+    });
+    await page.goto(PATH);
+    await expect(page.getByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeVisible();
+    await expect(page.getByText("Os números são atualizados a cada 30 segundos.")).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(stat(page, "Analisadas")).toHaveText("2");
     expect(await axeViolations(page)).toEqual([]);
   });
 

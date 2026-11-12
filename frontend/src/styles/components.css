@@ -485,3 +485,20 @@
   .rp-score__value { stroke: Highlight; }
   .rp-panel { border: var(--border-1) solid CanvasText; }
 }
+
+/* Aviso de tela (não é região viva): ícone e texto, nunca só cor. */
+.rp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-block-end: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-1) solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.rp-notice .rp-icon { margin-block-start: var(--space-1); color: var(--action); }
+.rp-notice p { margin: 0; }
+@media (forced-colors: active) {
+  .rp-notice { border-color: CanvasText; }
+}
