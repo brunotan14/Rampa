@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { documentTitle } from "../i18n/pt-BR";
+import { documentTitle } from "../i18n";
 
 // Um único h1 por tela, igual ao <title> do documento (design/03-padroes-de-tela.md).
 export function PageTitle({ children }: { children: string }) {

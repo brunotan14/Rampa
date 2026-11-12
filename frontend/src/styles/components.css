@@ -1,0 +1,192 @@
+/* Componentes do design system (design/components/<X>/README.md). Só tokens de tokens.css;
+   tamanhos de fonte em rem seguem a escala de design/01-fundamentos.md. */
+
+/* Texto só para leitor de tela */
+.rp-sr {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Icon ------------------------------------------------------------------------------ */
+.rp-icon { width: var(--icon-md); height: var(--icon-md); flex: none; }
+.rp-icon--sm { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* --- AppShell -------------------------------------------------------------------------- */
+.rp-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--surface-raised);
+  border-bottom: var(--border-1) solid var(--line);
+}
+.rp-header__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-8);
+  padding-block: var(--space-2);
+}
+.rp-brand { display: inline-flex; align-items: center; min-height: var(--target-comfort); border-radius: var(--radius-md); }
+.rp-nav__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.rp-nav__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-comfort);
+  padding: 0 var(--space-3);
+  border-bottom: var(--focus-width) solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.rp-nav__link:visited { color: var(--ink); }
+.rp-nav__link:hover { background: var(--action-soft); text-decoration: underline; }
+.rp-nav__link[aria-current="page"] {
+  color: var(--action);
+  border-bottom-color: var(--action);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* --- Logo ------------------------------------------------------------------------------ */
+.rp-logo { display: block; flex: none; }
+.rp-logo__tile { fill: var(--action); }
+.rp-logo__fg { fill: var(--on-action); }
+.rp-logo__ramp { fill: var(--cerrado-300); }
+.rp-logo__ink { fill: var(--ink); }
+.rp-logo__accent { fill: var(--brand-accent); }
+[data-theme="escuro"] .rp-logo__ramp { fill: var(--cerrado-700); }
+[data-theme="contraste"] .rp-logo__ramp { fill: var(--on-action); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--cerrado-700); } }
+/* Alto contraste do sistema (como o tokens.css): a rampa vira `on-action`, igual ao tema "contraste". */
+@media (prefers-contrast: more) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--on-action); } }
+
+/* --- Button ---------------------------------------------------------------------------- */
+.rp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  min-width: var(--target-comfort);
+  padding: 0 var(--space-5);
+  font: inherit;
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.25;
+  border-radius: var(--radius-md);
+  border: var(--border-1) solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+}
+.rp-btn--sm { min-height: var(--control-sm); min-width: var(--target-min); padding: 0 var(--space-3); font-size: 0.875rem; }
+.rp-btn--lg { min-height: var(--control-lg); padding: 0 var(--space-6); font-size: 1.125rem; }
+.rp-btn--primary { background: var(--button-primary-bg); color: var(--button-primary-ink); }
+.rp-btn--primary:hover { background: var(--button-primary-bg-hover); }
+.rp-btn--primary:active { background: var(--button-primary-bg-active); }
+.rp-btn--secondary { background: var(--surface-raised); color: var(--button-secondary-ink); border-color: var(--button-secondary-border); }
+.rp-btn--secondary:hover { background: var(--action-soft); border-color: var(--action); }
+.rp-btn--ghost { background: transparent; color: var(--button-secondary-ink); text-decoration: underline; text-underline-offset: 0.2em; }
+.rp-btn--ghost:hover { background: var(--action-soft); }
+.rp-btn--danger { background: var(--surface-raised); color: var(--button-danger-ink); border-color: var(--button-danger-ink); }
+.rp-btn--danger:hover { background: var(--critico-soft); }
+.rp-btn[aria-disabled="true"] {
+  color: var(--ink-disabled);
+  background: var(--surface-sunken);
+  border: var(--border-1) dashed var(--line-strong);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+.rp-btn[aria-busy="true"] { cursor: progress; }
+
+/* Carregando: anel parado com traço pontilhado; gira só sem preferência por movimento reduzido. */
+.rp-spinner {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  border-radius: var(--radius-full);
+  border: var(--border-2) dotted currentColor;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rp-btn { transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard); }
+  .rp-spinner {
+    border-style: solid;
+    border-right-color: transparent;
+    animation: rp-spin calc(var(--duration-slow) * 2.5) linear infinite;
+  }
+}
+@keyframes rp-spin { to { transform: rotate(1turn); } }
+
+/* --- Link ------------------------------------------------------------------------------ */
+.rp-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: var(--border-1);
+  text-underline-offset: 0.2em;
+  border-radius: var(--radius-sm);
+}
+.rp-link:hover { text-decoration-thickness: var(--focus-width); }
+.rp-link:visited { color: var(--link-visited); }
+.rp-link--standalone { font-weight: 600; display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--target-min); }
+.rp-link__icon { vertical-align: middle; }
+
+/* --- SeverityBadge --------------------------------------------------------------------- */
+.rp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: var(--border-1) solid currentColor;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.rp-badge__count { font-variant-numeric: tabular-nums; font-weight: 700; }
+.rp-badge--critico { color: var(--critico); background: var(--critico-soft); }
+.rp-badge--serio { color: var(--serio); background: var(--serio-soft); }
+.rp-badge--moderado { color: var(--moderado); background: var(--moderado-soft); }
+.rp-badge--menor { color: var(--menor); background: var(--menor-soft); }
+.rp-badge--sucesso { color: var(--sucesso); background: var(--sucesso-soft); }
+.rp-badge--revisao { color: var(--revisao); background: var(--revisao-soft); border-style: dashed; border-width: var(--border-2); }
+
+/* --- StateMessage ---------------------------------------------------------------------- */
+.rp-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: var(--measure);
+  padding: var(--space-8) var(--space-6);
+  border: var(--border-1) dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.rp-state--erro { border-style: solid; border-color: var(--critico); background: var(--surface-raised); }
+.rp-state--carregando { border-style: solid; border-color: var(--line); width: 100%; }
+.rp-state__icon { width: var(--space-8); height: var(--space-8); color: var(--ink-muted); }
+.rp-state--erro .rp-state__icon { color: var(--critico); }
+.rp-state__title { margin: 0; font-size: 1.25rem; line-height: 1.4; }
+.rp-state__text { margin: 0; color: var(--ink-muted); max-width: var(--measure); }
+.rp-state__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.rp-state ul { margin: 0; padding-inline-start: var(--space-5); }
+
+/* Skeleton estático: nada pisca nem se repete sem fim (06-movimento.md). */
+.rp-skeleton { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
+.rp-skeleton__line { display: block; min-height: var(--space-4); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.rp-skeleton__line--short { width: 60%; }
+
+@media (forced-colors: active) {
+  .rp-badge, .rp-btn, .rp-state { border: var(--border-1) solid CanvasText; }
+  .rp-btn[aria-disabled="true"] { color: GrayText; border-color: GrayText; }
+  .rp-nav__link[aria-current="page"] { border-bottom-color: Highlight; }
+  .rp-badge--revisao { border-style: dashed; }
+  .rp-skeleton__line { border: var(--border-1) solid CanvasText; }
+}

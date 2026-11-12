@@ -12,11 +12,14 @@
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "api-types": "node scripts/generate-api-types.ts"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible-mono": "5.3.0",
     "@fontsource/atkinson-hyperlegible-next": "5.3.0",
+    "@tanstack/react-query": "5.107.1",
+    "phoenix": "1.8.16",
     "react": "19.3.1",
     "react-aria-components": "1.22.1",
     "react-dom": "19.3.1",
@@ -28,6 +31,7 @@
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.9",
     "@types/node": "26.6.6",
+    "@types/phoenix": "1.6.8",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
@@ -37,6 +41,8 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.14.0",
     "jsdom": "31.0.0",
+    "json-schema-to-typescript": "16.0.0",
+    "openapi-typescript": "7.13.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.2",
     "vite": "8.3.7",
@@ -46,6 +52,9 @@
     "fsevents": false
   },
   "overrides": {
-    "minimatch@^10.0.0": "11.0.8"
+    "minimatch@^10.0.0": "11.0.8",
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

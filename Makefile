@@ -5,7 +5,7 @@ comma := ,
 full := $(filter 1,$(FULL))
 npm_ci := $(filter 1,$(NPM_CI))
 
-.PHONY: setup services down dev test test-backend test-load test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract
+.PHONY: setup services down dev test test-backend test-load test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract api-types
 
 setup: services ## Instala dependências e prepara o banco
 	cd backend && mix deps.get && mix ecto.setup
@@ -86,6 +86,7 @@ ci: ## Passos do CI na ordem do ci.yml (FULL=1: também os E2E; NPM_CI=1: `npm c
 	MIX_ENV=test infra/ci/check-contract.sh openapi
 	@echo "==> Frontend (lint, tipos, Vitest)"
 	$(if $(npm_ci),cd frontend && npm ci)
+	infra/ci/check-contract.sh frontend
 	$(MAKE) --no-print-directory lint-frontend
 	$(MAKE) --no-print-directory test-frontend
 	@echo "==> Scanner (lint, tipos, Vitest)"
@@ -107,3 +108,6 @@ openapi: ## Regenera o contrato OpenAPI versionado (shared/openapi.json)
 
 scanner-contract: ## Regenera os tipos do scanner a partir do contrato (shared/scanner-contract.schema.json)
 	cd scanner && npm run contract
+
+api-types: ## Regenera os tipos do frontend a partir da API (shared/openapi.json) e do canal (shared/channel-events.schema.json)
+	cd frontend && npm run api-types
