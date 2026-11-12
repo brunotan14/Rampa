@@ -4,6 +4,7 @@ defmodule RampaWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug OpenApiSpex.Plug.PutApiSpec, module: RampaWeb.ApiSpec
+    plug RampaWeb.Plugs.ApiHeaders
   end
 
   scope "/api", RampaWeb do
@@ -13,7 +14,10 @@ defmodule RampaWeb.Router do
 
     post "/audits", AuditController, :create
     get "/audits/:id", AuditController, :show
+    get "/audits/:audit_id/pages", PageController, :index
+    get "/audits/:audit_id/pages/:id", PageController, :show
     get "/audits/:audit_id/findings", FindingController, :index
+    get "/audits/:audit_id/findings/:id", FindingController, :show
   end
 
   # Especificação OpenAPI (`RampaWeb.ApiSpec`), em todos os ambientes.

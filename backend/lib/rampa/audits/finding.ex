@@ -42,6 +42,9 @@ defmodule Rampa.Audits.Finding do
     field :prompt_version, :string
     field :crop_path, :string
     field :raw, :map
+    # Coluna gerada no banco (0 = critical ... 3 = minor), para ordenar por severidade. O app
+    # nunca escreve nela.
+    field :severity_rank, :integer, writable: :never
 
     belongs_to :page, Page
     belongs_to :audit, Audit

@@ -272,7 +272,7 @@ defmodule RampaWeb.AuditControllerTest do
   end
 
   describe "GET /api/audits/:id" do
-    test "campos do M1, sem o hash do IP nem a chave de idempotência", %{conn: conn} do
+    test "campos do resumo, sem o hash do IP nem a chave de idempotência", %{conn: conn} do
       audit =
         audit_fixture(%{requester_ip_hash: "segredo-hash", idempotency_key: "segredo-chave"})
 
@@ -284,8 +284,9 @@ defmodule RampaWeb.AuditControllerTest do
 
       assert Map.keys(body) |> Enum.sort() ==
                Enum.sort(~w(id revision status start_url page_limit pages_found pages_scanned
-                            pages_failed totals_by_severity needs_review_count error
-                            started_at finished_at inserted_at))
+                            pages_failed score totals_by_severity needs_review_by_severity
+                            needs_review_count top_issues error started_at finished_at
+                            inserted_at))
 
       assert body["totals_by_severity"] == %{
                "critical" => 1,

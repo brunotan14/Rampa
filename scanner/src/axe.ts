@@ -1,6 +1,6 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "playwright";
-import { CONTRACT_LIMITS, type AxeFacts, type AxeNode, type AxeRule } from "./contract.gen.js";
+import { CONTRACT_LIMITS, type AxeFacts, type AxeNode, type AxePass, type AxeRule } from "./contract.gen.js";
 import { hasMinimumTarget } from "./contract.js";
 
 // Varredura automática com axe-core (RF-RA003). O scanner só repassa os fatos: quem converte
@@ -18,7 +18,14 @@ export async function runAxe(page: Page): Promise<AxeFacts> {
     version: results.testEngine.version,
     violations: results.violations.map(slimRule),
     incomplete: results.incomplete.map(slimRule),
+    passes: results.passes.map(slimPass),
   };
+}
+
+// Regra que passou (RF-RA017): só identificação e contagem, sem os nós (o HTML deles é da
+// página e não serve à aba "Aprovados"). Os cortes ficam em `contract.ts`.
+function slimPass(rule: RawRule): AxePass {
+  return { id: rule.id, tags: rule.tags, help: rule.help, nodes_total: rule.nodes.length };
 }
 
 // Mantém só os campos do contrato (`shared/scanner-contract.schema.json`). `any`/`all`/`none`,

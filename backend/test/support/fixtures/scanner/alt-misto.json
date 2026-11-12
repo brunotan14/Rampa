@@ -1,0 +1,148 @@
+{
+  "contract_version": "1",
+  "final_url": "https://exemplo.com/alt-misto.html",
+  "http_status": 200,
+  "title": "Imagens com e sem texto alternativo",
+  "blocked_requests": 0,
+  "axe": {
+    "version": "4.14.0",
+    "violations": [
+      {
+        "id": "image-alt",
+        "impact": "critical",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag111",
+          "section508",
+          "section508.22.a",
+          "TTv5",
+          "TT7.a",
+          "TT7.b",
+          "EN-301-549",
+          "EN-9.1.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-1.1.1"
+        ],
+        "description": "Ensure <img> elements have alternative text or a role of none or presentation",
+        "help": "Images must have alternative text",
+        "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/image-alt?application=playwright",
+        "nodes": [
+          {
+            "target": [
+              "img"
+            ],
+            "html": "<img src=\"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%2280%22%3E%3Crect%20width%3D%22120%22%20height%3D%2280%22%20fill%3D%22%23336699%22%2F%3E%3C%2Fsvg%3E\" width=\"120\" height=\"80\">",
+            "failureSummary": "Fix any of the following:\n  Element does not have an alt attribute\n  aria-label attribute does not exist or is empty\n  aria-labelledby attribute does not exist, references elements that do not exist or references elements that are empty\n  Element has no title attribute\n  Element's default semantics were not overridden with role=\"none\" or role=\"presentation\"",
+            "impact": "critical"
+          }
+        ],
+        "nodes_total": 1
+      }
+    ],
+    "incomplete": [],
+    "passes": [
+      {
+        "id": "document-title",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag242",
+          "TTv5",
+          "TT12.a",
+          "EN-301-549",
+          "EN-9.2.4.2",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.5.1"
+        ],
+        "help": "Documents must have <title> element to aid in navigation",
+        "nodes_total": 1
+      },
+      {
+        "id": "html-has-lang",
+        "tags": [
+          "cat.language",
+          "wcag2a",
+          "wcag311",
+          "TTv5",
+          "TT11.a",
+          "EN-301-549",
+          "EN-9.3.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.3.1"
+        ],
+        "help": "<html> element must have a lang attribute",
+        "nodes_total": 1
+      },
+      {
+        "id": "html-lang-valid",
+        "tags": [
+          "cat.language",
+          "wcag2a",
+          "wcag311",
+          "TTv5",
+          "TT11.a",
+          "EN-301-549",
+          "EN-9.3.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.4.1"
+        ],
+        "help": "<html> element must have a valid value for the lang attribute",
+        "nodes_total": 1
+      },
+      {
+        "id": "landmark-one-main",
+        "tags": [
+          "cat.semantics",
+          "best-practice"
+        ],
+        "help": "Document should have one main landmark",
+        "nodes_total": 1
+      },
+      {
+        "id": "page-has-heading-one",
+        "tags": [
+          "cat.semantics",
+          "best-practice"
+        ],
+        "help": "Page should contain a level-one heading",
+        "nodes_total": 1
+      },
+      {
+        "id": "region",
+        "tags": [
+          "cat.keyboard",
+          "best-practice",
+          "RGAAv4",
+          "RGAA-9.2.1"
+        ],
+        "help": "All page content should be contained by landmarks",
+        "nodes_total": 3
+      },
+      {
+        "id": "image-alt",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag111",
+          "section508",
+          "section508.22.a",
+          "TTv5",
+          "TT7.a",
+          "TT7.b",
+          "EN-301-549",
+          "EN-9.1.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-1.1.1"
+        ],
+        "help": "Images must have alternative text",
+        "nodes_total": 1
+      }
+    ]
+  }
+}

@@ -32,6 +32,12 @@ defmodule Rampa.Audits.AxeMapper do
       (contrato do scanner): a página pode ter mais ocorrências do que achados gravados.
 
   A versão do axe não vai no achado: fica em `pages.axe_version` (RNF-RA006).
+
+  `passed_rules/1` converte `axe.passes` (RF-RA017) nas regras aprovadas da página. Uma
+  regra que também está em `violations` ou `incomplete` (uns nós passaram, outros não; ou
+  todos os nós dela foram descartados pelo scanner por falta de `target`) **não** sai como
+  aprovada: mostrar "Aprovado" ao lado de uma falha da mesma regra seria afirmar mais do que
+  o axe provou.
   """
 
   alias Rampa.Audits.{Finding, PageData}
@@ -91,6 +97,38 @@ defmodule Rampa.Audits.AxeMapper do
       message: node["failureSummary"] || rule["help"],
       raw: Map.take(rule, ["id", "tags", "help", "helpUrl", "impact", "nodes_total"])
     }
+  end
+
+  @doc """
+  Regras aprovadas da página (`pages.passed_rules`, RF-RA017), a partir do mapa `axe` do
+  scanner: `%{"rule_id", "wcag_criteria", "help", "nodes_total"}`, na ordem do axe, sem
+  repetir `rule_id` e sem as regras que também aparecem em `violations` ou `incomplete`.
+  Sem o campo `passes` (scanner anterior ao RF-RA017), devolve `nil`: "não coletado", que a
+  interface distingue de "nenhuma aprovada" (`[]`).
+  """
+  @spec passed_rules(map()) :: [map()] | nil
+  def passed_rules(%{"passes" => passes} = axe) when is_list(passes) do
+    failed = MapSet.new(rule_ids(axe["violations"]) ++ rule_ids(axe["incomplete"]))
+
+    passes
+    |> Enum.filter(&(is_map(&1) and is_binary(&1["id"])))
+    |> Enum.reject(&MapSet.member?(failed, &1["id"]))
+    |> Enum.uniq_by(& &1["id"])
+    |> Enum.map(fn rule ->
+      %{
+        "rule_id" => rule["id"],
+        "wcag_criteria" => wcag_criteria(rule["tags"]),
+        "help" => rule["help"],
+        "nodes_total" => rule["nodes_total"]
+      }
+    end)
+  end
+
+  def passed_rules(_axe), do: nil
+
+  # A regra conta como falha só por estar na lista, mesmo sem nenhum nó enviado.
+  defp rule_ids(rules) do
+    for rule <- List.wrap(rules), is_map(rule), is_binary(rule["id"]), do: rule["id"]
   end
 
   @doc "Severidade do nó, senão a da regra, senão `:moderate`."

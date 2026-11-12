@@ -62,6 +62,7 @@ defmodule Rampa.Audits do
     Page,
     PageData,
     PageTask,
+    Report,
     Rules,
     ScanPageJob
   }
@@ -288,26 +289,29 @@ defmodule Rampa.Audits do
 
   ## Consulta
 
-  @type severity_totals :: %{Finding.severity() => non_neg_integer()}
-  @type summary :: %{
-          audit: Audit.t(),
-          totals_by_severity: severity_totals(),
-          needs_review_count: non_neg_integer()
-        }
-
   @doc """
-  Resumo de uma auditoria (`GET /api/audits/:id`, mínimo do M1): a auditoria (com a
-  `revision`), os totais por severidade **só dos achados confirmados** (`needs_review =
-  false`) e quantos achados pedem revisão. Lido numa instrução só (`snapshot_query/1`): a
-  `revision` e os totais são do mesmo instante. UUID inválido ou inexistente:
-  `{:error, :audit_not_found}`.
+  Resumo de uma auditoria (`GET /api/audits/:id`, RF-RA005): a auditoria (com a `revision`),
+  os totais por severidade dos achados confirmados (`needs_review = false`) e dos que pedem
+  revisão, quantos pedem revisão e o top 5 das regras confirmadas. Tudo numa instrução só
+  (`Rampa.Audits.Report.summary/1`): a `revision` e os totais são do mesmo instante. UUID
+  inválido ou inexistente: `{:error, :audit_not_found}`.
   """
-  @spec get_audit_summary(String.t()) :: {:ok, summary()} | {:error, :audit_not_found}
-  def get_audit_summary(id) do
-    with {:ok, audit, totals, needs_review} <- read_snapshot(id) do
-      {:ok, %{audit: audit, totals_by_severity: totals, needs_review_count: needs_review}}
-    end
-  end
+  @spec get_audit_summary(String.t()) :: {:ok, Report.summary()} | {:error, :audit_not_found}
+  defdelegate get_audit_summary(id), to: Report, as: :summary
+
+  @doc "Páginas da auditoria com as contagens (RF-RA006). Ver `Rampa.Audits.Report.list_pages/1`."
+  @spec list_pages(String.t()) :: {:ok, [Report.page_summary()]} | {:error, :audit_not_found}
+  defdelegate list_pages(audit_id), to: Report
+
+  @doc "Uma página com as regras aprovadas (RF-RA017). Ver `Rampa.Audits.Report.get_page/2`."
+  @spec get_page(String.t(), String.t()) ::
+          {:ok, Report.page_summary()} | {:error, :audit_not_found | :page_not_found}
+  defdelegate get_page(audit_id, page_id), to: Report
+
+  @doc "Detalhe de um achado (RF-RA007). Ver `Rampa.Audits.Report.get_finding/2`."
+  @spec get_finding(String.t(), String.t()) ::
+          {:ok, Report.finding_detail()} | {:error, :audit_not_found | :finding_not_found}
+  defdelegate get_finding(audit_id, finding_id), to: Report
 
   @doc """
   Andamento atual de uma auditoria, para o join do canal `audit:<id>` (RF-RA004): a
@@ -373,52 +377,74 @@ defmodule Rampa.Audits do
     }
   end
 
-  @type findings_page :: %{data: [Finding.t()], next_cursor: String.t() | nil}
+  @type findings_page :: %{
+          data: [Finding.t()],
+          next_cursor: String.t() | nil,
+          total: non_neg_integer()
+        }
 
   @doc """
-  Achados de uma auditoria (`GET /api/audits/:id/findings`), em páginas, na ordem
-  `(inserted_at, id)`.
+  Achados de uma auditoria (`GET /api/audits/:id/findings`), em páginas.
 
   `params` são os parâmetros da requisição (chaves em texto), todos opcionais:
 
     * `"severity"` (`critical`, `serious`, `moderate`, `minor`), `"source"` (`axe`, `ai`,
-      `heuristic`) e `"needs_review"` (`true`, `false`): valor fora disso devolve
-      `{:error, :invalid_filter}`;
+      `heuristic`), `"needs_review"` (`true`, `false`), `"page_id"` (UUID; página de outra
+      auditoria dá lista vazia) e `"wcag"` (critério no formato `1.4.3`): valor fora disso
+      devolve `{:error, :invalid_filter}`;
+    * `"sort"`: `recorded` (padrão, ordem `(inserted_at, id)`) ou `severity` (mais grave
+      primeiro, depois `rule_id`, `inserted_at` e `id`: os achados da mesma regra ficam
+      juntos). Outro valor: `{:error, :invalid_sort}`;
     * `"limit"`: de 1 a #{@findings_max_limit}, padrão #{@findings_default_limit}
       (`{:error, :invalid_limit}`);
-    * `"cursor"`: o `next_cursor` da página anterior, opaco (`{:error, :invalid_cursor}`).
+    * `"cursor"`: o `next_cursor` da página anterior, opaco, da mesma ordem
+      (`{:error, :invalid_cursor}`).
 
-  Paginação por chave (keyset) em `(inserted_at, id)`, com `inserted_at` em microssegundos:
-  nada se repete nem é pulado. É **estável depois que a auditoria termina**. Durante a
-  auditoria, um achado novo pode aparecer fora de ordem: o `inserted_at` é o horário da
-  transação que grava a página, e uma transação que começou antes pode terminar depois de
-  a lista já ter passado pelo horário dela.
+  Paginação por chave (keyset), sem repetir nem pular nada; **estável depois que a auditoria
+  termina**. Durante a auditoria, um achado novo pode aparecer fora de ordem: o
+  `inserted_at` é o horário da transação que grava a página, e uma transação que começou
+  antes pode terminar depois de a lista já ter passado pelo horário dela.
 
-  `next_cursor` é `nil` na última página. Auditoria inexistente: `{:error, :audit_not_found}`.
+    * `recorded`: o cursor leva `(inserted_at em microssegundos, id)`;
+    * `severity`: o cursor leva só o id do último achado (a âncora), e a chave
+      `(severity_rank, rule_id, inserted_at, id)` é lida do banco, da âncora da mesma
+      auditoria: o `rule_id` vem da página auditada e não entra no cursor. Âncora que não
+      existe (apagada por uma nova varredura durante a auditoria) ou de outra auditoria:
+      `{:error, :invalid_cursor}`.
+
+  `next_cursor` é `nil` na última página; `total` é quantos achados passam nos filtros (sem
+  o cursor). Auditoria inexistente: `{:error, :audit_not_found}`.
   """
   @spec list_findings(String.t(), map()) ::
           {:ok, findings_page()}
-          | {:error, :audit_not_found | :invalid_filter | :invalid_limit | :invalid_cursor}
+          | {:error,
+             :audit_not_found
+             | :invalid_filter
+             | :invalid_sort
+             | :invalid_limit
+             | :invalid_cursor}
   def list_findings(audit_id, params) when is_map(params) do
     with {:ok, audit} <- fetch_audit(audit_id),
          {:ok, filters} <- findings_filters(params),
+         {:ok, sort} <- findings_sort(params["sort"]),
          {:ok, limit} <- findings_limit(params["limit"]),
-         {:ok, after_key} <- decode_cursor(params["cursor"]) do
-      rows =
-        from(f in Finding,
-          where: f.audit_id == ^audit.id,
-          where: ^filters,
-          order_by: [asc: f.inserted_at, asc: f.id],
-          limit: ^(limit + 1)
-        )
-        |> after_cursor(after_key)
-        |> Repo.all()
-
+         {:ok, after_key} <- decode_cursor(sort, params["cursor"]),
+         filtered = from(f in Finding, where: f.audit_id == ^audit.id, where: ^filters),
+         rows = fetch_findings_page(filtered, sort, limit, after_key, audit.id),
+         :ok <- check_anchor(rows, after_key, audit.id) do
       {data, rest} = Enum.split(rows, limit)
-      next_cursor = if rest == [], do: nil, else: encode_cursor(List.last(data))
+      next_cursor = if rest == [], do: nil, else: encode_cursor(sort, List.last(data))
 
-      {:ok, %{data: data, next_cursor: next_cursor}}
+      {:ok, %{data: data, next_cursor: next_cursor, total: Repo.aggregate(filtered, :count)}}
     end
+  end
+
+  defp fetch_findings_page(filtered, sort, limit, after_key, audit_id) do
+    filtered
+    |> order_findings(sort)
+    |> limit(^(limit + 1))
+    |> after_cursor(after_key, audit_id)
+    |> Repo.all()
   end
 
   defp fetch_audit(id) do
@@ -430,11 +456,16 @@ defmodule Rampa.Audits do
     end
   end
 
+  # Critério WCAG: princípio de 1 a 4, diretriz e critério com até dois dígitos.
+  @wcag_criterion ~r/\A[1-4]\.\d{1,2}\.\d{1,2}\z/
+
   defp findings_filters(params) do
     [
-      {"severity", :severity, Map.new(Finding.severities(), &{Atom.to_string(&1), &1})},
-      {"source", :source, Map.new(Finding.sources(), &{Atom.to_string(&1), &1})},
-      {"needs_review", :needs_review, %{"true" => true, "false" => false}}
+      {"severity", :severity, &Map.fetch(severity_values(), &1)},
+      {"source", :source, &Map.fetch(source_values(), &1)},
+      {"needs_review", :needs_review, &Map.fetch(%{"true" => true, "false" => false}, &1)},
+      {"page_id", :page_id, &cast_page_id/1},
+      {"wcag", :wcag_criteria, &cast_wcag/1}
     ]
     |> Enum.reduce_while({:ok, dynamic(true)}, fn filter, {:ok, acc} ->
       case add_filter(acc, filter, params) do
@@ -444,14 +475,48 @@ defmodule Rampa.Audits do
     end)
   end
 
-  defp add_filter(acc, {param, field, values}, params) do
-    with {:ok, raw} <- Map.fetch(params, param),
-         {:ok, value} <- Map.fetch(values, raw) do
-      {:ok, dynamic([f], ^acc and field(f, ^field) == ^value)}
-    else
-      :error -> if Map.has_key?(params, param), do: :error, else: {:ok, acc}
+  defp severity_values, do: Map.new(Finding.severities(), &{Atom.to_string(&1), &1})
+  defp source_values, do: Map.new(Finding.sources(), &{Atom.to_string(&1), &1})
+
+  defp cast_page_id(raw) when is_binary(raw), do: Ecto.UUID.cast(raw)
+  defp cast_page_id(_invalid), do: :error
+
+  defp cast_wcag(raw) when is_binary(raw),
+    do: if(Regex.match?(@wcag_criterion, raw), do: {:ok, raw}, else: :error)
+
+  defp cast_wcag(_invalid), do: :error
+
+  defp add_filter(acc, {param, field, cast}, params) do
+    case Map.fetch(params, param) do
+      :error ->
+        {:ok, acc}
+
+      {:ok, raw} ->
+        with {:ok, value} <- cast.(raw), do: {:ok, filter_on(acc, field, value)}
     end
   end
+
+  defp filter_on(acc, :wcag_criteria, value),
+    do: dynamic([f], ^acc and ^value in f.wcag_criteria)
+
+  defp filter_on(acc, field, value), do: dynamic([f], ^acc and field(f, ^field) == ^value)
+
+  defp findings_sort(nil), do: {:ok, :recorded}
+  defp findings_sort("recorded"), do: {:ok, :recorded}
+  defp findings_sort("severity"), do: {:ok, :severity}
+  defp findings_sort(_invalid), do: {:error, :invalid_sort}
+
+  defp order_findings(query, :recorded),
+    do: order_by(query, [f], asc: f.inserted_at, asc: f.id)
+
+  defp order_findings(query, :severity),
+    do:
+      order_by(query, [f],
+        asc: f.severity_rank,
+        asc: f.rule_id,
+        asc: f.inserted_at,
+        asc: f.id
+      )
 
   defp findings_limit(nil), do: {:ok, @findings_default_limit}
 
@@ -464,19 +529,49 @@ defmodule Rampa.Audits do
 
   defp findings_limit(_invalid), do: {:error, :invalid_limit}
 
-  # Cursor: `<inserted_at em microssegundos Unix>:<id>` em Base64 de URL, sem
-  # preenchimento. O cliente não precisa (nem deve) interpretar.
-  defp encode_cursor(%Finding{inserted_at: inserted_at, id: id}),
+  # Cursores em Base64 de URL, sem preenchimento. O cliente não precisa (nem deve)
+  # interpretar:
+  #
+  #   * `recorded`: `<inserted_at em microssegundos Unix>:<id>`;
+  #   * `severity`: `severity:<id>`, só a âncora.
+  #
+  # O formato de uma ordem não decodifica na outra (`severity` não é número; o número não é
+  # `severity`): cursor de outra ordem é `invalid_cursor`.
+  @cursor_max_bytes 256
+  @severity_cursor_prefix "severity:"
+
+  defp encode_cursor(:recorded, %Finding{inserted_at: inserted_at, id: id}),
     do:
       Base.url_encode64("#{DateTime.to_unix(inserted_at, :microsecond)}:#{id}",
         padding: false
       )
 
-  defp decode_cursor(nil), do: {:ok, nil}
+  defp encode_cursor(:severity, %Finding{id: id}),
+    do: Base.url_encode64(@severity_cursor_prefix <> id, padding: false)
 
-  defp decode_cursor(cursor) when is_binary(cursor) do
-    with {:ok, decoded} <- Base.url_decode64(cursor, padding: false),
-         [unix, id] <- String.split(decoded, ":"),
+  defp decode_cursor(_sort, nil), do: {:ok, nil}
+
+  defp decode_cursor(sort, cursor)
+       when is_binary(cursor) and byte_size(cursor) <= @cursor_max_bytes do
+    case Base.url_decode64(cursor, padding: false) do
+      {:ok, decoded} -> decode_cursor_key(sort, decoded)
+      :error -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor(_sort, _invalid), do: {:error, :invalid_cursor}
+
+  defp decode_cursor_key(:severity, @severity_cursor_prefix <> id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> {:ok, {:anchor, id}}
+      :error -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor_key(:severity, _other), do: {:error, :invalid_cursor}
+
+  defp decode_cursor_key(:recorded, decoded) do
+    with [unix, id] <- String.split(decoded, ":"),
          {unix, ""} <- Integer.parse(unix),
          # Nenhum achado é anterior a 1970; antes do mínimo do `timestamptz` a consulta levantaria exceção.
          true <- unix >= 0,
@@ -488,17 +583,41 @@ defmodule Rampa.Audits do
     end
   end
 
-  defp decode_cursor(_invalid), do: {:error, :invalid_cursor}
+  defp after_cursor(query, nil, _audit_id), do: query
 
-  defp after_cursor(query, nil), do: query
+  defp after_cursor(query, {:anchor, id}, audit_id) do
+    where(
+      query,
+      [f],
+      fragment(
+        "(?, ?, ?, ?) > (SELECT a.severity_rank, a.rule_id, a.inserted_at, a.id FROM findings AS a WHERE a.id = ? AND a.audit_id = ?)",
+        f.severity_rank,
+        f.rule_id,
+        f.inserted_at,
+        f.id,
+        type(^id, Ecto.UUID),
+        type(^audit_id, Ecto.UUID)
+      )
+    )
+  end
 
-  defp after_cursor(query, {inserted_at, id}) do
+  defp after_cursor(query, {inserted_at, id}, _audit_id) do
     where(
       query,
       [f],
       f.inserted_at > ^inserted_at or (f.inserted_at == ^inserted_at and f.id > ^id)
     )
   end
+
+  # Âncora sem linha: a comparação dá `NULL` e a lista vem vazia. Só então confere se a
+  # âncora existe nesta auditoria (a lista vazia de verdade continua vazia).
+  defp check_anchor([], {:anchor, id}, audit_id) do
+    if Repo.exists?(from f in Finding, where: f.id == ^id and f.audit_id == ^audit_id),
+      do: :ok,
+      else: {:error, :invalid_cursor}
+  end
+
+  defp check_anchor(_rows, _after_key, _audit_id), do: :ok
 
   ## Criação de páginas e tarefas
 
@@ -618,12 +737,16 @@ defmodule Rampa.Audits do
   (`Rampa.Audits.PageData`): sem NUL e com o título cortado em #{@title_max_bytes} bytes.
   Como defesa para quem chama sem passar pelo cliente, resultado sem o campo `axe` devolve
   `{:error, :invalid_scan_result}`. Achado que não passa no changeset (recusa causada pelos
-  dados do scanner) devolve `{:error, {:invalid_finding, changeset}}` e nada é gravado. Os
+  dados do scanner) devolve `{:error, {:invalid_finding, changeset}}`, e a lista de regras
+  aprovadas que o banco recusa (acima de 64 KB) devolve
+  `{:error, {:invalid_passed_rules, changeset}}`; nos dois casos nada é gravado. Os
   outros erros (trava, tarefa ou página ausente, changeset da tarefa, da página ou da
   auditoria) voltam como estão: são do ciclo de vida ou do banco, não do resultado.
 
   Os achados `source: :axe` da página são apagados e regravados na mesma transação: varrer a
-  página de novo não duplica nada. Achados de outras fontes ficam.
+  página de novo não duplica nada. Achados de outras fontes ficam. `pages.passed_rules`
+  (RF-RA017, `Rampa.Audits.AxeMapper.passed_rules/1`) é sempre regravada, com `nil` quando o
+  resultado vem sem `axe.passes`.
   """
   @spec record_scan_result(Page.t(), map()) ::
           {:ok, Page.t()}
@@ -631,6 +754,7 @@ defmodule Rampa.Audits do
              transition_error()
              | :invalid_scan_result
              | {:invalid_finding, Ecto.Changeset.t()}
+             | {:invalid_passed_rules, Ecto.Changeset.t()}
              | Ecto.Changeset.t()}
   def record_scan_result(%Page{id: page_id}, result) do
     case PageData.sanitize(result) do
@@ -878,7 +1002,7 @@ defmodule Rampa.Audits do
          {:ok, task} <- fetch_open_task(tasks, :scan),
          {:ok, task} <- update_task(task, %{status: :done, error: nil, finished_at: now}),
          {:ok, scanned} <-
-           refresh_page(page, replace(tasks, task), scan_attrs(result, axe, now)),
+           refresh_scanned(page, replace(tasks, task), scan_attrs(result, axe, now)),
          {_deleted, _} <- Repo.delete_all(axe_findings_query(scanned.id)),
          {:ok, _count} <- insert_findings(scanned, axe, DateTime.utc_now()),
          {:ok, _audit, events} <- settle(audit, now, {page, scanned}) do
@@ -886,14 +1010,31 @@ defmodule Rampa.Audits do
     end
   end
 
+  # `passed_rules` vai sempre, mesmo `nil` (scanner sem `axe.passes`): uma nova varredura
+  # não deixa a lista de uma varredura anterior.
   defp scan_attrs(result, axe, now) do
     %{
       final_url: result["final_url"],
       http_status: result["http_status"],
       title: PageData.truncate_bytes(result["title"], @title_max_bytes),
       axe_version: axe["version"],
-      scanned_at: now
+      scanned_at: now,
+      passed_rules: AxeMapper.passed_rules(axe)
     }
+  end
+
+  # A lista de regras aprovadas vem do scanner: recusada pelo banco (acima de 64 KB), é
+  # recusa causada pelos dados do scanner, como um achado inválido.
+  defp refresh_scanned(page, tasks, attrs) do
+    case refresh_page(page, tasks, attrs) do
+      {:error, %Ecto.Changeset{errors: errors} = changeset} ->
+        if Keyword.has_key?(errors, :passed_rules),
+          do: {:error, {:invalid_passed_rules, changeset}},
+          else: {:error, changeset}
+
+      result ->
+        result
+    end
   end
 
   defp axe_findings_query(page_id) do
@@ -929,7 +1070,8 @@ defmodule Rampa.Audits do
 
   defp row(%Finding{} = finding, now) do
     finding
-    |> Map.take(Finding.__schema__(:fields))
+    # `severity_rank` é coluna gerada no banco: não entra no `INSERT`.
+    |> Map.take(Finding.__schema__(:fields) -- [:severity_rank])
     |> Map.merge(%{id: Ecto.UUID.generate(), inserted_at: now, updated_at: now})
   end
 

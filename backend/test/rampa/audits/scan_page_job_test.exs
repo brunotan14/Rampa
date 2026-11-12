@@ -120,14 +120,14 @@ defmodule Rampa.Audits.ScanPageJobTest do
     end
   end
 
-  # Ordem de deploy: o scanner sobe antes do backend com um campo opcional novo (ex.: o
-  # `axe.passes` do RF-RA017). A resposta passa pelo cliente HTTP real.
+  # Ordem de deploy: o scanner sobe antes do backend com um campo opcional novo (ex.: um
+  # `axe.inapplicable` que o contrato ainda não conhece). A resposta passa pelo cliente HTTP real.
   test "resposta da mesma versão com campo desconhecido é gravada sem ele" do
     page = page_fixture(%{url: "https://exemplo.com/img-sem-alt.html"})
 
     body =
       scanner_response("img-sem-alt")
-      |> put_in(["axe", "passes"], [%{"id" => "document-title", "nodes" => []}])
+      |> put_in(["axe", "inapplicable"], [%{"id" => "document-title", "nodes" => []}])
       |> update_in(["axe", "violations"], fn [rule] ->
         [
           rule
@@ -140,12 +140,52 @@ defmodule Rampa.Audits.ScanPageJobTest do
     expect(ClientMock, :scan, &HTTP.scan/1)
 
     log = capture_log([level: :warning], fn -> assert :ok = perform(page) end)
-    assert log =~ "#/axe/passes"
+    assert log =~ "#/axe/inapplicable"
 
     assert %Page{status: :done, error: nil, axe_version: "4.14.0"} = reload(page)
     assert [%Finding{rule_id: "image-alt", severity: :critical} = finding] = findings(page)
     refute Map.has_key?(finding.raw, "extra_rule_field")
     assert %Audit{status: :completed} = audit_of(page)
+  end
+
+  # RF-RA017: `axe.passes` no limite do contrato (100 regras, `help` de 512 caracteres de 4
+  # bytes, 32 tags) passa no schema, mas passa de 64 KB no banco: recusa causada pelos dados
+  # do scanner, definitiva, sem nova tentativa. Abaixo do teto, grava.
+  describe "axe.passes hostil" do
+    defp hostile_passes(count, help) do
+      tags = for i <- 1..32, do: "wcag#{rem(i, 4) + 1}#{rem(i, 9) + 1}#{i}"
+
+      for i <- 1..count,
+          do: %{"id" => "regra-#{i}", "tags" => tags, "help" => help, "nodes_total" => i}
+    end
+
+    defp scan_with_passes(passes) do
+      body = put_in(scanner_response("limpa"), ["axe", "passes"], passes)
+      Req.Test.stub(HTTP, &Req.Test.json(&1, body))
+      expect(ClientMock, :scan, &HTTP.scan/1)
+    end
+
+    test "no limite do schema: invalid_scan_result definitivo, nada gravado" do
+      page = page_fixture(%{url: "https://exemplo.com/limpa.html"})
+      scan_with_passes(hostile_passes(100, String.duplicate("😀", 512)))
+
+      capture_log(fn -> assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1) end)
+
+      assert %Page{status: :failed, error: "invalid_scan_result", passed_rules: nil} =
+               reload(page)
+
+      assert %PageTask{status: :failed, error: "invalid_scan_result"} = scan_task(page)
+      assert %Audit{status: :failed} = audit_of(page)
+    end
+
+    test "grande, mas abaixo de 64 KB: grava a lista inteira" do
+      page = page_fixture(%{url: "https://exemplo.com/limpa.html"})
+      scan_with_passes(hostile_passes(100, String.duplicate("a", 200)))
+
+      assert :ok = perform(page)
+      assert %Page{status: :done, passed_rules: rules} = reload(page)
+      assert length(rules) == 100
+    end
   end
 
   test "RF-RA003: limpa.html não gera achado com needs_review = false" do

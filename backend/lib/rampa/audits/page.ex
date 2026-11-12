@@ -5,7 +5,7 @@ defmodule Rampa.Audits.Page do
 
   import Ecto.Changeset
 
-  alias Rampa.Audits.{Audit, Finding, PageTask}
+  alias Rampa.Audits.{Audit, Finding, JSONList, PageTask}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -24,6 +24,10 @@ defmodule Rampa.Audits.Page do
     field :error, :string
     field :axe_version, :string
     field :scanned_at, :utc_datetime
+    # Regras do axe aprovadas (RF-RA017): `%{"rule_id", "wcag_criteria", "help",
+    # "nodes_total"}`, sem as que também falharam na página
+    # (`Rampa.Audits.AxeMapper.passed_rules/1`). `nil` = não coletado.
+    field :passed_rules, JSONList
 
     belongs_to :audit, Audit
     has_many :findings, Finding
@@ -50,7 +54,16 @@ defmodule Rampa.Audits.Page do
   @spec progress_changeset(t(), map()) :: Ecto.Changeset.t()
   def progress_changeset(page, attrs) do
     page
-    |> cast(attrs, [:status, :error, :final_url, :http_status, :title, :axe_version, :scanned_at])
+    |> cast(attrs, [
+      :status,
+      :error,
+      :final_url,
+      :http_status,
+      :title,
+      :axe_version,
+      :scanned_at,
+      :passed_rules
+    ])
     |> validate_required([:status])
     |> validate_number(:http_status, greater_than_or_equal_to: 100, less_than: 600)
     |> validate_by_status()
@@ -76,5 +89,6 @@ defmodule Rampa.Audits.Page do
     |> check_constraint(:http_status, name: :http_status_range)
     |> check_constraint(:scanned_at, name: :scanned_requires_scan_data)
     |> check_constraint(:error, name: :failed_requires_error)
+    |> check_constraint(:passed_rules, name: :passed_rules_shape)
   end
 end

@@ -73,6 +73,12 @@ export interface AxeFacts {
    * @maxItems 100
    */
   incomplete: AxeRule[];
+  /**
+   * Regras que passaram (RF-RA017), sem os nós: só identificação e contagem. Opcional (acrescentado sem subir a versão): o backend grava `NULL` quando falta. Uma regra pode aparecer aqui e em `violations` ou `incomplete` ao mesmo tempo (uns nós passam, outros não); quem decide o que mostrar como aprovado é o backend.
+   *
+   * @maxItems 100
+   */
+  passes?: AxePass[];
 }
 /**
  * Uma regra do axe com os nós afetados. Os textos (`description`, `help`, `helpUrl`, `tags`) são do axe, não da página.
@@ -116,6 +122,21 @@ export interface AxeNode {
    * Presente (e `true`) quando o `target` passou dos limites e foi cortado: os seletores deixam de apontar com segurança para o elemento e não devem ser usados como seletor CSS. Ausente quando o `target` está inteiro.
    */
   target_truncated?: true;
+}
+/**
+ * Uma regra do axe que passou na página. Sem nós e sem HTML: nada aqui vem da página. Limites próprios, menores que os de `AxeRule`, porque o backend guarda a lista inteira na página.
+ */
+export interface AxePass {
+  id: string;
+  /**
+   * @maxItems 32
+   */
+  tags: string[];
+  help: string;
+  /**
+   * Quantos nós passaram na regra.
+   */
+  nodes_total: number;
 }
 /**
  * Resposta de erro, com o status HTTP dado pelo código (`x-http-status` em `ScanErrorCode`).
@@ -187,7 +208,9 @@ export const CONTRACT_LIMITS = {
   "targetLevels": 8,
   "shadowLevels": 8,
   "selector": 512,
-  "detail": 2048
+  "detail": 2048,
+  "passTags": 32,
+  "passHelp": 512
 } as const;
 
 // Schema do corpo de POST /scan, para a validação do Fastify.

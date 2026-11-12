@@ -88,6 +88,33 @@
           "type": "array",
           "maxItems": 100,
           "items": { "$ref": "#/definitions/AxeRule" }
+        },
+        "passes": {
+          "description": "Regras que passaram (RF-RA017), sem os nós: só identificação e contagem. Opcional (acrescentado sem subir a versão): o backend grava `NULL` quando falta. Uma regra pode aparecer aqui e em `violations` ou `incomplete` ao mesmo tempo (uns nós passam, outros não); quem decide o que mostrar como aprovado é o backend.",
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/definitions/AxePass" }
+        }
+      }
+    },
+    "AxePass": {
+      "title": "AxePass",
+      "description": "Uma regra do axe que passou na página. Sem nós e sem HTML: nada aqui vem da página. Limites próprios, menores que os de `AxeRule`, porque o backend guarda a lista inteira na página.",
+      "type": "object",
+      "required": ["id", "tags", "help", "nodes_total"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tags": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "maxLength": 64 }
+        },
+        "help": { "type": "string", "maxLength": 512 },
+        "nodes_total": {
+          "description": "Quantos nós passaram na regra.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

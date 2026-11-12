@@ -1,0 +1,9 @@
+{
+  "title": "Imagens com e sem texto alternativo",
+  "http_status": 200,
+  "blocked_requests": 0,
+  "violations": [{ "id": "image-alt", "impact": "critical", "nodes": 1 }],
+  "incomplete": [],
+  "passes_include": ["image-alt", "document-title"],
+  "passes_exclude": []
+}

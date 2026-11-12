@@ -53,6 +53,35 @@ defmodule RampaWeb.Schemas do
   def codes(operation, status),
     do: operation |> Rampa.ErrorCodes.api(status) |> Enum.map(&Atom.to_string/1)
 
+  @doc "Propriedades comuns da página na lista e no detalhe (RF-RA006)."
+  @spec page_properties() :: map()
+  def page_properties do
+    count = %Schema{type: :integer, minimum: 0}
+
+    %{
+      id: %Schema{type: :string, format: :uuid},
+      url: %Schema{type: :string, description: "URL pedida, já normalizada."},
+      final_url: %Schema{
+        type: :string,
+        nullable: true,
+        description: "URL analisada, depois dos redirecionamentos."
+      },
+      title: %Schema{type: :string, nullable: true},
+      status: %Schema{type: :string, enum: ~w(queued scanning analyzing done failed)},
+      http_status: %Schema{type: :integer, nullable: true, minimum: 100, maximum: 599},
+      error: RampaWeb.Schemas.AuditError,
+      scanned_at: %Schema{type: :string, format: :"date-time", nullable: true},
+      counts_by_severity: RampaWeb.Schemas.SeverityTotals,
+      needs_review_count: count,
+      passed_count: %Schema{
+        type: :integer,
+        minimum: 0,
+        nullable: true,
+        description: "Regras aprovadas; `null` quando não foram coletadas."
+      }
+    }
+  end
+
   @doc "Códigos (texto) de `pages.error` e `audits.error`, de `Rampa.ErrorCodes`."
   @spec page_codes() :: [String.t()]
   def page_codes, do: Enum.map(Rampa.ErrorCodes.page(), &Atom.to_string/1)

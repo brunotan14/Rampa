@@ -3,6 +3,7 @@ import {
   CONTRACT_VERSION,
   type AxeFacts,
   type AxeNode,
+  type AxePass,
   type AxeRule,
   type AxeTarget,
   type ScanError,
@@ -89,11 +90,23 @@ function limitRule(rule: AxeRule): AxeRule {
   };
 }
 
+// Regra aprovada: limites próprios (`AxePass`), menores que os de `AxeRule`, porque o backend
+// guarda a lista inteira na página.
+function limitPass(rule: AxePass): AxePass {
+  return {
+    id: truncate(rule.id, LIMITS.ruleId),
+    tags: rule.tags.slice(0, LIMITS.passTags).map((tag) => truncate(tag, LIMITS.tag)),
+    help: truncate(rule.help, LIMITS.passHelp),
+    nodes_total: Math.max(rule.nodes_total, 0),
+  };
+}
+
 export function limitAxe(axe: AxeFacts): AxeFacts {
   return {
     version: truncate(axe.version, LIMITS.axeVersion),
     violations: axe.violations.slice(0, LIMITS.rules).map(limitRule),
     incomplete: axe.incomplete.slice(0, LIMITS.rules).map(limitRule),
+    ...(axe.passes === undefined ? {} : { passes: axe.passes.slice(0, LIMITS.rules).map(limitPass) }),
   };
 }
 

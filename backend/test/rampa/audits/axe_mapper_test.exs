@@ -192,4 +192,63 @@ defmodule Rampa.Audits.AxeMapperTest do
       assert AxeMapper.selector([]) == nil
     end
   end
+
+  describe "passed_rules/1 (RF-RA017)" do
+    defp pass(id, tags \\ ["wcag2a", "wcag111"]),
+      do: %{"id" => id, "tags" => tags, "help" => "Ajuda #{id}", "nodes_total" => 2}
+
+    test "converte cada regra aprovada, com os critérios das tags e sem HTML" do
+      axe = %{
+        "violations" => [],
+        "incomplete" => [],
+        "passes" => [pass("image-alt"), pass("x", ["best-practice"])]
+      }
+
+      assert AxeMapper.passed_rules(axe) == [
+               %{
+                 "rule_id" => "image-alt",
+                 "wcag_criteria" => ["1.1.1"],
+                 "help" => "Ajuda image-alt",
+                 "nodes_total" => 2
+               },
+               %{"rule_id" => "x", "wcag_criteria" => [], "help" => "Ajuda x", "nodes_total" => 2}
+             ]
+    end
+
+    test "regra que também falhou (violations ou incomplete) não sai como aprovada" do
+      axe = %{
+        "violations" => [rule(%{"id" => "image-alt"})],
+        "incomplete" => [rule(%{"id" => "color-contrast"})],
+        "passes" => [pass("image-alt"), pass("color-contrast"), pass("document-title")]
+      }
+
+      assert [%{"rule_id" => "document-title"}] = AxeMapper.passed_rules(axe)
+    end
+
+    # O scanner descarta os nós sem `target` mínimo (`hasMinimumTarget`) e pode mandar a regra
+    # com `nodes: []` e `nodes_total` > 0: ela não vira achado, mas continua sendo falha.
+    test "regra com todos os nós descartados (nodes vazio) também não sai como aprovada" do
+      axe = %{
+        "violations" => [rule(%{"id" => "image-alt", "nodes" => [], "nodes_total" => 3})],
+        "incomplete" => [],
+        "passes" => [pass("image-alt"), pass("document-title")]
+      }
+
+      assert AxeMapper.to_findings(axe) == []
+      assert [%{"rule_id" => "document-title"}] = AxeMapper.passed_rules(axe)
+    end
+
+    test "fixture de nós mistos (alt-misto): image-alt falha e passa; fica fora" do
+      axe = scanner_response("alt-misto")["axe"]
+
+      assert Enum.any?(axe["passes"], &(&1["id"] == "image-alt"))
+      refute Enum.any?(AxeMapper.passed_rules(axe), &(&1["rule_id"] == "image-alt"))
+    end
+
+    test "sem passes é nil (não coletado); lista vazia é []; repetida sai uma vez" do
+      assert AxeMapper.passed_rules(%{"violations" => [], "incomplete" => []}) == nil
+      assert AxeMapper.passed_rules(%{"passes" => []}) == []
+      assert [_] = AxeMapper.passed_rules(%{"passes" => [pass("a"), pass("a")]})
+    end
+  end
 end

@@ -3,7 +3,7 @@ defmodule RampaWeb.FindingControllerTest do
 
   import Rampa.AuditsFixtures
 
-  @fields ~w(id page_id source rule_id wcag_criteria severity needs_review confidence
+  @fields ~w(id page_id source rule_id help wcag_criteria severity needs_review confidence
              selector html_snippet message)
 
   setup do
@@ -29,7 +29,7 @@ defmodule RampaWeb.FindingControllerTest do
   defp index(conn, audit_id, params \\ %{}),
     do: get(conn, ~p"/api/audits/#{audit_id}/findings?#{params}")
 
-  test "campos do M1, sem raw, recorte nem campos de IA", %{conn: conn, audit_id: audit_id} do
+  test "campos da lista, sem raw, recorte nem campos de IA", %{conn: conn, audit_id: audit_id} do
     body = conn |> index(audit_id) |> json_response(200)
 
     assert %{"data" => [first | _] = data, "next_cursor" => nil} = body
@@ -107,5 +107,80 @@ defmodule RampaWeb.FindingControllerTest do
 
     assert missing == invalid
     assert %{"error" => %{"code" => "audit_not_found"}} = missing
+  end
+
+  describe "GET /api/audits/:audit_id/findings/:id (RF-RA007)" do
+    test "detalhe com IA, ocorrências e outras páginas; sem raw nem recorte", %{page: page} do
+      finding = Rampa.Repo.get_by!(Rampa.Audits.Finding, page_id: page.id, source: :ai)
+
+      body =
+        build_conn()
+        |> get(~p"/api/audits/#{page.audit_id}/findings/#{finding.id}")
+        |> json_response(200)
+
+      assert body["audit_id"] == page.audit_id
+      assert body["confidence"] == 0.6
+      assert body["ai_model"] == "claude-sonnet-5-5"
+      assert body["axe_version"] == nil
+      assert body["page"]["id"] == page.id
+      assert body["occurrences"] == %{"page" => 1, "audit" => 1}
+      assert body["other_pages"] == []
+      refute Map.has_key?(body, "raw")
+      refute Map.has_key?(body, "crop_path")
+      refute inspect(body) =~ "segredo"
+      refute inspect(body) =~ "recortes"
+    end
+
+    test "help_url só da documentação do axe", %{page: page} do
+      for {url, expected} <- [
+            {"https://dequeuniversity.com/rules/axe/4.14/image-alt?application=playwright",
+             "https://dequeuniversity.com/rules/axe/4.14/image-alt?application=playwright"},
+            {"javascript:alert(1)", nil},
+            {"https://dequeuniversity.com.evil.example/x", nil},
+            {"http://dequeuniversity.com/x", nil},
+            {"https://dequeuniversity.com/x y", nil},
+            {123, nil}
+          ] do
+        finding = finding_fixture(page, %{raw: %{"helpUrl" => url, "help" => "Ajuda"}})
+
+        body =
+          build_conn()
+          |> get(~p"/api/audits/#{page.audit_id}/findings/#{finding.id}")
+          |> json_response(200)
+
+        assert body["help_url"] == expected, inspect(url)
+        assert body["help"] == "Ajuda"
+      end
+    end
+
+    test "achado de outra auditoria é 404 finding_not_found", %{audit_id: audit_id} do
+      foreign = page_fixture(%{status: :done}) |> finding_fixture()
+
+      body =
+        build_conn()
+        |> get(~p"/api/audits/#{audit_id}/findings/#{foreign.id}")
+        |> json_response(404)
+
+      assert body["error"]["code"] == "finding_not_found"
+
+      body =
+        build_conn()
+        |> get(~p"/api/audits/#{Ecto.UUID.generate()}/findings/#{foreign.id}")
+        |> json_response(404)
+
+      assert body["error"]["code"] == "audit_not_found"
+    end
+  end
+
+  test "filtros só da query string: o audit_id do caminho não vira filtro", %{
+    conn: conn,
+    audit_id: audit_id
+  } do
+    body = conn |> index(audit_id, %{sort: "severity", wcag: "1.1.1"}) |> json_response(200)
+    assert body["total"] == 5
+    assert hd(body["data"])["severity"] == "critical"
+
+    body = build_conn() |> index(audit_id, %{sort: "x"}) |> json_response(422)
+    assert body["error"]["code"] == "invalid_sort"
   end
 end
