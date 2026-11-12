@@ -30,16 +30,17 @@ defmodule RampaWeb.Endpoint do
       longpoll: [connect_info: [session: @session_options]]
   end
 
-  # Build do frontend (PRD §7): os arquivos de `RampaWeb.static_paths/0`, com o cache e os
-  # cabeçalhos de `RampaWeb.Static.headers/1`. O `gzip` serve o `.gz` gerado no build da
-  # imagem (`backend/Dockerfile`). O resto das rotas da interface cai no `index.html`
-  # (`RampaWeb.SpaController`).
+  # Build do frontend (PRD §7): os arquivos de `RampaWeb.static_paths/0`. O cache e os
+  # cabeçalhos vêm de `RampaWeb.Static`, também na 304 (o `:headers` do `Plug.Static` não
+  # vale nela). O `gzip` serve o `.gz` gerado no build da imagem (`backend/Dockerfile`). O
+  # resto das rotas da interface cai no `index.html` (`RampaWeb.SpaController`).
+  plug RampaWeb.Static
+
   plug Plug.Static,
     at: "/",
     from: RampaWeb.Static.from(),
     gzip: not code_reloading?,
     only: RampaWeb.static_paths(),
-    headers: {RampaWeb.Static, :headers, []},
     raise_on_missing_only: code_reloading?
 
   # Code reloading can be explicitly enabled under the

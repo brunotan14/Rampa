@@ -23,8 +23,7 @@ defmodule Rampa.ReleaseTest do
       |> Keyword.drop([:pool, :pool_size, :name])
       |> Release.migration_config()
 
-    {:ok, conn} = Postgrex.start_link(config)
-    on_exit(fn -> Process.exit(conn, :normal) end)
+    conn = start_supervised!({Postgrex, config})
 
     assert %Postgrex.Result{rows: [["5s"]]} = Postgrex.query!(conn, "SHOW lock_timeout", [])
   end

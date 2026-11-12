@@ -82,13 +82,56 @@ jobs:
         if: always()
         run: docker logout ghcr.io || true
 
+  # Pula o deploy só se o staging JÁ tem este sha ou um descendente (`infra/ci/should-deploy.sh`,
+  # pelo último deployment com sucesso do environment). Com dois merges seguidos e o mais novo
+  # vermelho no CI, o mais antigo ainda vai para o ar. Fica num job sem `environment`: um job
+  # com environment registra um deployment com sucesso mesmo quando pula, e o sha errado
+  # passaria a contar como "no ar". O rollback manual não passa por aqui.
+  decide:
+    name: Decide o deploy
+    needs: [publish]
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: read
+    outputs:
+      skip: ${{ steps.decision.outputs.skip }}
+    steps:
+      # História completa: a comparação é por ancestralidade na `main`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: O staging já tem este sha ou um mais novo?
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.publish.outputs.sha }}
+        run: |
+          decision=$(infra/ci/should-deploy.sh "$SHA")
+          if [ "$decision" != deploy ]; then
+            echo "::warning::o staging já está em ${decision#skip }, que contém $SHA: deploy pulado."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Deploy no staging
-    needs: [publish]
-    # No rollback manual o `publish` é pulado; nos dois caminhos, só se nada falhou antes.
-    if: ${{ !cancelled() && (needs.publish.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.publish.result == 'skipped')) }}
+    needs: [publish, decide]
+    # Push: só com o `publish` e o `decide` verdes e sem pular. Rollback manual: os dois são
+    # pulados.
+    if: >-
+      ${{ !cancelled() && (
+        (needs.publish.result == 'success' && needs.decide.result == 'success' && needs.decide.outputs.skip != 'true') ||
+        (github.event_name == 'workflow_dispatch' && needs.publish.result == 'skipped' && needs.decide.result == 'skipped')
+      ) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Pior caso do `deploy.sh`, somado: espera da trava (900 s) + dois `docker pull` (até
+    # 600 s) + postgres (120 s) + migrations (reserva de 300 s) + scanner (180 s) + app (180 s)
+    # + Traefik no primeiro deploy (300 s, mais 25 s da última volta) + rollback (300 s) ≈
+    # 2 905 s, uns 48 min. Com folga para o SSH: 55 min. O job não pode cair antes do script,
+    # senão fica vermelho com o deploy ainda em curso na VPS.
+    timeout-minutes: 55
     environment:
       name: staging
     # Um deploy por vez, sem cancelar o que está em curso. Fica no job (e não no chamador),
@@ -96,6 +139,9 @@ jobs:
     concurrency:
       group: deploy-staging
       cancel-in-progress: false
+    permissions:
+      contents: read
+      deployments: read
     steps:
       - name: Sha do deploy
         id: target
@@ -109,21 +155,25 @@ jobs:
             exit 1
           fi
           echo "sha=$sha" >>"$GITHUB_OUTPUT"
-      # Com dois merges seguidos, o deploy do mais antigo pode rodar depois do mais novo: só a
-      # ponta da `main` vai para o ar. O rollback manual pula esta conferência.
-      - name: Confere que é a ponta da main
-        id: tip
+      # A decisão do `decide` de novo, já dentro da `concurrency`: se outro deploy mais novo
+      # entrou entre os dois jobs, este falha em vez de voltar o staging para trás (e o
+      # deployment deste job não fica registrado como sucesso).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+      - name: Confere de novo, dentro da fila de deploy
         if: github.event_name != 'workflow_dispatch'
         env:
+          GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.target.outputs.sha }}
         run: |
-          tip=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
-          if [ "$tip" != "$SHA" ]; then
-            echo "::notice::$SHA não é mais a ponta da main ($tip): o deploy fica para o commit mais novo."
-            echo "skip=true" >>"$GITHUB_OUTPUT"
+          decision=$(infra/ci/should-deploy.sh "$SHA")
+          if [ "$decision" != deploy ]; then
+            echo "::error::outro deploy entrou na frente: o staging já está em ${decision#skip }, que contém $SHA. Nada foi feito."
+            exit 1
           fi
       - name: Deploy pela chave restrita do usuário deploy
-        if: steps.tip.outputs.skip != 'true'
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

@@ -13,8 +13,9 @@
 #      e extrai o Compose da imagem do app para `/opt/rampa/releases/<sha>/`;
 #   2. `postgres` de pé → `bin/migrate` (com o app antigo ainda no ar) → `scanner` → `app`,
 #      cada um esperando o healthcheck do Compose;
-#   3. confere o caminho pelo Traefik: `https://$PHX_HOST/api/health` sem credencial tem de dar
-#      401 do basic auth (certificado válido e roteador no ar);
+#   3. confere o caminho pelo Traefik, em `https://$PHX_HOST/api/health`: sem credencial tem de
+#      dar 401 (certificado válido e basic auth no ar) e com a `RAMPA_HEALTHCHECK_AUTH` tem de
+#      dar 200 (o Traefik alcança o app novo, e o app, o banco e o scanner);
 #   4. deu certo: grava `current` e `previous` e apaga as releases e imagens antigas (ficam 3).
 #      Falhou em 2 ou 3: volta para a versão de `current`, com o Compose e a etiqueta dela,
 #      e sai com erro (o job do Actions fica vermelho). Sem versão anterior (primeiro
@@ -29,8 +30,10 @@
 # Saída: 0 no sucesso, 1 na falha (com ou sem rollback), 64 no uso errado, 75 com outro deploy
 # segurando a trava além do prazo. Log em `/opt/rampa/deploy.log`.
 #
-# Configuração no `/opt/rampa/.env` (fora do Git, 600): as variáveis do Compose de produção e,
-# opcional, `RAMPA_REGISTRY` (padrão abaixo). As variáveis `RAMPA_DIR`, `RAMPA_LOCK_WAIT_S`,
+# Configuração no `/opt/rampa/.env` (fora do Git, 600): as variáveis do Compose de produção,
+# `RAMPA_HEALTHCHECK_AUTH` (`usuario:senha` do basic auth em texto puro, só lida por este
+# script e nunca repassada a container) e, opcional, `RAMPA_REGISTRY` (padrão abaixo). As
+# imagens são públicas no GHCR: a VPS não faz `docker login`. As variáveis `RAMPA_DIR`, `RAMPA_LOCK_WAIT_S`,
 # `RAMPA_MIN_FREE_MB`, `RAMPA_HEALTH_WAIT_S` e `RAMPA_FIRST_HEALTH_WAIT_S` só existem para o
 # teste (`infra/test/check-deploy.sh`); o SSH do `deploy` não repassa variáveis de ambiente.
 set -euo pipefail
@@ -109,12 +112,27 @@ check_disk() {
   log "Disco: $free MB livres em $root"
 }
 
+# `docker pull` sem credencial. Recusa por autorização quase sempre é pacote privado no GHCR.
+pull() {
+  local out
+  if out=$(docker pull --quiet "$1" 2>&1); then
+    return 0
+  fi
+  printf '%s\n' "$out"
+  if grep -qiE 'unauthorized|denied|authentication required' <<<"$out"; then
+    log "ERRO: o registro recusou $1 sem credencial. Os pacotes rampa-app e rampa-scanner do GHCR precisam ser públicos (GitHub → Packages → <pacote> → Package settings → Change visibility → Public); a VPS não faz docker login"
+  else
+    log "ERRO: não consegui baixar $1"
+  fi
+  return 1
+}
+
 # Baixa as imagens e extrai o Compose da imagem do app para a pasta da release.
 prepare() {
   local dir=$RELEASES/$SHA cid
   log "Baixando $APP_IMAGE e $SCANNER_IMAGE"
-  docker pull --quiet "$APP_IMAGE" || return 1
-  docker pull --quiet "$SCANNER_IMAGE" || return 1
+  pull "$APP_IMAGE" || return 1
+  pull "$SCANNER_IMAGE" || return 1
 
   mkdir -p "$dir"
   touch "$dir"
@@ -132,20 +150,38 @@ prepare() {
   fi
 }
 
-# O Traefik responde pelo host público com certificado válido: sem credencial, o basic auth
-# devolve 401. No primeiro deploy a espera é maior (emissão do certificado).
+# Código HTTP de `https://$PHX_HOST/api/health` pelo Traefik (000 se não conectar). Com `$1`
+# (`usuario:senha`), manda a credencial pela configuração na entrada padrão do curl, nunca na
+# linha de comando (que outros usuários veem no `ps`).
+health_code() {
+  local auth=${1:-} code
+  local args=(-sS -o /dev/null -w '%{http_code}' --max-time 10
+    --resolve "$PHX_HOST:443:127.0.0.1" "https://$PHX_HOST/api/health")
+  if [ -n "$auth" ]; then
+    auth=${auth//\\/\\\\}
+    auth=${auth//\"/\\\"}
+    code=$(printf 'user = "%s"\n' "$auth" | curl -K - "${args[@]}" 2>/dev/null) || code=000
+  else
+    code=$(curl "${args[@]}" 2>/dev/null) || code=000
+  fi
+  printf '%s' "$code"
+}
+
+# Pelo host público, com certificado válido: sem credencial o basic auth responde 401; com a
+# credencial o app novo responde 200 (healthcheck completo). No primeiro deploy a espera é maior
+# (emissão do certificado).
 check_traefik() {
-  local wait=$1 deadline code
+  local wait=$1 deadline anonymous authenticated
   deadline=$((SECONDS + wait))
   while :; do
-    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
-      --resolve "$PHX_HOST:443:127.0.0.1" "https://$PHX_HOST/api/health" 2>/dev/null) || code=000
-    if [ "$code" = 401 ]; then
-      log "Traefik: https://$PHX_HOST/api/health respondeu 401 (basic auth no ar)"
+    anonymous=$(health_code)
+    authenticated=$(health_code "$HEALTHCHECK_AUTH")
+    if [ "$anonymous" = 401 ] && [ "$authenticated" = 200 ]; then
+      log "Traefik: https://$PHX_HOST/api/health respondeu 401 sem credencial e 200 com ela"
       return 0
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
-      log "ERRO: pelo Traefik, https://$PHX_HOST/api/health respondeu $code (esperado: 401)"
+      log "ERRO: pelo Traefik, https://$PHX_HOST/api/health respondeu $anonymous sem credencial (esperado: 401) e $authenticated com ela (esperado: 200)"
       return 1
     fi
     sleep 5
@@ -231,6 +267,11 @@ main() {
   esac
   PHX_HOST=$(env_get PHX_HOST)
   [ -n "$PHX_HOST" ] || fail "PHX_HOST não está no $ENV_FILE"
+  HEALTHCHECK_AUTH=$(env_get RAMPA_HEALTHCHECK_AUTH)
+  case $HEALTHCHECK_AUTH in
+    ?*:?*) ;;
+    *) fail "RAMPA_HEALTHCHECK_AUTH (usuario:senha do basic auth, em texto puro) não está no $ENV_FILE: sem ela o deploy não confere o app pelo Traefik" ;;
+  esac
   REGISTRY=$(env_get RAMPA_REGISTRY)
   REGISTRY=${REGISTRY:-$DEFAULT_REGISTRY}
   export RAMPA_REGISTRY=$REGISTRY

@@ -204,9 +204,12 @@ jobs:
     name: Deploy
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [backend, frontend, scanner, e2e, e2e-integrated]
+    # O chamador limita o que o `deploy.yml` pode pedir: pacotes (push no GHCR) e leitura dos
+    # deployments do environment (decisão de pular).
     permissions:
       contents: read
       packages: write
+      deployments: read
     uses: ./.github/workflows/deploy.yml
 
   # Barra no PR dependência nova (npm, mix, actions) com vulnerabilidade conhecida de severidade

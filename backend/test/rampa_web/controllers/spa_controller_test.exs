@@ -60,6 +60,26 @@ defmodule RampaWeb.SpaControllerTest do
       assert conn |> get("/") |> get_resp_header("cache-control") == ["no-cache"]
     end
 
+    test "revalidação com o ETag: 304 sem corpo, com a CSP e o no-cache", %{conn: conn} do
+      [etag] = conn |> get("/") |> get_resp_header("etag")
+      assert etag =~ ~r/^"[A-Za-z0-9_-]{27}"$/
+
+      for value <- [etag, "W/#{etag}", ~s("outro", #{etag}), "*"] do
+        conn = conn |> recycle() |> put_req_header("if-none-match", value) |> get("/auditorias/x")
+
+        assert conn.status == 304, value
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "etag") == [etag]
+
+        for {name, header} <- BrowserHeaders.headers() do
+          assert get_resp_header(conn, name) == [header], "#{value}: cabeçalho #{name}"
+        end
+      end
+
+      conn = conn |> recycle() |> put_req_header("if-none-match", ~s("build-antigo")) |> get("/")
+      assert_index(conn)
+    end
+
     test "/api/* sem rota continua 404 em JSON, com os cabeçalhos da API e sem o HTML",
          %{conn: conn} do
       for path <- ["/api/inexistente", "/api", "/api/audits/x/y/z"] do
@@ -103,6 +123,20 @@ defmodule RampaWeb.SpaControllerTest do
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
       assert [content_type] = get_resp_header(conn, "content-type")
       assert content_type =~ "javascript"
+    end
+
+    test "a 304 dos arquivos do build mantém o cache e o nosniff", %{conn: conn} do
+      for {path, cache} <- [
+            {"/assets/index-teste123.js", "public, max-age=31536000, immutable"},
+            {"/favicon.svg", "public, max-age=0, must-revalidate"}
+          ] do
+        [etag] = conn |> recycle() |> get(path) |> get_resp_header("etag")
+        conn = conn |> recycle() |> put_req_header("if-none-match", etag) |> get(path)
+
+        assert conn.status == 304, path
+        assert get_resp_header(conn, "cache-control") == [cache], path
+        assert get_resp_header(conn, "x-content-type-options") == ["nosniff"], path
+      end
     end
 
     test "o favicon (nome fixo) é revalidado", %{conn: conn} do

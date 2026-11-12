@@ -7,10 +7,11 @@
 #   infra/test/check-deploy.sh             sobe o container e roda os casos dentro dele
 #   infra/test/check-deploy.sh --inside    roda os casos (só dentro do container)
 #
-# Casos: sucesso no primeiro e no segundo deploy; app sem healthcheck e Traefik sem o 401 →
-# rollback com o Compose e a etiqueta anteriores; primeiro deploy que falha (sem rollback);
+# Casos: sucesso no primeiro e no segundo deploy; app sem healthcheck, Traefik sem o 401 e
+# app sem o 200 com a credencial → rollback com o Compose e a etiqueta anteriores; primeiro deploy que falha (sem rollback);
 # migration que falha (o app novo não sobe); trava ocupada; sha inválido; Compose de outra
-# versão do bootstrap; disco cheio; .env aberto demais; limpeza das releases antigas.
+# versão do bootstrap; disco cheio; .env aberto demais; sem a RAMPA_HEALTHCHECK_AUTH; pacote
+# privado no registro; limpeza das releases antigas.
 set -euo pipefail
 
 UBUNTU_IMAGE=ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5
@@ -44,7 +45,11 @@ echo "RAMPA_TAG=${RAMPA_TAG:-} $*" >>"$FAKE_LOG"
 failing() { [[ " ${FAKE_FAIL:-} " == *" $1:${RAMPA_TAG:-$2} "* ]]; }
 case $1 in
   info) echo "$FAKE_DOCKER_ROOT" ;;
-  pull) tag=${2##*:}; [ "$2" = --quiet ] && tag=${3##*:}; failing pull "$tag" && exit 1; exit 0 ;;
+  pull)
+    tag=${2##*:}; [ "$2" = --quiet ] && tag=${3##*:}
+    if failing pull "$tag"; then echo "${FAKE_PULL_ERROR:-Error response from daemon: manifest unknown}" >&2; exit 1; fi
+    exit 0
+    ;;
   create) echo cid-falso ;;
   cp) cp "$FAKE_COMPOSE" "$3" ;;
   compose)
@@ -60,10 +65,17 @@ case $1 in
 esac
 exit 0
 FAKE
+# curl falso: sem `-K -`, responde $FAKE_CURL_CODE (o 401 do basic auth); com `-K -`, guarda a
+# configuração recebida na entrada padrão em $FAKE_CURL_CONFIG e responde $FAKE_CURL_AUTH_CODE.
 cat >"$WORK/bin/curl" <<'FAKE'
 #!/usr/bin/env bash
 echo "curl $*" >>"$FAKE_LOG"
-printf '%s' "${FAKE_CURL_CODE:-401}"
+if [ "$1" = -K ] && [ "$2" = - ]; then
+  cat >>"$FAKE_CURL_CONFIG"
+  printf '%s' "${FAKE_CURL_AUTH_CODE:-200}"
+else
+  printf '%s' "${FAKE_CURL_CODE:-401}"
+fi
 FAKE
 chmod +x "$WORK/bin/docker" "$WORK/bin/curl"
 
@@ -79,10 +91,11 @@ fresh() {
   DIR=$WORK/case-$((passed + failures))
   mkdir -p "$DIR"
   printf '%s\n' "PHX_HOST=rampa.exemplo.test" "RAMPA_REGISTRY=registro.test/rampa" \
-    "RAMPA_BASIC_AUTH='teste:\$2y\$05\$abc'" >"$DIR/.env"
+    "RAMPA_BASIC_AUTH='teste:\$2y\$05\$abc'" "RAMPA_HEALTHCHECK_AUTH='teste:se\"nh\\a\$1'" >"$DIR/.env"
   chmod 600 "$DIR/.env"
   export RAMPA_DIR=$DIR FAKE_LOG=$DIR/docker.log FAKE_COMPOSE=$REPO/infra/docker-compose.prod.yml
-  export FAKE_FAIL="" FAKE_CURL_CODE=401
+  export FAKE_FAIL="" FAKE_CURL_CODE=401 FAKE_CURL_AUTH_CODE=200 FAKE_PULL_ERROR=""
+  export FAKE_CURL_CONFIG=$DIR/curl-config.txt
   : >"$FAKE_LOG"
 }
 
@@ -122,10 +135,14 @@ check "sempre com -p rampa, o .env e o Compose da release" \
   called "RAMPA_TAG=$SHA1 compose -p rampa --env-file $DIR/.env -f $DIR/releases/$SHA1/docker-compose.prod.yml up -d --wait --wait-timeout 120 postgres"
 check "migrations sem o Traefik e sem subir dependências" \
   called "run --rm --no-deps -l traefik.enable=false app /app/bin/migrate"
-check "ordem: postgres, migrate, scanner, app, Traefik" \
+check "ordem: postgres, migrate, scanner, app, Traefik (sem e com credencial)" \
   [ "$(grep -oE 'up -d --wait --wait-timeout [0-9]+ (postgres|scanner|app)$|/app/bin/migrate|^curl' "$FAKE_LOG" |
-    sed -E 's/.* //' | tr '\n' ' ')" = "postgres /app/bin/migrate scanner app curl " ]
+    sed -E 's/.* //' | tr '\n' ' ')" = "postgres /app/bin/migrate scanner app curl curl " ]
 check "confere o 401 pelo Traefik, no host do .env" called "--resolve rampa.exemplo.test:443:127.0.0.1 https://rampa.exemplo.test/api/health"
+check "confere também com a credencial, esperando 200" said "respondeu 401 sem credencial e 200 com ela"
+# shellcheck disable=SC2016 # o `$1` é parte da senha fictícia, não do shell.
+check "a credencial vai na entrada do curl, escapada" grep -qxF 'user = "teste:se\"nh\\a$1"' "$FAKE_CURL_CONFIG"
+check "a credencial nunca vai na linha de comando" bash -c "! grep -qF 'nh' '$FAKE_LOG'"
 check "registra no deploy.log" grep -qF "Deploy concluído: no ar $SHA1" "$DIR/deploy.log"
 
 echo "deploy.sh: segundo deploy e rollbacks"
@@ -146,6 +163,13 @@ FAKE_CURL_CODE=000 deploy "$SHA3"
 check "Traefik sem o 401: sai com 1" status_is 1
 check "Traefik sem o 401: volta para a anterior" called "RAMPA_TAG=$SHA2 compose -p rampa"
 check "Traefik sem o 401: current não muda" [ "$(state current)" = "$SHA2" ]
+
+: >"$FAKE_LOG"
+FAKE_CURL_AUTH_CODE=503 deploy "$SHA3"
+check "app sem o 200 pelo Traefik (só o basic auth no ar): sai com 1" status_is 1
+check "app sem o 200 pelo Traefik: volta para a anterior" called "RAMPA_TAG=$SHA2 compose -p rampa"
+check "app sem o 200 pelo Traefik: explica" said "503 com ela (esperado: 200)"
+check "app sem o 200 pelo Traefik: current não muda" [ "$(state current)" = "$SHA2" ]
 
 : >"$FAKE_LOG"
 FAKE_FAIL="migrate:$SHA3" deploy "$SHA3"
@@ -184,6 +208,22 @@ fresh
 chmod 644 "$DIR/.env"
 deploy "$SHA1"
 check ".env legível por outros: recusa" bash -c "[ $STATUS -eq 1 ] && ! grep -qF ' pull ' '$FAKE_LOG'"
+
+fresh
+FAKE_FAIL="pull:$SHA1" FAKE_PULL_ERROR="Error response from daemon: Head \"https://ghcr.io/v2/x/manifests/y\": unauthorized" deploy "$SHA1"
+check "pacote privado: sai com 1" status_is 1
+check "pacote privado: explica que os pacotes do GHCR precisam ser públicos" said "precisam ser públicos"
+check "pacote privado: nunca tenta docker login" bash -c "! grep -qF ' login' '$FAKE_LOG'"
+
+fresh
+FAKE_FAIL="pull:$SHA1" deploy "$SHA1"
+check "outro erro de pull: não fala em pacote privado" bash -c "[ $STATUS -eq 1 ] && ! grep -qF 'públicos' '$DIR/out.txt'"
+
+fresh
+grep -v '^RAMPA_HEALTHCHECK_AUTH=' "$DIR/.env" >"$DIR/env.tmp" && mv "$DIR/env.tmp" "$DIR/.env" && chmod 600 "$DIR/.env"
+deploy "$SHA1"
+check "sem RAMPA_HEALTHCHECK_AUTH: recusa sem baixar nada" bash -c "[ $STATUS -eq 1 ] && ! grep -qF ' pull ' '$FAKE_LOG'"
+check "sem RAMPA_HEALTHCHECK_AUTH: explica" said "RAMPA_HEALTHCHECK_AUTH"
 
 fresh
 grep -v '^PHX_HOST=' "$DIR/.env" >"$DIR/env.tmp" && mv "$DIR/env.tmp" "$DIR/.env" && chmod 600 "$DIR/.env"

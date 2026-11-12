@@ -7,11 +7,15 @@
 #   * nenhum serviço publica porta (só o Traefik alcança o app), nada de `env_file`;
 #   * segredos só onde são usados: app (SECRET_KEY_BASE, IP_HASH_SECRET, DATABASE_URL) e
 #     postgres (POSTGRES_PASSWORD); o scanner não recebe nenhum; SSRF_ALLOWLIST em nenhum;
-#   * o scanner fora da rede do banco, que é interna; só o app tem labels do Traefik;
+#   * a credencial do healthcheck (`RAMPA_HEALTHCHECK_AUTH`, só do `infra/deploy.sh`) em nenhum
+#     serviço;
+#   * o scanner fora da rede do banco, que é interna; só o app tem labels do Traefik, com o
+#     entrypoint, o resolver e o proxy confiável vindos do .env (sem padrão no arquivo);
 #   * limites de memória (soma ≤ 2,5 GiB, sem swap além do limite), CPU do scanner,
 #     `oom_score_adj` (banco por último), endurecimento (`cap_drop`, `read_only`,
 #     `no-new-privileges`, `pids_limit`, `restart`) em todos;
-#   * variável obrigatória faltando (PHX_HOST, segredos, RAMPA_TAG) impede o `config`.
+#   * variável obrigatória faltando (PHX_HOST, segredos, Traefik, TRUSTED_PROXIES) impede o
+#     `config`.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -23,12 +27,17 @@ trap 'rm -rf "$WORK"' EXIT
 SECRET_KEY_BASE=segredo-ficticio-secret-key-base-0123456789
 IP_HASH_SECRET=segredo-ficticio-ip-hash-0123456789
 POSTGRES_PASSWORD=senhaficticia0123456789
+HEALTHCHECK_PASSWORD=senha-do-healthcheck-ficticia
 cat >"$WORK/env" <<EOF
 PHX_HOST=rampa.exemplo.test
 SECRET_KEY_BASE=$SECRET_KEY_BASE
 IP_HASH_SECRET=$IP_HASH_SECRET
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 RAMPA_BASIC_AUTH='teste:\$2y\$05\$abcdefghijklmnopqrstuv'
+RAMPA_HEALTHCHECK_AUTH=teste:$HEALTHCHECK_PASSWORD
+TRAEFIK_ENTRYPOINT=entrada-ficticia
+TRAEFIK_CERTRESOLVER=resolver-ficticio
+TRUSTED_PROXIES=172.30.240.1/32
 EOF
 
 render() {
@@ -67,14 +76,34 @@ expect "a senha do banco só no app (DATABASE_URL) e no postgres" \
 expect "o scanner não recebe segredo" \
   '(.services.scanner.environment | keys) - ["NODE_ENV", "HOST", "PORT"] == [] and .services.scanner.environment.NODE_ENV == "production"'
 
+expect "a credencial do healthcheck em nenhum serviço" \
+  "(.services | tostring | contains(\"$HEALTHCHECK_PASSWORD\")) | not"
+if grep -qF RAMPA_HEALTHCHECK_AUTH "$FILE"; then
+  echo "FALHOU: $FILE não pode usar a RAMPA_HEALTHCHECK_AUTH (é só do deploy.sh)" >&2
+  failures=$((failures + 1))
+else
+  echo "ok: o Compose não lê a RAMPA_HEALTHCHECK_AUTH"
+fi
+
+# Nada da configuração da VPS no arquivo versionado (o repositório é público): entrypoint,
+# resolver e proxy confiável sem valor padrão.
+if grep -qE '\$\{(TRAEFIK_ENTRYPOINT|TRAEFIK_CERTRESOLVER|TRUSTED_PROXIES):-' "$FILE"; then
+  echo "FALHOU: $FILE dá valor padrão a TRAEFIK_ENTRYPOINT, TRAEFIK_CERTRESOLVER ou TRUSTED_PROXIES" >&2
+  failures=$((failures + 1))
+else
+  echo "ok: entrypoint, resolver e proxy confiável só do .env"
+fi
+
 expect "o scanner fora da rede do banco" '(.services.scanner.networks | has("db")) | not'
 expect "o banco só na rede db, interna" '(.services.postgres.networks | keys) == ["db"] and .networks.db.internal == true'
 expect "app e scanner por rede interna" '.networks.scan.internal == true and (.services.app.networks | has("scan")) and (.services.scanner.networks | has("scan"))'
 expect "só o app com labels do Traefik" \
   '([.services | to_entries[] | select(.key != "app") | .value.labels // {} | keys[] | select(startswith("traefik."))] | length) == 0 and .services.app.labels["traefik.enable"] == "true"'
 expect "o Traefik entra pela rede edge" '.services.app.labels["traefik.docker.network"] == .networks.edge.name and (.services.app.networks | has("edge"))'
-expect "proxy confiável é só o gateway da rede edge" \
-  '.services.app.environment.TRUSTED_PROXIES == (.networks.edge.ipam.config[0].gateway + "/32")'
+expect "proxy confiável vem do .env" '.services.app.environment.TRUSTED_PROXIES == "172.30.240.1/32"'
+# shellcheck disable=SC2016 # `$l` é variável do jq.
+expect "entrypoint e resolver do Traefik vêm do .env, nos dois roteadores" \
+  '.services.app.labels as $l | ([$l | to_entries[] | select(.key | endswith(".entrypoints")) | .value] == ["entrada-ficticia", "entrada-ficticia"]) and ([$l | to_entries[] | select(.key | endswith(".tls.certresolver")) | .value] == ["resolver-ficticio", "resolver-ficticio"])'
 expect "basic auth nos dois roteadores" \
   '(.services.app.labels["traefik.http.routers.rampa.middlewares"] | split(",") | index("rampa-auth")) != null and (.services.app.labels["traefik.http.routers.rampa-socket.middlewares"] | split(",") | index("rampa-auth")) != null'
 # shellcheck disable=SC2016 # as crases são do Traefik, não do shell.
@@ -96,7 +125,8 @@ expect "stop_grace_period do app maior que o do Oban (30 s)" '.services.app.stop
 expect "healthcheck em todos" '[.services[] | .healthcheck.test != null] | all'
 
 # Variável obrigatória faltando: o Compose recusa, e o deploy para antes de trocar nada.
-for name in PHX_HOST SECRET_KEY_BASE IP_HASH_SECRET POSTGRES_PASSWORD RAMPA_BASIC_AUTH; do
+for name in PHX_HOST SECRET_KEY_BASE IP_HASH_SECRET POSTGRES_PASSWORD RAMPA_BASIC_AUTH \
+  TRAEFIK_ENTRYPOINT TRAEFIK_CERTRESOLVER TRUSTED_PROXIES; do
   grep -v "^$name=" "$WORK/env" >"$WORK/env-sem"
   if render "$WORK/env-sem" >/dev/null 2>&1; then
     echo "FALHOU: sem $name o Compose deveria recusar" >&2

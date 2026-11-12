@@ -58,11 +58,13 @@ e2e-integrado-down: ## Guarda os logs e derruba o Compose de teste
 	infra/test/run-e2e.sh down
 
 # Deploy sem subir nada (PRD §7): `shellcheck` dos scripts de `infra/`, as regras do Compose de
-# produção (`docker compose config` + `jq`) e o `infra/deploy.sh` com `docker` falso, num
-# container Ubuntu 24.04. Precisa do Docker, do `shellcheck` e do `jq`.
+# produção (`docker compose config` + `jq`), a decisão de pular o deploy
+# (`infra/ci/should-deploy.sh`, com `gh` falso) e o `infra/deploy.sh` com `docker` falso, num
+# container Ubuntu 24.04. Precisa do Docker, do Git, do `shellcheck` e do `jq`.
 check-infra: ## Confere os scripts de deploy e o Compose de produção, sem subir nada
 	shellcheck infra/deploy.sh infra/ci/*.sh infra/test/*.sh
 	infra/test/check-compose-prod.sh
+	infra/test/check-should-deploy.sh
 	infra/test/check-deploy.sh
 
 lint: lint-backend lint-frontend lint-scanner lint-e2e ## Formatação, lint e tipos (backend, frontend, scanner e e2e)
