@@ -8,15 +8,24 @@
 //   4. os eventos são agregados em lotes de 500 ms (um render por lote).
 // A reconexão e o novo join são do cliente `phoenix`; o snapshot do novo join passa pela
 // regra 1. O hook devolve o estado e o anúncio; a região `aria-live` fica na tela.
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { Socket } from "phoenix";
 import { createContext, createElement, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../i18n";
 import { totalProblems } from "../severity";
-import { CHANNEL_EVENTS, type AuditChannelEvent } from "./channel.gen";
-import { ApiError, getAudit, isApiError } from "./client";
+import { CHANNEL_EVENTS, CHANNEL_TOPIC, type AuditChannelEvent } from "./channel.gen";
+import { ApiError, getAudit, isApiError, listPages } from "./client";
+import { isRecord } from "./json";
 import { queryKeys } from "./queryKeys";
-import type { AuditStatus, AuditSummary, ChannelProgress, PageError, SeverityCounts } from "./types";
+import type {
+  AuditStatus,
+  AuditSummary,
+  ChannelProgress,
+  FindingsPage,
+  PageError,
+  PageSummary,
+  SeverityCounts,
+} from "./types";
 
 export const BATCH_MS = 500;
 export const SILENCE_MS = 30_000;
@@ -94,11 +103,45 @@ export const initialChannelState: AuditChannelState = {
   announcement: null,
 };
 
-/** Um snapshot recebido (join, evento ou GET), com a página quando o evento é de página. */
+/**
+ * Um `progress` recebido, com a origem (`join` e `get` são snapshots) e a página quando o
+ * evento é de página.
+ */
 export interface Incoming {
   revision: number;
   progress: ChannelProgress;
+  source: "event" | "join" | "get";
   page?: PageActivity;
+}
+
+/** Páginas que já terminaram segundo o `progress` (analisadas mais as com falha). */
+export function finishedPages(progress: ChannelProgress): number {
+  return progress.pages_scanned + progress.pages_failed;
+}
+
+function activityFromSummary(page: PageSummary): PageActivity[] {
+  switch (page.status) {
+    case "analyzing":
+    case "done":
+      return [{ pageId: page.id, kind: "scanned", counts: page.counts_by_severity, needsReviewCount: page.needs_review_count }];
+    case "failed":
+      return [
+        { pageId: page.id, kind: "failed", error: page.error ?? { code: "internal_error", message: t.errors.internal_error } },
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Completa o feed com as páginas terminadas da lista da API (`GET /api/audits/:id/pages`),
+ * para ele não contradizer o contador depois de eventos perdidos (queda, publicação que
+ * falhou). O que já está no feed fica na ordem de chegada; o resto entra na ordem da lista.
+ */
+export function mergePages(feed: readonly PageActivity[], list: readonly PageSummary[]): PageActivity[] {
+  const known = new Set(feed.map((p) => p.pageId));
+  const added = list.filter((p) => !known.has(p.id)).flatMap(activityFromSummary);
+  return added.length === 0 ? (feed as PageActivity[]) : [...feed, ...added];
 }
 
 function announcementFor(progress: ChannelProgress): string {
@@ -140,15 +183,15 @@ export function applyBatch(state: AuditChannelState, batch: readonly Incoming[])
 
 // --- Payloads ----------------------------------------------------------------------------
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // O backend confere cada payload contra o schema; aqui só se descarta o que nem tem a forma
 // básica (revision e progress), para um payload estranho não derrubar a tela.
 function toIncoming(event: AuditChannelEvent | "join", payload: unknown): Incoming | null {
   if (!isRecord(payload) || typeof payload["revision"] !== "number" || !isRecord(payload["progress"])) return null;
-  const incoming: Incoming = { revision: payload["revision"], progress: payload["progress"] as unknown as ChannelProgress };
+  const incoming: Incoming = {
+    revision: payload["revision"],
+    progress: payload["progress"] as unknown as ChannelProgress,
+    source: event === "join" ? "join" : "event",
+  };
   const pageId = payload["page_id"];
   if (typeof pageId === "string") {
     if (event === "page_scanned") {
@@ -170,6 +213,7 @@ function fromSummary(summary: AuditSummary): Incoming {
   return {
     revision: summary.revision,
     progress: { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error },
+    source: "get",
   };
 }
 
@@ -180,12 +224,8 @@ function joinError(response: unknown): ApiError {
   return new ApiError(code, message, 0);
 }
 
-// Mantém o resumo em cache (`useAudit`) com o `progress` mais novo, sem refazer o GET a cada
-// evento (PRD §9: o top 5 é recalculado no GET; o canal já leva os contadores).
-function syncAuditCache(client: QueryClient, auditId: string, revision: number, progress: ChannelProgress) {
-  client.setQueryData<AuditSummary>(queryKeys.audit(auditId), (old) =>
-    old && revision > old.revision ? { ...old, ...progress, revision } : old,
-  );
+export function auditTopic(auditId: string): string {
+  return CHANNEL_TOPIC.replace("<id>", auditId);
 }
 
 // --- Hook --------------------------------------------------------------------------------
@@ -193,6 +233,12 @@ function syncAuditCache(client: QueryClient, auditId: string, revision: number, 
 /**
  * Acompanha a auditoria pelo canal `audit:<id>`. Devolve o progresso (com a maior `revision`
  * recebida), o estado da conexão, as páginas terminadas e o anúncio de conclusão.
+ *
+ * Cache do resumo (`useAudit`): o canal não escreve nele. O resumo é uma foto de uma
+ * `revision` (totais, revisão por severidade, top 5, datas); misturar nele o `progress` do
+ * canal deixaria campos de instantes diferentes lado a lado. Quando o canal passa à frente,
+ * o resumo só é marcado como velho (sem buscar de novo); no fim da auditoria ele é buscado
+ * uma vez. Durante o andamento, os contadores ao vivo vêm deste hook.
  */
 export function useAuditChannel(auditId: string): AuditChannelState {
   const getSocket = useContext(SocketContext);
@@ -205,6 +251,8 @@ export function useAuditChannel(auditId: string): AuditChannelState {
 
   useEffect(() => {
     let active = true;
+    let left = false;
+    let rebuilding = false;
     let buffer: Incoming[] = [];
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -212,23 +260,63 @@ export function useAuditChannel(auditId: string): AuditChannelState {
 
     const commit = (next: AuditChannelState) => {
       if (!active || next === stateRef.current) return;
-      const previous = stateRef.current;
       stateRef.current = next;
       setSnapshot({ auditId, state: next });
-      if (next.progress && next.revision !== null && next.revision !== previous.revision) {
-        syncAuditCache(queryClient, auditId, next.revision, next.progress);
-      }
-      // Fim da auditoria: resumo (top 5), páginas e achados são lidos de novo, uma vez.
-      if (next.announcement !== null && previous.announcement === null) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.audit(auditId) });
-      }
+    };
+
+    // Fim da auditoria: o resumo (top 5, datas), a lista de páginas e, se houve página
+    // analisada, a primeira página de cada lista de achados aberta são lidos de novo, uma vez.
+    const refreshAfterEnd = (progress: ChannelProgress, summaryIsFresh: boolean) => {
+      if (!summaryIsFresh) void queryClient.invalidateQueries({ queryKey: queryKeys.audit(auditId), exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pages(auditId), exact: true });
+      if (progress.status === "failed" || progress.pages_scanned === 0) return;
+      // Só a primeira página: as de cursor já carregadas não são buscadas de novo.
+      queryClient.setQueriesData<InfiniteData<FindingsPage, string | null>>(
+        { queryKey: queryKeys.findingsAll(auditId) },
+        (data) =>
+          data && data.pages.length > 1
+            ? { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) }
+            : data,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.findingsAll(auditId), refetchType: "active" });
+    };
+
+    // Regra do feed: um snapshot (join ou GET) com mais páginas terminadas do que o feed
+    // conhece quer dizer que eventos se perderam; o feed é completado pela lista de páginas.
+    const rebuildFeed = () => {
+      if (rebuilding) return;
+      rebuilding = true;
+      queryClient
+        .fetchQuery({
+          queryKey: queryKeys.pages(auditId),
+          queryFn: ({ signal }) => listPages(auditId, { signal }),
+          staleTime: 0,
+        })
+        .then((list) => commit({ ...stateRef.current, pages: mergePages(stateRef.current.pages, list.data) }))
+        .catch(() => undefined) // o próximo snapshot tenta de novo
+        .finally(() => {
+          rebuilding = false;
+        });
     };
 
     const flush = () => {
       flushTimer = null;
       const batch = buffer;
       buffer = [];
-      commit(applyBatch(stateRef.current, batch));
+      const previous = stateRef.current;
+      const next = applyBatch(previous, batch);
+      commit(next);
+      if (next.progress === null || next.revision === null) return;
+
+      const advanced = next.revision !== previous.revision;
+      const fromGet = batch.some((item) => item.source === "get" && item.revision === next.revision);
+      if (advanced && !fromGet) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.audit(auditId), exact: true, refetchType: "none" });
+      }
+      if (next.announcement !== null && previous.announcement === null) refreshAfterEnd(next.progress, fromGet);
+
+      const snapshotInBatch = batch.some((item) => item.source !== "event");
+      if (snapshotInBatch && finishedPages(next.progress) > next.pages.length) rebuildFeed();
     };
 
     const scheduleSilenceCheck = () => {
@@ -237,9 +325,9 @@ export function useAuditChannel(auditId: string): AuditChannelState {
     };
 
     const receive = (incoming: Incoming | null) => {
-      if (!active) return;
+      // Payload descartado não conta como evento: não adia o GET de silêncio.
+      if (!active || incoming === null) return;
       scheduleSilenceCheck();
-      if (incoming === null) return;
       buffer.push(incoming);
       // Sem nada na tela ainda, o primeiro snapshot entra na hora; o resto espera o lote.
       if (stateRef.current.progress === null) {
@@ -273,7 +361,12 @@ export function useAuditChannel(auditId: string): AuditChannelState {
         });
     }
 
-    const channel = getSocket().channel(`audit:${auditId}`, {});
+    const channel = getSocket().channel(auditTopic(auditId), {});
+    const leave = () => {
+      if (left) return;
+      left = true;
+      channel.leave();
+    };
     for (const event of CHANNEL_EVENTS) {
       channel.on(event, (payload) => receive(toIncoming(event, payload)));
     }
@@ -290,7 +383,7 @@ export function useAuditChannel(auditId: string): AuditChannelState {
       .receive("error", (response) => {
         if (!active) return;
         // Auditoria inexistente ou limite de canais: tentar de novo não muda a resposta.
-        channel.leave();
+        leave();
         commit({ ...stateRef.current, error: joinError(response) });
         if (silenceTimer !== null) clearTimeout(silenceTimer);
       })
@@ -303,7 +396,7 @@ export function useAuditChannel(auditId: string): AuditChannelState {
       active = false;
       if (flushTimer !== null) clearTimeout(flushTimer);
       if (silenceTimer !== null) clearTimeout(silenceTimer);
-      channel.leave();
+      leave();
     };
   }, [auditId, getSocket, queryClient]);
 

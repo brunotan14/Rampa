@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { RouterProvider, createMemoryRouter } from "react-router";
 import axe from "axe-core";
 import { routes } from "../src/routes";
@@ -18,17 +18,15 @@ export function withQueryClient(client = testQueryClient()) {
   };
 }
 
-export function renderRoute(path = "/") {
+export function renderRoute(path = "/", { strict = false } = {}) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const Wrapper = withQueryClient();
-  return {
-    router,
-    ...render(
-      <Wrapper>
-        <RouterProvider router={router} />
-      </Wrapper>,
-    ),
-  };
+  const ui = (
+    <Wrapper>
+      <RouterProvider router={router} />
+    </Wrapper>
+  );
+  return { router, ...render(strict ? <StrictMode>{ui}</StrictMode> : ui) };
 }
 
 // Contraste não é calculado no jsdom; ele é coberto pelo E2E num navegador real.

@@ -64,6 +64,8 @@
 [data-theme="escuro"] .rp-logo__ramp { fill: var(--cerrado-700); }
 [data-theme="contraste"] .rp-logo__ramp { fill: var(--on-action); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--cerrado-700); } }
+/* Alto contraste do sistema (como o tokens.css): a rampa vira `on-action`, igual ao tema "contraste". */
+@media (prefers-contrast: more) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--on-action); } }
 
 /* --- Button ---------------------------------------------------------------------------- */
 .rp-btn {

@@ -18,6 +18,7 @@ export class FakeChannel implements ChannelLike {
   readonly handlers = new Map<string, (payload?: unknown) => void>();
   private errorHandlers: ((reason?: unknown) => void)[] = [];
   joins = 0;
+  leaves = 0;
   left = false;
 
   constructor(readonly topic: string, readonly params?: object) {}
@@ -28,6 +29,7 @@ export class FakeChannel implements ChannelLike {
   }
   leave() {
     this.left = true;
+    this.leaves += 1;
     return new FakePush();
   }
   on(event: string, callback: (payload?: unknown) => void) {

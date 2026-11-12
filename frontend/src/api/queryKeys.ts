@@ -7,6 +7,8 @@ export const queryKeys = {
   audit: (auditId: string) => ["audits", auditId] as const,
   pages: (auditId: string) => ["audits", auditId, "pages"] as const,
   page: (auditId: string, pageId: string) => ["audits", auditId, "pages", pageId] as const,
+  /** Prefixo de todas as listas de achados da auditoria, com qualquer filtro. */
+  findingsAll: (auditId: string) => ["audits", auditId, "findings"] as const,
   findings: (auditId: string, filters: FindingsFilters = {}) => ["audits", auditId, "findings", filters] as const,
   finding: (auditId: string, findingId: string) => ["audits", auditId, "finding", findingId] as const,
 };

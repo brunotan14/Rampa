@@ -4,9 +4,17 @@ import type { ReactNode } from "react";
 import { FakeSocket } from "../../test/fakeSocket";
 import { AUDIT_ID, PAGE_ID, auditSummary, progress } from "../../test/fixtures";
 import { jsonResponse, testQueryClient } from "../../test/render";
-import { AuditSocketProvider, BATCH_MS, SILENCE_MS, useAuditChannel, type AuditChannelState } from "./channel";
+import {
+  AuditSocketProvider,
+  BATCH_MS,
+  SILENCE_MS,
+  auditTopic,
+  useAuditChannel,
+  type AuditChannelState,
+} from "./channel";
 import { queryKeys } from "./queryKeys";
-import type { AuditSummary } from "./types";
+import { useAudit, useFindings, usePages } from "./hooks";
+import type { AuditSummary, PageSummary } from "./types";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -41,6 +49,34 @@ function setup(auditId = AUDIT_ID) {
 }
 
 const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+const requested = () => fetchMock.mock.calls.map(([url]) => String(url));
+const auditGets = () => requested().filter((url) => url === `/api/audits/${AUDIT_ID}`).length;
+
+const pageSummary = (id: string, status: PageSummary["status"] = "done"): PageSummary => ({
+  id,
+  url: `https://exemplo.com.br/${id}`,
+  final_url: null,
+  title: null,
+  status,
+  http_status: 200,
+  error: status === "failed" ? { code: "timeout", message: "A página demorou demais." } : null,
+  scanned_at: null,
+  counts_by_severity: { critical: 0, serious: 1, moderate: 0, minor: 0 },
+  needs_review_count: 0,
+  passed_count: null,
+});
+
+/** `fetch` falso que responde por endereço. */
+function routes(table: Record<string, () => unknown>) {
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    const path = url.split("?")[0]!;
+    const handler = table[path];
+    if (!handler) throw new Error(`sem resposta para ${url}`);
+    return jsonResponse(handler());
+  });
+}
 
 const scanned = (revision: number, over = {}) => ({
   revision,
@@ -179,15 +215,14 @@ describe("useAuditChannel", () => {
     await advance(SILENCE_MS - 1);
     expect(fetchMock).not.toHaveBeenCalled();
     await advance(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]![0])).toBe(`/api/audits/${AUDIT_ID}`);
+    expect(auditGets()).toBe(1);
     await advance(BATCH_MS);
     expect(result.current.revision).toBe(3);
     expect(result.current.progress?.pages_scanned).toBe(1);
 
     // Continua em silêncio: busca de novo a cada 30 s.
     await advance(SILENCE_MS);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(auditGets()).toBe(2);
   });
 
   it("cada evento recomeça a contagem dos 30 s", async () => {
@@ -207,7 +242,7 @@ describe("useAuditChannel", () => {
     const { result, channel } = setup();
     act(() => channel().reply({ revision: 4, progress: progress({ pages_scanned: 4 }) }));
     await advance(SILENCE_MS + BATCH_MS);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(auditGets()).toBe(1);
     expect(result.current.revision).toBe(4);
     expect(result.current.progress?.pages_scanned).toBe(4);
   });
@@ -257,19 +292,157 @@ describe("useAuditChannel", () => {
     expect(result.current.error).toMatchObject({ code: "audit_not_found" });
   });
 
-  it("mantém o resumo em cache atualizado e o invalida na conclusão", async () => {
+  it("não mistura o progress do canal no resumo em cache: só o marca como velho, sem buscar", async () => {
     const { client, channel } = setup();
-    client.setQueryData<AuditSummary>(queryKeys.audit(AUDIT_ID), auditSummary({ revision: 1 }));
-    act(() => channel().reply({ revision: 1, progress: progress() }));
-    act(() => channel().push("page_scanned", scanned(2, { pages_scanned: 1 })));
+    const cachedBefore = auditSummary({ revision: 1, needs_review_count: 1, needs_review_by_severity: { critical: 0, serious: 1, moderate: 0, minor: 0 } });
+    client.setQueryData<AuditSummary>(queryKeys.audit(AUDIT_ID), cachedBefore);
+    act(() => channel().reply({ revision: 1, progress: progress({ needs_review_count: 1 }) }));
+    act(() => channel().push("page_scanned", scanned(2, { pages_scanned: 1, needs_review_count: 4 })));
     await advance(BATCH_MS);
-    const cached = client.getQueryData<AuditSummary>(queryKeys.audit(AUDIT_ID));
-    expect(cached).toMatchObject({ revision: 2, pages_scanned: 1, start_url: "https://exemplo.com.br/" });
-    expect(client.getQueryState(queryKeys.audit(AUDIT_ID))?.isInvalidated).toBe(false);
 
-    act(() => channel().push("audit_completed", { revision: 3, progress: progress({ status: "completed" }), score: null }));
-    await advance(BATCH_MS);
+    const cached = client.getQueryData<AuditSummary>(queryKeys.audit(AUDIT_ID))!;
+    expect(cached).toEqual(cachedBefore);
+    const byseverity = Object.values(cached.needs_review_by_severity).reduce((a, b) => a + b, 0);
+    expect(cached.needs_review_count).toBe(byseverity);
     expect(client.getQueryState(queryKeys.audit(AUDIT_ID))?.isInvalidated).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("um resumo observado (useAudit) também não é buscado a cada evento", async () => {
+    routes({ [`/api/audits/${AUDIT_ID}`]: () => auditSummary({ revision: 1 }) });
+    const socket = new FakeSocket();
+    const client = testQueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <AuditSocketProvider socket={socket}>{children}</AuditSocketProvider>
+      </QueryClientProvider>
+    );
+    renderHook(() => [useAudit(AUDIT_ID), useAuditChannel(AUDIT_ID)], { wrapper });
+    await advance(0);
+    expect(auditGets()).toBe(1);
+    act(() => socket.last.reply({ revision: 1, progress: progress() }));
+    for (let revision = 2; revision < 6; revision++) {
+      act(() => socket.last.push("status_changed", { revision, progress: progress(), status: "running" }));
+      await advance(BATCH_MS);
+    }
+    expect(auditGets()).toBe(1);
+  });
+
+  it("feed depois da reconexão: 3 páginas terminam durante a queda e o feed fica com 5", async () => {
+    const pages = ["p1", "p2", "p3", "p4", "p5"];
+    routes({ [`/api/audits/${AUDIT_ID}/pages`]: () => ({ data: pages.map((id) => pageSummary(id)) }) });
+    const { result, channel } = setup();
+    act(() => channel().reply({ revision: 1, progress: progress({ pages_found: 5 }) }));
+    act(() => {
+      channel().push("page_scanned", { ...scanned(2, { pages_found: 5, pages_scanned: 1 }), page_id: "p2" });
+      channel().push("page_scanned", { ...scanned(3, { pages_found: 5, pages_scanned: 2 }), page_id: "p1" });
+    });
+    await advance(BATCH_MS);
+    expect(result.current.pages.map((p) => p.pageId)).toEqual(["p2", "p1"]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    act(() => channel().drop());
+    act(() => channel().reply({ revision: 9, progress: progress({ pages_found: 5, pages_scanned: 5 }) }));
+    await advance(BATCH_MS);
+    expect(requested()).toEqual([`/api/audits/${AUDIT_ID}/pages`]);
+    expect(result.current.progress?.pages_scanned).toBe(5);
+    expect(result.current.pages.map((p) => p.pageId)).toEqual(["p2", "p1", "p3", "p4", "p5"]);
+  });
+
+  it("o GET de silêncio também completa o feed, com as páginas que falharam", async () => {
+    routes({
+      [`/api/audits/${AUDIT_ID}`]: () => auditSummary({ revision: 4, pages_found: 2, pages_scanned: 1, pages_failed: 1 }),
+      [`/api/audits/${AUDIT_ID}/pages`]: () => ({ data: [pageSummary("p1"), pageSummary("p2", "failed")] }),
+    });
+    const { result, channel } = setup();
+    act(() => channel().reply({ revision: 1, progress: progress({ pages_found: 2 }) }));
+    await advance(SILENCE_MS + BATCH_MS);
+    expect(result.current.pages).toEqual([
+      { pageId: "p1", kind: "scanned", counts: { critical: 0, serious: 1, moderate: 0, minor: 0 }, needsReviewCount: 0 },
+      { pageId: "p2", kind: "failed", error: { code: "timeout", message: "A página demorou demais." } },
+    ]);
+  });
+
+  describe("no fim da auditoria", () => {
+    function setupWithQueries() {
+      const socket = new FakeSocket();
+      const client = testQueryClient();
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          <AuditSocketProvider socket={socket}>{children}</AuditSocketProvider>
+        </QueryClientProvider>
+      );
+      const view = renderHook(
+        () => ({
+          audit: useAudit(AUDIT_ID),
+          pages: usePages(AUDIT_ID),
+          findings: useFindings(AUDIT_ID),
+          channel: useAuditChannel(AUDIT_ID),
+        }),
+        { wrapper },
+      );
+      return { socket, ...view };
+    }
+
+    function reportRoutes(summary: () => AuditSummary) {
+      fetchMock.mockImplementation(async (input) => {
+        const url = new URL(String(input), "http://x");
+        if (url.pathname === `/api/audits/${AUDIT_ID}`) return jsonResponse(summary());
+        if (url.pathname === `/api/audits/${AUDIT_ID}/pages`) return jsonResponse({ data: [] });
+        if (url.pathname === `/api/audits/${AUDIT_ID}/findings`) {
+          const cursor = url.searchParams.get("cursor");
+          return jsonResponse({ data: [], next_cursor: cursor ? null : "c1", total: cursor ? null : 2 });
+        }
+        throw new Error(`sem resposta para ${url}`);
+      });
+    }
+
+    it("busca uma vez o resumo, as páginas e só a primeira página dos achados", async () => {
+      reportRoutes(() => auditSummary({ revision: 1 }));
+      const { socket, result } = setupWithQueries();
+      await advance(10);
+      expect(result.current.findings.hasNextPage).toBe(true);
+      await act(async () => {
+        const next = result.current.findings.fetchNextPage();
+        await vi.advanceTimersByTimeAsync(10);
+        await next;
+      });
+      await advance(10);
+      expect(result.current.findings.data?.pages).toHaveLength(2);
+      act(() => socket.last.reply({ revision: 1, progress: progress() }));
+      fetchMock.mockClear();
+
+      act(() =>
+        socket.last.push("audit_completed", {
+          revision: 2,
+          progress: progress({ status: "completed", pages_scanned: 1 }),
+          score: null,
+        }),
+      );
+      await advance(BATCH_MS);
+      await advance(0);
+      expect(requested().sort()).toEqual(
+        [`/api/audits/${AUDIT_ID}`, `/api/audits/${AUDIT_ID}/pages`, `/api/audits/${AUDIT_ID}/findings`].sort(),
+      );
+      expect(result.current.findings.data?.pages).toHaveLength(1);
+    });
+
+    it("se o GET de silêncio trouxe o fim, não busca o resumo de novo; sem página analisada, nem os achados", async () => {
+      let summary = auditSummary({ revision: 1 });
+      reportRoutes(() => summary);
+      const { socket } = setupWithQueries();
+      await advance(0);
+      act(() => socket.last.reply({ revision: 1, progress: progress() }));
+      fetchMock.mockClear();
+
+      summary = auditSummary({ revision: 3, status: "failed", pages_failed: 1, error: { code: "timeout", message: "Demorou." } });
+      await advance(SILENCE_MS);
+      await advance(BATCH_MS);
+      await advance(0);
+      expect(auditGets()).toBe(1);
+      expect(requested().filter((u) => u.includes("/pages")).length).toBeGreaterThanOrEqual(1);
+      expect(requested().filter((u) => u.includes("/findings"))).toEqual([]);
+    });
   });
 
   it("ignora payload sem revision ou progress", async () => {
@@ -282,6 +455,30 @@ describe("useAuditChannel", () => {
     await advance(BATCH_MS);
     expect(result.current.revision).toBe(1);
     expect(result.current.pages).toEqual([]);
+  });
+
+  it("payload descartado não adia o GET de silêncio", async () => {
+    routes({ [`/api/audits/${AUDIT_ID}`]: () => auditSummary() });
+    const { channel } = setup();
+    act(() => channel().reply({ revision: 1, progress: progress() }));
+    await advance(20_000);
+    act(() => {
+      channel().push("page_scanned", { page_id: PAGE_ID });
+      channel().push("status_changed", null);
+    });
+    await advance(10_000);
+    expect(auditGets()).toBe(1);
+  });
+
+  it("depois de um join recusado, a limpeza não sai do canal de novo", () => {
+    const { channel, unmount } = setup();
+    act(() => channel().refuse({ error: { code: "channel_limit_reached", message: "Limite." } }));
+    unmount();
+    expect(channel().leaves).toBe(1);
+  });
+
+  it("o tópico sai do contrato (x-topic)", () => {
+    expect(auditTopic(AUDIT_ID)).toBe(`audit:${AUDIT_ID}`);
   });
 
   it("ao desmontar sai do canal e para os timers", async () => {

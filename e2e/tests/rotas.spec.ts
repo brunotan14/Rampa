@@ -88,3 +88,35 @@ test("o foco do teclado tem anel visível nos links da tela", async ({ page }) =
     expect(outline.width).toBeGreaterThanOrEqual(2);
   }
 });
+
+test.describe("logo no alto contraste do sistema", () => {
+  async function fills(page: Page) {
+    return page.evaluate(() => {
+      const fill = (selector: string) => getComputedStyle(document.querySelector(selector)!).fill;
+      return { ramp: fill(".rp-header .rp-logo__ramp"), fg: fill(".rp-header .rp-logo__fg") };
+    });
+  }
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`com contraste mais alto (${colorScheme}), a rampa usa on-action, como o tema contraste`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme, contrast: "more" });
+      await page.goto("/");
+      const { ramp, fg } = await fills(page);
+      expect(ramp).toBe(fg);
+    });
+  }
+
+  test("sem preferência de contraste, a rampa mantém a cor do cerrado", async ({ page }) => {
+    await page.emulateMedia({ contrast: "no-preference" });
+    await page.goto("/");
+    const { ramp, fg } = await fills(page);
+    expect(ramp).not.toBe(fg);
+  });
+
+  test("com forced-colors, o logo continua com nome e o axe não aponta nada", async ({ page }) => {
+    await page.emulateMedia({ forcedColors: "active" });
+    await page.goto("/");
+    await expect(page.getByRole("img", { name: "Rampa, página inicial" })).toBeVisible();
+    expect(await axeViolations(page)).toEqual([]);
+  });
+});

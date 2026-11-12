@@ -4,6 +4,7 @@
 // `unexpected_response`. O 429 traz `retryAfter` (de `error.retry_after` ou do cabeçalho
 // `Retry-After`).
 import { errorMessage } from "../i18n";
+import { isRecord } from "./json";
 import type { operations } from "./schema.gen";
 import type { CreateAuditRequest, FindingsFilters, KnownErrorCode } from "./types";
 
@@ -49,10 +50,6 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return undefined;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseRetryAfter(body: Record<string, unknown> | undefined, header: string | null): Date | null {

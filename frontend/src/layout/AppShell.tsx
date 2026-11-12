@@ -11,14 +11,15 @@ import { t } from "../i18n";
 export function AppShell() {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
-  const firstRender = useRef(true);
+  // Caminho da última tela que já recebeu o foco (ou da primeira carga). Guardado na
+  // renderização inicial, não no efeito: a dupla execução do efeito no StrictMode vê o mesmo
+  // caminho e não move o foco na primeira carga.
+  const focusedPath = useRef(pathname);
 
   // Na primeira carga o foco fica onde o navegador o põe (o leitor de tela começa do topo).
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
+    if (focusedPath.current === pathname) return;
+    focusedPath.current = pathname;
     mainRef.current?.querySelector<HTMLElement>("h1")?.focus();
   }, [pathname]);
 

@@ -58,6 +58,13 @@ describe("AppShell", () => {
     expect(document.body).toHaveFocus();
   });
 
+  it("no StrictMode (efeito executado duas vezes) também não move o foco na primeira carga", async () => {
+    const { router } = renderRoute(AUDIT, { strict: true });
+    expect(document.body).toHaveFocus();
+    await act(() => router.navigate("/"));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveFocus());
+  });
+
   it("não tem violações do axe", async () => {
     const { container } = renderRoute("/");
     expect(await axeViolations(container)).toEqual([]);

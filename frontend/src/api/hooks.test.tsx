@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { AUDIT_ID, PAGE_ID, auditSummary } from "../../test/fixtures";
 import { jsonResponse, testQueryClient, withQueryClient } from "../../test/render";
-import { useAudit, useCreateAudit, useFinding, useFindings, usePage, usePages } from "./hooks";
+import { idempotencyScope, useAudit, useCreateAudit, useFinding, useFindings, usePage, usePages } from "./hooks";
 import { queryKeys } from "./queryKeys";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -84,6 +84,47 @@ describe("hooks da API", () => {
     expect(keyOf(1)).toBe(keyOf(0));
     expect(keyOf(2)).not.toBe(keyOf(1));
     expect(keyOf(3)).not.toBe(keyOf(2));
+  });
+
+  it("useCreateAudit: mesma URL com page_limit diferente é outro pedido, com outra chave", async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ error: { code: "internal_error", message: "x" } }, { status: 500 }),
+    );
+    const { result } = renderHook(() => useCreateAudit(), { wrapper: withQueryClient() });
+    const send = (input: { url: string; page_limit?: number }) =>
+      act(async () => {
+        await result.current.mutateAsync(input).catch(() => undefined);
+      });
+    await send({ url: "exemplo.com.br", page_limit: 5 });
+    await send({ url: "  https://exemplo.com.br/#topo ", page_limit: 5 });
+    await send({ url: "exemplo.com.br", page_limit: 10 });
+    expect(keyOf(1)).toBe(keyOf(0));
+    expect(keyOf(2)).not.toBe(keyOf(1));
+  });
+
+  it("useCreateAudit descarta a chave num erro definitivo (4xx), mas não no 429", async () => {
+    const replies = [
+      jsonResponse({ error: { code: "rate_limited", message: "x", retry_after: "2026-11-12T17:32:00Z" } }, { status: 429 }),
+      jsonResponse({ error: { code: "blocked_address", message: "x" } }, { status: 422 }),
+      jsonResponse({ id: AUDIT_ID }, { status: 202 }),
+    ];
+    fetchMock.mockImplementation(async () => replies.shift()!);
+    const { result } = renderHook(() => useCreateAudit(), { wrapper: withQueryClient() });
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await result.current.mutateAsync({ url: "exemplo.com.br" }).catch(() => undefined);
+      });
+    }
+    expect(keyOf(1)).toBe(keyOf(0)); // depois do 429, a mesma
+    expect(keyOf(2)).not.toBe(keyOf(1)); // depois do 422, nova
+  });
+
+  it("a chave considera a URL normalizada no cliente e o page_limit", () => {
+    expect(idempotencyScope({ url: " Exemplo.com.br#x" })).toBe(idempotencyScope({ url: "https://exemplo.com.br/" }));
+    expect(idempotencyScope({ url: "exemplo.com.br", page_limit: 1 })).not.toBe(
+      idempotencyScope({ url: "exemplo.com.br", page_limit: 2 }),
+    );
+    expect(idempotencyScope({ url: "http://exemplo.com.br" })).not.toBe(idempotencyScope({ url: "exemplo.com.br" }));
   });
 
   it("useCreateAudit repete sozinho uma queda de rede, com a mesma chave", async () => {
