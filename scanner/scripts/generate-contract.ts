@@ -54,12 +54,17 @@ const limits = {
   shadowLevels: "/definitions/AxeTarget/items/anyOf/1/maxItems",
   selector: "/definitions/AxeSelector/maxLength",
   detail: "/definitions/ScanError/properties/detail/maxLength",
+  passTags: "/definitions/AxePass/properties/tags/maxItems",
+  passHelp: "/definitions/AxePass/properties/help/maxLength",
 } as const;
 
 // Os limites com o mesmo nome no código precisam ser iguais no schema.
 const sameAs: [string, keyof typeof limits][] = [
   ["/definitions/AxeFacts/properties/incomplete/maxItems", "rules"],
   ["/definitions/AxeRule/properties/help/maxLength", "ruleText"],
+  ["/definitions/AxeFacts/properties/passes/maxItems", "rules"],
+  ["/definitions/AxePass/properties/id/maxLength", "ruleId"],
+  ["/definitions/AxePass/properties/tags/items/maxLength", "tag"],
 ];
 for (const [pointer, name] of sameAs) {
   if (integerAt(pointer) !== integerAt(limits[name])) throw new Error(`${pointer} difere de ${limits[name]}`);

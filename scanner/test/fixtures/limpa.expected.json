@@ -3,5 +3,7 @@
   "http_status": 200,
   "blocked_requests": 0,
   "violations": [],
-  "incomplete": []
+  "incomplete": [],
+  "passes_include": ["image-alt", "document-title", "html-has-lang"],
+  "passes_exclude": []
 }

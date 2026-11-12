@@ -1,6 +1,10 @@
 defmodule RampaWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :rampa
 
+  # Cabeçalhos de `/api/*` também nas respostas de erro do `render_errors`: envolve o
+  # `call/2` do endpoint (ver `RampaWeb.Plugs.ApiHeaders`).
+  @before_compile RampaWeb.Plugs.ApiHeaders
+
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.

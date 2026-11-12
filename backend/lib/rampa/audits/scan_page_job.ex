@@ -21,7 +21,8 @@ defmodule Rampa.Audits.ScanPageJob do
       `invalid_url`, `resource_limit`, `http_error`, `invalid_request` e
       `invalid_scan_result` fecham a tarefa `failed` na hora. `invalid_scan_result` é uma
       resposta 200 com a versão certa do contrato, mas fora do schema, ou um achado que o
-      changeset recusa na gravação (os dados do scanner): o mesmo scanner devolveria o
+      changeset recusa na gravação, ou a lista de regras aprovadas acima do limite do banco (os
+      dados do scanner): o mesmo scanner devolveria o
       mesmo resultado;
     * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
       erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner,
@@ -183,6 +184,9 @@ defmodule Rampa.Audits.ScanPageJob do
 
       {:error, {:invalid_finding, changeset}} ->
         {:error, :invalid_scan_result, "achado recusado: #{inspect(changeset.errors)}"}
+
+      {:error, {:invalid_passed_rules, changeset}} ->
+        {:error, :invalid_scan_result, "regras aprovadas recusadas: #{inspect(changeset.errors)}"}
 
       {:error, reason} ->
         {:error, :internal_error, "gravação do resultado falhou: #{inspect(reason)}"}

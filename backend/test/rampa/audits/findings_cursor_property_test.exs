@@ -2,6 +2,7 @@ defmodule Rampa.Audits.FindingsCursorPropertyTest do
   use Rampa.DataCase, async: true
   use ExUnitProperties
 
+  import Ecto.Query
   import Rampa.AuditsFixtures
 
   alias Rampa.Audits
@@ -40,14 +41,26 @@ defmodule Rampa.Audits.FindingsCursorPropertyTest do
     end
   end
 
-  defp page_through(audit_id, limit, cursor \\ nil, acc \\ []) do
-    params = %{"limit" => Integer.to_string(limit)}
+  defp page_through(audit_id, limit, sort \\ "recorded", cursor \\ nil, acc \\ []) do
+    params = %{"limit" => Integer.to_string(limit), "sort" => sort}
     params = if cursor, do: Map.put(params, "cursor", cursor), else: params
 
     assert {:ok, %{data: data, next_cursor: next}} = Audits.list_findings(audit_id, params)
     acc = acc ++ Enum.map(data, & &1.id)
 
-    if next, do: page_through(audit_id, limit, next, acc), else: acc
+    if next, do: page_through(audit_id, limit, sort, next, acc), else: acc
+  end
+
+  @severities ~w(critical serious moderate minor)a
+
+  # Poucos valores de severidade, regra e instante, para haver empate em cada nível da chave.
+  defp severity_spec do
+    SD.list_of(
+      SD.tuple(
+        {SD.member_of(@severities), SD.member_of(["a", "b", "a:b", "ç😀"]), SD.integer(0..2)}
+      ),
+      max_length: 8
+    )
   end
 
   property "ida e volta do cursor: as páginas juntas dão todos os achados, na ordem, sem repetir" do
@@ -65,6 +78,35 @@ defmodule Rampa.Audits.FindingsCursorPropertyTest do
         |> Enum.map(&elem(&1, 0))
 
       assert page_through(page.audit_id, limit) == expected
+    end
+  end
+
+  # Ordem `sort=severity` com o cursor por âncora: a chave
+  # `(severity_rank, rule_id, inserted_at, id)` vem do banco.
+  property "sort=severity: as páginas juntas dão todos os achados, na ordem, sem repetir" do
+    check all spec <- severity_spec(), limit <- SD.integer(1..4), max_runs: 40 do
+      page = page_fixture(%{status: :done})
+
+      findings =
+        for {severity, rule_id, offset} <- spec do
+          finding_fixture(page, %{
+            severity: severity,
+            rule_id: rule_id,
+            inserted_at: DateTime.add(@base, offset, :microsecond)
+          })
+        end
+
+      # A mesma ordem, calculada pelo próprio banco (a colação do `rule_id` é a dele).
+      expected =
+        Repo.all(
+          from f in Rampa.Audits.Finding,
+            where: f.audit_id == ^page.audit_id,
+            order_by: [asc: f.severity_rank, asc: f.rule_id, asc: f.inserted_at, asc: f.id],
+            select: f.id
+        )
+
+      assert length(expected) == length(findings)
+      assert page_through(page.audit_id, limit, "severity") == expected
     end
   end
 
@@ -86,6 +128,18 @@ defmodule Rampa.Audits.FindingsCursorPropertyTest do
 
       check all cursor <- cursor, max_runs: 150 do
         assert Audits.list_findings(audit_id, %{"cursor" => cursor}) ==
+                 {:error, :invalid_cursor}
+      end
+    end
+
+    property "sort=severity: âncora adulterada é cursor inválido, sem exceção",
+             %{audit_id: audit_id} do
+      check all id <- cursor_id(),
+                prefix <- SD.member_of(["severity:", "severity", "SEVERITY:", "", "1:"]),
+                max_runs: 150 do
+        cursor = Base.url_encode64(prefix <> id, padding: false)
+
+        assert Audits.list_findings(audit_id, %{"sort" => "severity", "cursor" => cursor}) ==
                  {:error, :invalid_cursor}
       end
     end

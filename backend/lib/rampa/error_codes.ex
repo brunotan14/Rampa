@@ -53,12 +53,16 @@ defmodule Rampa.ErrorCodes do
       dns_error: 503
     ],
     get_audit: [audit_not_found: 404],
+    list_pages: [audit_not_found: 404],
+    get_page: [audit_not_found: 404, page_not_found: 404],
     list_findings: [
       audit_not_found: 404,
       invalid_filter: 422,
+      invalid_sort: 422,
       invalid_limit: 422,
       invalid_cursor: 422
-    ]
+    ],
+    get_finding: [audit_not_found: 404, finding_not_found: 404]
   }
 
   # Recusas do join no canal `audit:<id>` (RF-RA004). Sem status HTTP: voltam na resposta do
@@ -79,7 +83,8 @@ defmodule Rampa.ErrorCodes do
 
   @statuses @api |> Map.values() |> List.flatten() |> Kernel.++(@http) |> Map.new()
 
-  @type operation :: :create_audit | :get_audit | :list_findings
+  @type operation ::
+          :create_audit | :get_audit | :list_pages | :get_page | :list_findings | :get_finding
 
   @doc "Códigos de erro do contrato do scanner."
   @spec scanner() :: [atom()]

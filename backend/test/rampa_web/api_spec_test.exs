@@ -36,14 +36,16 @@ defmodule RampaWeb.ApiSpecTest do
   defp create(conn, body), do: post(conn, ~p"/api/audits", body)
 
   describe "a especificação" do
-    test "é servida em /api/openapi.json com as quatro rotas", %{conn: conn} do
+    test "é servida em /api/openapi.json com as sete rotas", %{conn: conn} do
       spec = conn |> get("/api/openapi.json") |> json_response(200)
 
       assert spec["openapi"] =~ ~r/^3\./
       assert spec["info"]["title"] == "Rampa"
 
       assert Map.keys(spec["paths"]) |> Enum.sort() ==
-               ~w(/api/audits /api/audits/{audit_id}/findings /api/audits/{id} /api/health)
+               ~w(/api/audits /api/audits/{audit_id}/findings /api/audits/{audit_id}/findings/{id}
+                  /api/audits/{audit_id}/pages /api/audits/{audit_id}/pages/{id}
+                  /api/audits/{id} /api/health)
     end
 
     test "documenta o Idempotency-Key, o Retry-After do 429 e o cursor", %{spec: spec} do
@@ -63,7 +65,10 @@ defmodule RampaWeb.ApiSpecTest do
       operations = %{
         create_audit: spec.paths["/api/audits"].post,
         get_audit: spec.paths["/api/audits/{id}"].get,
-        list_findings: spec.paths["/api/audits/{audit_id}/findings"].get
+        list_pages: spec.paths["/api/audits/{audit_id}/pages"].get,
+        get_page: spec.paths["/api/audits/{audit_id}/pages/{id}"].get,
+        list_findings: spec.paths["/api/audits/{audit_id}/findings"].get,
+        get_finding: spec.paths["/api/audits/{audit_id}/findings/{id}"].get
       }
 
       assert Enum.sort(Map.keys(operations)) == Enum.sort(ErrorCodes.operations())
@@ -241,10 +246,116 @@ defmodule RampaWeb.ApiSpecTest do
       assert not_found.status == 404
       assert_operation_response(not_found, "listFindings")
 
-      for query <- ["severity=x", "limit=500", "cursor=x"] do
+      for query <- [
+            "severity=x",
+            "page_id=x",
+            "wcag=9.9",
+            "sort=x",
+            "limit=500",
+            "cursor=x",
+            "sort=severity&cursor=x"
+          ] do
         invalid = build_conn() |> get("/api/audits/#{page.audit_id}/findings?#{query}")
         assert invalid.status == 422
         assert_operation_response(invalid, "listFindings")
+      end
+    end
+  end
+
+  describe "GET /api/audits/:audit_id/pages e /pages/:id" do
+    test "200 com página feita, com falha e sem regras coletadas; 404", %{conn: conn} do
+      audit = audit_fixture()
+
+      done =
+        page_fixture(%{
+          audit: audit,
+          status: :done,
+          title: "Início",
+          passed_rules: [
+            %{
+              "rule_id" => "image-alt",
+              "wcag_criteria" => ["1.1.1"],
+              "help" => "Images must have alternative text",
+              "nodes_total" => 1
+            }
+          ]
+        })
+
+      failed = page_fixture(%{audit: audit, url: "https://exemplo.com/b", status: :failed})
+      finding_fixture(done)
+
+      conn
+      |> get(~p"/api/audits/#{audit.id}/pages")
+      |> assert_operation_response("listPages")
+
+      for page <- [done, failed] do
+        build_conn()
+        |> get(~p"/api/audits/#{audit.id}/pages/#{page.id}")
+        |> assert_operation_response("getPage")
+      end
+
+      not_found = build_conn() |> get(~p"/api/audits/#{Ecto.UUID.generate()}/pages")
+      assert not_found.status == 404
+      assert_operation_response(not_found, "listPages")
+
+      for path <- [
+            ~p"/api/audits/#{audit.id}/pages/#{Ecto.UUID.generate()}",
+            ~p"/api/audits/#{Ecto.UUID.generate()}/pages/#{done.id}"
+          ] do
+        missing = build_conn() |> get(path)
+        assert missing.status == 404
+        assert_operation_response(missing, "getPage")
+      end
+    end
+  end
+
+  describe "GET /api/audits/:audit_id/findings/:id" do
+    test "200 do axe e de IA; 404", %{conn: conn} do
+      page = page_fixture(%{status: :done})
+
+      axe =
+        finding_fixture(page, %{
+          raw: %{
+            "help" => "Images must have alternative text",
+            "helpUrl" => "https://dequeuniversity.com/rules/axe/4.14/image-alt",
+            "nodes_total" => 3
+          }
+        })
+
+      ai =
+        finding_fixture(page, %{
+          source: :ai,
+          needs_review: true,
+          confidence: 0.8,
+          ai_model: "claude-sonnet-5-5",
+          prompt_version: "alt-v1",
+          ai_reason: "Motivo",
+          ai_suggestion: "Sugestão",
+          raw: nil
+        })
+
+      other =
+        page_fixture(%{
+          audit: Repo.get!(Rampa.Audits.Audit, page.audit_id),
+          url: "https://exemplo.com/2",
+          status: :done
+        })
+
+      finding_fixture(other)
+
+      for finding <- [axe, ai] do
+        conn
+        |> get(~p"/api/audits/#{page.audit_id}/findings/#{finding.id}")
+        |> assert_operation_response("getFinding")
+      end
+
+      for path <- [
+            ~p"/api/audits/#{page.audit_id}/findings/#{Ecto.UUID.generate()}",
+            ~p"/api/audits/#{Ecto.UUID.generate()}/findings/#{axe.id}"
+          ] do
+        missing = build_conn() |> get(path)
+        assert missing.status == 404
+        assert_operation_response(missing, "getFinding")
       end
     end
   end

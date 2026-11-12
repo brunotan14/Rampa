@@ -13,7 +13,10 @@ defmodule RampaWeb.Router do
 
     post "/audits", AuditController, :create
     get "/audits/:id", AuditController, :show
+    get "/audits/:audit_id/pages", PageController, :index
+    get "/audits/:audit_id/pages/:id", PageController, :show
     get "/audits/:audit_id/findings", FindingController, :index
+    get "/audits/:audit_id/findings/:id", FindingController, :show
   end
 
   # Especificação OpenAPI (`RampaWeb.ApiSpec`), em todos os ambientes.

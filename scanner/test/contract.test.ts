@@ -123,6 +123,49 @@ describe("cortes", () => {
     expect(axe.violations[0]?.nodes_total).toBe(45);
     expect(axe.incomplete[0]?.nodes_total).toBe(45);
   });
+
+  it("passes é opcional: sem ele a resposta continua válida e sem o campo", () => {
+    const body = okResponse() as { axe: Record<string, unknown> };
+    expect(body.axe).not.toHaveProperty("passes");
+    expect(validators.response(body)).toBe(true);
+  });
+
+  it("regras aprovadas saem nos limites próprios de AxePass", () => {
+    const hostile = {
+      id: "r".repeat(CONTRACT_LIMITS.ruleId + 50),
+      tags: Array.from({ length: 100 }, (_, i) => `t${i}`.padEnd(CONTRACT_LIMITS.tag + 10, "x")),
+      help: "😀".repeat(CONTRACT_LIMITS.passHelp),
+      nodes_total: 7,
+    };
+    const body = scanResponse({
+      final_url: "https://exemplo.com/",
+      http_status: 200,
+      title: "",
+      axe: { version: "4.14.0", violations: [], incomplete: [], passes: Array(CONTRACT_LIMITS.rules + 20).fill(hostile) },
+      blocked_requests: 0,
+    });
+    const passes = body.axe.passes!;
+    expect(passes).toHaveLength(CONTRACT_LIMITS.rules);
+    expect(passes[0]!.id).toHaveLength(CONTRACT_LIMITS.ruleId);
+    expect(passes[0]!.tags).toHaveLength(CONTRACT_LIMITS.passTags);
+    expect(passes[0]!.tags[0]).toHaveLength(CONTRACT_LIMITS.tag);
+    // `maxLength` conta pontos de código: 512 emojis de 2 unidades UTF-16 viram 256.
+    expect([...passes[0]!.help]).toHaveLength(CONTRACT_LIMITS.passHelp / 2);
+    assertValid(validators.response, body, "resposta com passes no limite");
+  });
+
+  it("o schema recusa regra aprovada com nós ou acima dos limites", () => {
+    const body = okResponse() as { axe: Record<string, unknown> };
+    const pass = { id: "image-alt", tags: ["wcag111"], help: "x", nodes_total: 1 };
+    body.axe.passes = [pass];
+    expect(validators.response(body)).toBe(true);
+    body.axe.passes = [{ ...pass, nodes: [] }];
+    expect(validators.response(body)).toBe(false);
+    body.axe.passes = [{ ...pass, help: "x".repeat(CONTRACT_LIMITS.passHelp + 1) }];
+    expect(validators.response(body)).toBe(false);
+    body.axe.passes = [{ ...pass, tags: Array(CONTRACT_LIMITS.passTags + 1).fill("t") }];
+    expect(validators.response(body)).toBe(false);
+  });
 });
 
 function okResponse(): Record<string, unknown> {

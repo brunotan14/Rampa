@@ -32,6 +32,12 @@ defmodule Rampa.Audits.AxeMapper do
       (contrato do scanner): a página pode ter mais ocorrências do que achados gravados.
 
   A versão do axe não vai no achado: fica em `pages.axe_version` (RNF-RA006).
+
+  `passed_rules/1` converte `axe.passes` (RF-RA017) nas regras aprovadas da página. Uma
+  regra que também está em `violations` ou `incomplete` (uns nós passaram, outros não; ou
+  todos os nós dela foram descartados pelo scanner por falta de `target`) **não** sai como
+  aprovada: mostrar "Aprovado" ao lado de uma falha da mesma regra seria afirmar mais do que
+  o axe provou.
   """
 
   alias Rampa.Audits.{Finding, PageData}
@@ -91,6 +97,81 @@ defmodule Rampa.Audits.AxeMapper do
       message: node["failureSummary"] || rule["help"],
       raw: Map.take(rule, ["id", "tags", "help", "helpUrl", "impact", "nodes_total"])
     }
+  end
+
+  @doc """
+  Regras aprovadas da página (`pages.passed_rules`, RF-RA017), a partir do mapa `axe` do
+  scanner: `%{"rule_id", "wcag_criteria", "help", "nodes_total"}`, na ordem do axe, sem
+  repetir `rule_id` e sem as regras que também aparecem em `violations` ou `incomplete`.
+  Sem o campo `passes` (scanner anterior ao RF-RA017), devolve `nil`: "não coletado", que a
+  interface distingue de "nenhuma aprovada" (`[]`).
+  """
+  @spec passed_rules(map()) :: [map()] | nil
+  def passed_rules(%{"passes" => passes} = axe) when is_list(passes) do
+    failed = MapSet.new(rule_ids(axe["violations"]) ++ rule_ids(axe["incomplete"]))
+
+    passes
+    |> Enum.filter(&(is_map(&1) and is_binary(&1["id"])))
+    |> Enum.reject(&MapSet.member?(failed, &1["id"]))
+    |> Enum.uniq_by(& &1["id"])
+    |> Enum.map(fn rule ->
+      %{
+        "rule_id" => rule["id"],
+        "wcag_criteria" => wcag_criteria(rule["tags"]),
+        "help" => rule["help"],
+        "nodes_total" => rule["nodes_total"]
+      }
+    end)
+  end
+
+  def passed_rules(_axe), do: nil
+
+  @doc """
+  Corta a lista de regras aprovadas para caber em `max_bytes` na coluna `pages.passed_rules`
+  (o check do banco mede `octet_length(passed_rules::text)`). Ordem estável: remove do fim
+  até caber. Se nem o primeiro item couber sozinho, devolve `nil` ("não coletado"). O tamanho é estimado por cima da representação em texto do
+  `jsonb` (que põe um espaço depois de cada `,` e `:`), então o que passa aqui passa no banco.
+
+  Devolve a lista (ou `nil`) e o que aconteceu: `:ok`, `{:cut, mantidas, total}` ou
+  `{:dropped, total}`, para o aviso no log, sem conteúdo.
+  """
+  @spec fit_passed_rules([map()] | nil, pos_integer()) ::
+          {[map()] | nil,
+           :ok | {:cut, non_neg_integer(), pos_integer()} | {:dropped, pos_integer()}}
+  def fit_passed_rules(nil, _max_bytes), do: {nil, :ok}
+
+  def fit_passed_rules(rules, max_bytes) when is_list(rules) do
+    sizes = Enum.map(rules, &item_bytes/1)
+    total = length(rules)
+
+    # `[` e `]`, mais `, ` entre os itens.
+    kept =
+      sizes
+      |> Enum.scan(fn size, acc -> acc + size + 2 end)
+      |> Enum.take_while(&(&1 + 2 <= max_bytes))
+      |> length()
+
+    cond do
+      kept == total -> {rules, :ok}
+      kept == 0 -> {nil, {:dropped, total}}
+      true -> {Enum.take(rules, kept), {:cut, kept, total}}
+    end
+  end
+
+  # Por cima do texto do `jsonb`: o JSON compacto mais um espaço por `:` e por `,` (no
+  # máximo dois por chave, e um por item de lista dentro do item).
+  defp item_bytes(item) do
+    extra =
+      Enum.reduce(item, 0, fn {_key, value}, acc ->
+        acc + 2 + if(is_list(value), do: length(value), else: 0)
+      end)
+
+    byte_size(Jason.encode!(item)) + extra
+  end
+
+  # A regra conta como falha só por estar na lista, mesmo sem nenhum nó enviado.
+  defp rule_ids(rules) do
+    for rule <- List.wrap(rules), is_map(rule), is_binary(rule["id"]), do: rule["id"]
   end
 
   @doc "Severidade do nó, senão a da regra, senão `:moderate`."

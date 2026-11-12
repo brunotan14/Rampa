@@ -14,13 +14,17 @@ import { fixturesPolicy } from "./support/policy.js";
 const fixturesDir = new URL("./fixtures/", import.meta.url);
 
 // Resultado esperado de cada fixture (`<nome>.expected.json`). `violations` é comparação
-// exata (regra, impacto e número de nós); `incomplete` é "contém pelo menos".
+// exata (regra, impacto e número de nós); `incomplete` é "contém pelo menos". `passes`
+// (RF-RA017) é conferido por subconjunto: as regras de `passes_include` estão lá e as de
+// `passes_exclude` não (a lista exata muda com a versão do axe).
 interface Expected {
   title: string;
   http_status: number;
   blocked_requests: number;
   violations: { id: string; impact: string; nodes: number }[];
   incomplete: { id: string; nodes: number }[];
+  passes_include: string[];
+  passes_exclude: string[];
 }
 
 const fixtureNames = readdirSync(fixturesDir)
@@ -102,7 +106,7 @@ describe("GET /health", () => {
 
 describe("fixtures", () => {
   it("existem e cada uma tem o seu .expected.json", () => {
-    expect(fixtureNames).toEqual(expect.arrayContaining(["contraste-incerto", "img-sem-alt", "limpa"]));
+    expect(fixtureNames).toEqual(expect.arrayContaining(["alt-misto", "contraste-incerto", "img-sem-alt", "limpa"]));
     for (const name of fixtureNames) {
       expect(() => readFileSync(new URL(`${name}.expected.json`, fixturesDir)), name).not.toThrow();
     }
@@ -143,6 +147,12 @@ describe("POST /scan com cada fixture", () => {
     for (const rule of expected.incomplete) {
       expect(incomplete).toContainEqual(rule);
     }
+
+    const passes = (body.axe.passes ?? []).map((rule) => rule.id);
+    expect(passes).toEqual(expect.arrayContaining(expected.passes_include));
+    for (const id of expected.passes_exclude) {
+      expect(passes).not.toContain(id);
+    }
   });
 });
 
@@ -151,7 +161,12 @@ describe("POST /scan", () => {
     const res = await scan(`${fixturesUrl}/img-sem-alt.html`);
     const { axe } = res.json<ScanResponse>();
 
-    expect(Object.keys(axe).sort()).toEqual(["incomplete", "version", "violations"]);
+    expect(Object.keys(axe).sort()).toEqual(["incomplete", "passes", "version", "violations"]);
+    const passed = axe.passes?.find((r) => r.id === "document-title");
+    expect(passed).toBeDefined();
+    // Regra aprovada vai sem os nós: nenhum HTML da página.
+    expect(Object.keys(passed!).sort()).toEqual(["help", "id", "nodes_total", "tags"]);
+    expect(passed!.nodes_total).toBeGreaterThan(0);
     const rule = axe.violations.find((r) => r.id === "image-alt");
     expect(rule).toBeDefined();
     expect(Object.keys(rule!).sort()).toEqual(

@@ -108,42 +108,42 @@ msgstr ""
 msgid "must be equal to %{number}"
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:166
+#: lib/rampa_web/error_messages.ex:180
 #, elixir-autogen, elixir-format
 msgid "A API só responde em JSON."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:224
+#: lib/rampa_web/error_messages.ex:238
 #, elixir-autogen, elixir-format
 msgid "A análise ficou parada por tempo demais e foi encerrada."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:194
+#: lib/rampa_web/error_messages.ex:208
 #, elixir-autogen, elixir-format
 msgid "A página abriu, mas a análise falhou."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:177
+#: lib/rampa_web/error_messages.ex:191
 #, elixir-autogen, elixir-format
 msgid "A página demorou demais para carregar ou para ser analisada."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:197
+#: lib/rampa_web/error_messages.ex:211
 #, elixir-autogen, elixir-format
 msgid "A página passou do limite de dados ou de conexões da análise."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:184
+#: lib/rampa_web/error_messages.ex:198
 #, elixir-autogen, elixir-format
 msgid "A página respondeu com um erro HTTP e não foi analisada."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:157
+#: lib/rampa_web/error_messages.ex:171
 #, elixir-autogen, elixir-format
 msgid "A requisição está malformada."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:231
+#: lib/rampa_web/error_messages.ex:245
 #, elixir-autogen, elixir-format
 msgid "A varredura da página falhou, então as análises que dependem dela não rodaram."
 msgstr ""
@@ -153,7 +153,7 @@ msgstr ""
 msgid "Auditoria não encontrada. Confira o endereço do relatório."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:172
+#: lib/rampa_web/error_messages.ex:186
 #, elixir-autogen, elixir-format
 msgid "Envie o corpo da requisição em JSON."
 msgstr ""
@@ -163,7 +163,7 @@ msgstr ""
 msgid "Envie um JSON com o campo url, com o endereço a auditar."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:160
+#: lib/rampa_web/error_messages.ex:174
 #, elixir-autogen, elixir-format
 msgid "Este endereço da API não existe."
 msgstr ""
@@ -178,14 +178,9 @@ msgstr ""
 msgid "Este endereço não é válido. Confira se ele está completo, sem usuário e senha, e com até 2.048 caracteres."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:163
+#: lib/rampa_web/error_messages.ex:177
 #, elixir-autogen, elixir-format
 msgid "Este método não é aceito neste endereço da API."
-msgstr ""
-
-#: lib/rampa_web/error_messages.ex:127
-#, elixir-autogen, elixir-format
-msgid "Filtro inválido. Use severity (critical, serious, moderate ou minor), source (axe, ai ou heuristic) e needs_review (true ou false)."
 msgstr ""
 
 #: lib/rampa_web/error_messages.ex:63
@@ -193,7 +188,7 @@ msgstr ""
 msgid "Não encontramos este domínio. Confira se o endereço está certo."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:191
+#: lib/rampa_web/error_messages.ex:205
 #, elixir-autogen, elixir-format
 msgid "Não foi possível abrir a página."
 msgstr ""
@@ -208,12 +203,12 @@ msgstr ""
 msgid "O cabeçalho Idempotency-Key precisa ter de 1 a 128 caracteres, sem espaços nem acentos."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:169
+#: lib/rampa_web/error_messages.ex:183
 #, elixir-autogen, elixir-format
 msgid "O corpo da requisição é grande demais."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:138
+#: lib/rampa_web/error_messages.ex:152
 #, elixir-autogen, elixir-format
 msgid "O cursor da paginação não é válido. Recomece a lista do início."
 msgstr ""
@@ -228,27 +223,27 @@ msgstr ""
 msgid "O limite de páginas precisa ser um número inteiro de 1 a 25."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:135
+#: lib/rampa_web/error_messages.ex:149
 #, elixir-autogen, elixir-format
 msgid "O parâmetro limit precisa ser um número inteiro de 1 a 100."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:214
+#: lib/rampa_web/error_messages.ex:228
 #, elixir-autogen, elixir-format
 msgid "O resultado da análise veio incompleto."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:204
+#: lib/rampa_web/error_messages.ex:218
 #, elixir-autogen, elixir-format
 msgid "O serviço de análise estava indisponível. Tente uma nova auditoria em alguns minutos."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:211
+#: lib/rampa_web/error_messages.ex:225
 #, elixir-autogen, elixir-format
 msgid "O serviço de análise recusou esta página."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:238
+#: lib/rampa_web/error_messages.ex:252
 #, elixir-autogen, elixir-format
 msgid "Ocorreu um erro inesperado. Tente de novo em alguns instantes."
 msgstr ""
@@ -273,12 +268,32 @@ msgstr ""
 msgid "Este Idempotency-Key já foi usado para auditar outro endereço. Use uma chave nova para cada auditoria."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:217
+#: lib/rampa_web/error_messages.ex:231
 #, elixir-autogen, elixir-format
 msgid "Não foi possível concluir a análise por uma incompatibilidade interna do Rampa. O problema ficou registrado para a equipe corrigir."
 msgstr ""
 
-#: lib/rampa_web/error_messages.ex:147
+#: lib/rampa_web/error_messages.ex:161
 #, elixir-autogen, elixir-format
 msgid "Esta conexão já acompanha auditorias demais ao mesmo tempo. Feche outras abas do Rampa e recarregue a página."
+msgstr ""
+
+#: lib/rampa_web/error_messages.ex:127
+#, elixir-autogen, elixir-format
+msgid "Esta página não faz parte da auditoria. Volte à lista de páginas."
+msgstr ""
+
+#: lib/rampa_web/error_messages.ex:130
+#, elixir-autogen, elixir-format
+msgid "Este problema não faz parte da auditoria. Volte à lista de problemas."
+msgstr ""
+
+#: lib/rampa_web/error_messages.ex:137
+#, elixir-autogen, elixir-format
+msgid "Filtro inválido. Use severity (critical, serious, moderate ou minor), source (axe, ai ou heuristic), needs_review (true ou false), page_id (id de uma página) e wcag (critério no formato 1.4.3)."
+msgstr ""
+
+#: lib/rampa_web/error_messages.ex:146
+#, elixir-autogen, elixir-format
+msgid "Ordem inválida. Use sort=recorded ou sort=severity."
 msgstr ""

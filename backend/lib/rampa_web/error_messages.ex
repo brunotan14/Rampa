@@ -123,13 +123,27 @@ defmodule RampaWeb.ErrorMessages do
   def message("audit_not_found", _bindings),
     do: dgettext("errors", "Auditoria não encontrada. Confira o endereço do relatório.")
 
+  def message("page_not_found", _bindings),
+    do: dgettext("errors", "Esta página não faz parte da auditoria. Volte à lista de páginas.")
+
+  def message("finding_not_found", _bindings) do
+    dgettext(
+      "errors",
+      "Este problema não faz parte da auditoria. Volte à lista de problemas."
+    )
+  end
+
   def message("invalid_filter", _bindings) do
     dgettext(
       "errors",
       "Filtro inválido. Use severity (critical, serious, moderate ou minor), source (axe, ai " <>
-        "ou heuristic) e needs_review (true ou false)."
+        "ou heuristic), needs_review (true ou false), page_id (id de uma página) e wcag " <>
+        "(critério no formato 1.4.3)."
     )
   end
+
+  def message("invalid_sort", _bindings),
+    do: dgettext("errors", "Ordem inválida. Use sort=recorded ou sort=severity.")
 
   def message("invalid_limit", _bindings),
     do: dgettext("errors", "O parâmetro limit precisa ser um número inteiro de 1 a 100.")

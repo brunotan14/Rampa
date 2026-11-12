@@ -81,15 +81,15 @@ defmodule Rampa.Scanner.ContractTest do
 
     test "campo desconhecido em axe (scanner à frente do backend) é aceito e descartado" do
       body = scanner_response("img-sem-alt")
-      passes = [%{"id" => "document-title", "nodes" => []}]
+      inapplicable = [%{"id" => "document-title", "nodes" => []}]
 
       log =
         capture_log([level: :warning], fn ->
-          assert Contract.check_response(put_in(body, ["axe", "passes"], passes)) ==
+          assert Contract.check_response(put_in(body, ["axe", "inapplicable"], inapplicable)) ==
                    {:ok, body}
         end)
 
-      assert log =~ "#/axe/passes"
+      assert log =~ "#/axe/inapplicable"
       assert log =~ "atualize o backend"
     end
 

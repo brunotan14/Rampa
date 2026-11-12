@@ -80,10 +80,10 @@ defmodule Rampa.Scanner.HTTPTest do
 
   test "scan/1 descarta campos que a versão do contrato não conhece" do
     response = scanner_response("img-sem-alt")
-    stub(&Req.Test.json(&1, put_in(response, ["axe", "passes"], [%{"id" => "x"}])))
+    stub(&Req.Test.json(&1, put_in(response, ["axe", "inapplicable"], [%{"id" => "x"}])))
 
     assert capture_log(fn -> assert HTTP.scan("https://exemplo.com/") == {:ok, response} end) =~
-             "#/axe/passes"
+             "#/axe/inapplicable"
   end
 
   describe "respostas fora do contrato" do

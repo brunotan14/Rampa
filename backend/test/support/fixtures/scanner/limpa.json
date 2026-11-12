@@ -7,6 +7,146 @@
   "axe": {
     "version": "4.14.0",
     "violations": [],
-    "incomplete": []
+    "incomplete": [],
+    "passes": [
+      {
+        "id": "document-title",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag242",
+          "TTv5",
+          "TT12.a",
+          "EN-301-549",
+          "EN-9.2.4.2",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.5.1"
+        ],
+        "help": "Documents must have <title> element to aid in navigation",
+        "nodes_total": 1
+      },
+      {
+        "id": "html-has-lang",
+        "tags": [
+          "cat.language",
+          "wcag2a",
+          "wcag311",
+          "TTv5",
+          "TT11.a",
+          "EN-301-549",
+          "EN-9.3.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.3.1"
+        ],
+        "help": "<html> element must have a lang attribute",
+        "nodes_total": 1
+      },
+      {
+        "id": "html-lang-valid",
+        "tags": [
+          "cat.language",
+          "wcag2a",
+          "wcag311",
+          "TTv5",
+          "TT11.a",
+          "EN-301-549",
+          "EN-9.3.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-8.4.1"
+        ],
+        "help": "<html> element must have a valid value for the lang attribute",
+        "nodes_total": 1
+      },
+      {
+        "id": "landmark-one-main",
+        "tags": [
+          "cat.semantics",
+          "best-practice"
+        ],
+        "help": "Document should have one main landmark",
+        "nodes_total": 1
+      },
+      {
+        "id": "page-has-heading-one",
+        "tags": [
+          "cat.semantics",
+          "best-practice"
+        ],
+        "help": "Page should contain a level-one heading",
+        "nodes_total": 1
+      },
+      {
+        "id": "region",
+        "tags": [
+          "cat.keyboard",
+          "best-practice",
+          "RGAAv4",
+          "RGAA-9.2.1"
+        ],
+        "help": "All page content should be contained by landmarks",
+        "nodes_total": 3
+      },
+      {
+        "id": "image-alt",
+        "tags": [
+          "cat.text-alternatives",
+          "wcag2a",
+          "wcag111",
+          "section508",
+          "section508.22.a",
+          "TTv5",
+          "TT7.a",
+          "TT7.b",
+          "EN-301-549",
+          "EN-9.1.1.1",
+          "ACT",
+          "RGAAv4",
+          "RGAA-1.1.1"
+        ],
+        "help": "Images must have alternative text",
+        "nodes_total": 1
+      },
+      {
+        "id": "link-name",
+        "tags": [
+          "cat.name-role-value",
+          "wcag2a",
+          "wcag244",
+          "wcag412",
+          "section508",
+          "section508.22.a",
+          "TTv5",
+          "TT6.a",
+          "EN-301-549",
+          "EN-9.2.4.4",
+          "EN-9.4.1.2",
+          "ACT",
+          "RGAAv4",
+          "RGAA-6.2.1"
+        ],
+        "help": "Links must have discernible text",
+        "nodes_total": 1
+      },
+      {
+        "id": "color-contrast",
+        "tags": [
+          "cat.color",
+          "wcag2aa",
+          "wcag143",
+          "TTv5",
+          "TT13.c",
+          "EN-301-549",
+          "EN-9.1.4.3",
+          "ACT",
+          "RGAAv4",
+          "RGAA-3.2.1"
+        ],
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "nodes_total": 4
+      }
+    ]
   }
 }

@@ -5,7 +5,7 @@ comma := ,
 full := $(filter 1,$(FULL))
 npm_ci := $(filter 1,$(NPM_CI))
 
-.PHONY: setup services down dev test test-backend test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract
+.PHONY: setup services down dev test test-backend test-load test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract
 
 setup: services ## Instala dependências e prepara o banco
 	cd backend && mix deps.get && mix ecto.setup
@@ -29,6 +29,9 @@ test: test-backend test-frontend test-scanner ## Testes unitários das três par
 
 test-backend:
 	cd backend && mix test
+
+test-load: ## Teste de carga do relatório (100 mil achados; fora do `make test`)
+	cd backend && mix test --only load
 
 test-frontend:
 	cd frontend && npm test
