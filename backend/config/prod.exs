@@ -12,6 +12,12 @@ config :rampa, RampaWeb.Endpoint,
     ]
   ]
 
+# Na troca de versão (`infra/deploy.sh`), o Docker manda SIGTERM e espera o
+# `stop_grace_period` do `app` em `infra/docker-compose.prod.yml` (45 s) antes do SIGKILL. O
+# Oban para de pegar jobs e espera até 30 s os que estão rodando; o que passar disso volta à
+# fila pelo Lifeline e pela reconciliação (os jobs são idempotentes).
+config :rampa, Oban, shutdown_grace_period: :timer.seconds(30)
+
 # Do not print debug messages in production
 config :logger, level: :info
 

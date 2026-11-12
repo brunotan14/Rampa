@@ -42,3 +42,7 @@ config :phoenix,
 
 # Testes do `Rampa.Scanner.HTTP` respondem por `Req.Test`, sem rede
 config :rampa, :scanner_req_options, plug: {Req.Test, Rampa.Scanner.HTTP}
+
+# Build do frontend de mentira para os testes do fallback da SPA (`RampaWeb.Static`): o
+# build de verdade só existe na imagem (`backend/Dockerfile`).
+config :rampa, :static_from, Path.expand("../test/support/static", __DIR__)

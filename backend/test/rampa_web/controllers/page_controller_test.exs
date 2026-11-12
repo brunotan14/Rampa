@@ -159,8 +159,9 @@ defmodule RampaWeb.PageControllerTest do
       assert {"referrer-policy", "no-referrer"} in headers
     end
 
+    # Fora de /api é o HTML da interface (`RampaWeb.Plugs.BrowserHeaders`), não o `no-store`.
     outside = build_conn() |> get("/robots.txt")
-    assert get_resp_header(outside, "x-robots-tag") == []
+    assert get_resp_header(outside, "cache-control") == ["no-cache"]
   end
 
   test "UUID fora da forma canônica: page_id inválido e página 404", ctx do

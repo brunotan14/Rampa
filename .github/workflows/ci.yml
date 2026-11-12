@@ -5,9 +5,12 @@ on:
   push:
     branches: [main]
 
+# Em PR, um push novo cancela a execução anterior. Na `main`, nunca: cancelar no meio do job
+# `deploy` deixaria a VPS no meio da troca (o `deploy.sh` segue sozinho, mas o job perderia o
+# resultado). Execuções da `main` esperam a anterior terminar.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -175,6 +178,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Deploy sem subir nada (`make check-infra`, o mesmo do `make ci`): `shellcheck` dos
+      # scripts, regras do Compose de produção e o `infra/deploy.sh` com `docker` falso.
+      - name: Scripts e Compose de produção
+        run: make check-infra
       - name: Compose de teste e specs integrados
         run: make e2e-integrado
       # O script já derruba tudo; este passo cobre o cancelamento e o prazo estourado (guarda
@@ -188,6 +195,22 @@ jobs:
           name: e2e-integrado
           path: e2e/test-results/integrado
           retention-days: 14
+
+  # Deploy no staging (PRD §7, `.github/workflows/deploy.yml`): só no push na `main`, depois de
+  # todos os checks. Não é check obrigatório da proteção da `main` (não roda em PR). A
+  # `Revisão de dependências` só existe em PR e fica fora do `needs`. Os segredos do SSH são do
+  # environment `staging`, declarado no job do `deploy.yml`: sem `secrets: inherit`.
+  deploy:
+    name: Deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, frontend, scanner, e2e, e2e-integrated]
+    # O chamador limita o que o `deploy.yml` pode pedir: pacotes (push no GHCR) e leitura dos
+    # deployments do environment (decisão de pular).
+    permissions:
+      contents: read
+      packages: write
+      deployments: read
+    uses: ./.github/workflows/deploy.yml
 
   # Barra no PR dependência nova (npm, mix, actions) com vulnerabilidade conhecida de severidade
   # moderada ou maior. Só faz sentido em PR: compara a base com a branch.

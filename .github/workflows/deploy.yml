@@ -1,0 +1,198 @@
+name: Deploy
+
+# Deploy no staging (PRD §7, Hospedagem e deploy). Dois caminhos:
+#
+#   * `workflow_call`: o job `deploy` do `ci.yml`, no push na `main` depois dos checks verdes.
+#     Constrói e publica `rampa-app:<sha>` e `rampa-scanner:<sha>` no GHCR e faz o deploy;
+#   * `workflow_dispatch`: rollback manual para um sha já publicado (só o SSH, sem build).
+#     Rode a partir da `main` (o environment `staging` só aceita a `main`), com o sha completo
+#     da versão anterior: Actions → Deploy → Run workflow.
+#
+# A VPS só baixa as imagens, nunca compila. O SSH usa o usuário `deploy`, cujo comando forçado
+# só aceita `deploy <sha>` e roda o `/opt/rampa/deploy.sh` (`infra/deploy.sh`).
+#
+# Segredos: `DEPLOY_SSH_KEY`, `DEPLOY_HOST` e `DEPLOY_KNOWN_HOSTS` existem só no environment
+# `staging` (restrito à `main`). Num workflow reutilizável, o `environment` fica no job DESTE
+# arquivo, e os segredos do environment chegam direto a esse job, sem `secrets: inherit` no
+# chamador. O host nunca aparece no log nem no arquivo (o environment não declara `url`).
+#
+# Sem actions de terceiros (regra do repositório): login, build e push pelo próprio `docker`.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "SHA completo (40 caracteres) de uma versão já publicada no GHCR"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publica as imagens
+    # No `workflow_call`, `github.event_name` é o evento do chamador (`push`).
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha: ${{ steps.images.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Nomes das imagens
+        id: images
+        run: |
+          owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          # Etiquetas OCI: a origem liga o pacote do GHCR a este repositório.
+          {
+            echo "labels=--label org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY --label org.opencontainers.image.revision=$GITHUB_SHA"
+            echo "sha=$GITHUB_SHA"
+            echo "app=ghcr.io/$owner/rampa-app:$GITHUB_SHA"
+            echo "scanner=ghcr.io/$owner/rampa-scanner:$GITHUB_SHA"
+          } >>"$GITHUB_OUTPUT"
+      - name: Constrói o app (release de produção, com o build do React)
+        run: docker build ${{ steps.images.outputs.labels }} -f backend/Dockerfile -t "${{ steps.images.outputs.app }}" .
+      - name: Constrói o scanner
+        run: docker build ${{ steps.images.outputs.labels }} -t "${{ steps.images.outputs.scanner }}" scanner
+      # As imagens que vão para a VPS se recusam a subir com a SSRF_ALLOWLIST (RF-RA002), e o
+      # controle prova que sobem sem ela.
+      - name: Allowlist recusada nas imagens publicadas
+        env:
+          APP_PROD_IMAGE: ${{ steps.images.outputs.app }}
+          SCANNER_IMAGE: ${{ steps.images.outputs.scanner }}
+          SKIP_E2E_RELEASE: "1"
+        run: infra/test/check-allowlist-prod.sh
+      - name: Publica no GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_IMAGE: ${{ steps.images.outputs.app }}
+          SCANNER_IMAGE: ${{ steps.images.outputs.scanner }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$APP_IMAGE"
+          docker push "$SCANNER_IMAGE"
+          # Os digests ficam no log, para conferir na VPS (`docker image inspect`).
+          docker image inspect --format '{{index .RepoDigests 0}}' "$APP_IMAGE" "$SCANNER_IMAGE"
+      - name: Sai do GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+
+  # Pula o deploy só se o staging JÁ tem este sha ou um descendente (`infra/ci/should-deploy.sh`,
+  # pelo último deployment com sucesso do environment). Com dois merges seguidos e o mais novo
+  # vermelho no CI, o mais antigo ainda vai para o ar. Fica num job sem `environment`: um job
+  # com environment registra um deployment com sucesso mesmo quando pula, e o sha errado
+  # passaria a contar como "no ar". O rollback manual não passa por aqui.
+  decide:
+    name: Decide o deploy
+    needs: [publish]
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: read
+    outputs:
+      skip: ${{ steps.decision.outputs.skip }}
+    steps:
+      # História completa: a comparação é por ancestralidade na `main`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: O staging já tem este sha ou um mais novo?
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.publish.outputs.sha }}
+        run: |
+          decision=$(infra/ci/should-deploy.sh "$SHA")
+          if [ "$decision" != deploy ]; then
+            echo "::warning::o staging já está em ${decision#skip }, que contém $SHA: deploy pulado."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy no staging
+    needs: [publish, decide]
+    # Push: só com o `publish` e o `decide` verdes e sem pular. Rollback manual: os dois são
+    # pulados.
+    if: >-
+      ${{ !cancelled() && (
+        (needs.publish.result == 'success' && needs.decide.result == 'success' && needs.decide.outputs.skip != 'true') ||
+        (github.event_name == 'workflow_dispatch' && needs.publish.result == 'skipped' && needs.decide.result == 'skipped')
+      ) }}
+    runs-on: ubuntu-latest
+    # Pior caso do `deploy.sh`, somado: espera da trava (900 s) + dois `docker pull` (até
+    # 600 s) + postgres (120 s) + migrations (reserva de 300 s) + scanner (180 s) + app (180 s)
+    # + Traefik no primeiro deploy (300 s, mais 25 s da última volta) + rollback (300 s) ≈
+    # 2 905 s, uns 48 min. Com folga para o SSH: 55 min. O job não pode cair antes do script,
+    # senão fica vermelho com o deploy ainda em curso na VPS.
+    timeout-minutes: 55
+    environment:
+      name: staging
+    # Um deploy por vez, sem cancelar o que está em curso. Fica no job (e não no chamador),
+    # para não travar com a concorrência do `ci.yml`. O `deploy.sh` tem a própria trava.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      deployments: read
+    steps:
+      - name: Sha do deploy
+        id: target
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          PUBLISHED_SHA: ${{ needs.publish.outputs.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then sha=$INPUT_SHA; else sha=$PUBLISHED_SHA; fi
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sha inválido: precisa de 40 caracteres hexadecimais minúsculos"
+            exit 1
+          fi
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+      # A decisão do `decide` de novo, já dentro da `concurrency`: se outro deploy mais novo
+      # entrou entre os dois jobs, este falha em vez de voltar o staging para trás (e o
+      # deployment deste job não fica registrado como sucesso).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+      - name: Confere de novo, dentro da fila de deploy
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          decision=$(infra/ci/should-deploy.sh "$SHA")
+          if [ "$decision" != deploy ]; then
+            echo "::error::outro deploy entrou na frente: o staging já está em ${decision#skip }, que contém $SHA. Nada foi feito."
+            exit 1
+          fi
+      - name: Deploy pela chave restrita do usuário deploy
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "::error::faltam os segredos DEPLOY_SSH_KEY, DEPLOY_HOST ou DEPLOY_KNOWN_HOSTS no environment staging"
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/ssh"
+          install -d -m 700 "$dir"
+          (umask 077 && printf '%s\n' "$DEPLOY_SSH_KEY" >"$dir/key" && printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >"$dir/known_hosts")
+          # Chave do host conferida (sem confiar no primeiro acesso); o servidor só aceita
+          # `deploy <sha>` desta chave. A saída é o log do deploy.sh.
+          ssh -i "$dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$dir/known_hosts" \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o LogLevel=ERROR \
+            "deploy@$DEPLOY_HOST" "deploy $SHA"
+      - name: Apaga a chave do runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"

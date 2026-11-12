@@ -26,7 +26,7 @@ Saída em `e2e/test-results/integrado/` (`report/`, `artifacts/` com os traces e
 | `env.apiDailyUrl` (`http://app-daily-via-proxy:4000`) | Instância com `AUDITS_DAILY_LIMIT=3`, banco próprio. |
 | `env.scannerUrl` (`http://scanner:4100`) | Scanner direto (`POST /scan`). |
 | `env.fixturesUrl` (`http://fixtures`) | Site de fixtures, como o app e o scanner o enxergam. |
-| `env.webUrl` (`http://web`) | Frontend (build do React em nginx, `infra/test/web.Dockerfile`), com `/api` e `/socket` repassados ao app pela faixa confiável. Para os casos que usam o navegador; o IP simulado vai no `X-Forwarded-For` do contexto. |
+| `env.webUrl` (`http://app-via-proxy:4000`) | Frontend: o build do React servido pelo próprio app (`priv/static`, como em produção), com a CSP e o fallback da SPA, pela faixa confiável. Para os casos que usam o navegador; o IP simulado vai no `X-Forwarded-For` do contexto. |
 
 Use sempre esses nomes, nunca o nome do serviço (`app`): ele resolve em qualquer rede
 compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsível.
@@ -59,6 +59,7 @@ Também em `support/`: `messages.ts` (os textos de `error.message` que os crité
 | `rf-ra002-protecao-ssrf.spec.ts` | RF-RA002 CA1, CA2, CA3 e CA6 |
 | `rf-ra002-limites.spec.ts` | RF-RA002 CA4, `X-Forwarded-For` fora da faixa confiável e teto diário (os dois baldes exclusivos) |
 | `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |
+| `frontend-servido.spec.ts` | PRD §7 e RNF-RA008: o app serve o build do React (fallback da SPA no link direto) com a CSP, sem violação no navegador do início ao fim da auditoria |
 
 O RF-RA002 CA5 (produção não sobe com a allowlist) e o isolamento de rede do scanner são
 provados pelos scripts da seção abaixo, não pelos specs.

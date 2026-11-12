@@ -11,6 +11,10 @@
 # A release de teste (`rampa-e2e-app`, MIX_ENV=e2e) sem o marcador RAMPA_E2E=1 se comporta
 # como produção e também recusa; com o marcador (como no Compose de teste), sobe.
 # O mesmo para o scanner com NODE_ENV=production (RF-RA002).
+#
+# Imagens por variável: `APP_PROD_IMAGE`, `APP_E2E_IMAGE` e `SCANNER_IMAGE`. Com
+# `SKIP_E2E_RELEASE=1` pula a release de teste: o deploy (`.github/workflows/deploy.yml`) só
+# constrói as imagens de produção e confere as que vai publicar.
 set -euo pipefail
 
 APP_IMAGE=${APP_PROD_IMAGE:-rampa-e2e-app-prod}
@@ -112,11 +116,13 @@ start "$prefix-app-control" "${APP_ENV[@]}" -e SSRF_ALLOWLIST= "$APP_IMAGE"
 expect_refusal "$prefix-app-allowlist" "$REFUSAL"
 expect_running "$prefix-app-control" "Running RampaWeb.Endpoint" "controle: sem a allowlist"
 
-echo "Release de teste fora do Compose de teste ($APP_E2E_IMAGE)"
-start "$prefix-e2e-no-marker" "${APP_ENV[@]}" -e SSRF_ALLOWLIST=fixtures "$APP_E2E_IMAGE"
-start "$prefix-e2e-marker" "${APP_ENV[@]}" -e SSRF_ALLOWLIST=fixtures -e RAMPA_E2E=1 "$APP_E2E_IMAGE"
-expect_refusal "$prefix-e2e-no-marker" "$REFUSAL"
-expect_running "$prefix-e2e-marker" "Running RampaWeb.Endpoint" "controle: com a allowlist e RAMPA_E2E=1"
+if [ "${SKIP_E2E_RELEASE:-}" != "1" ]; then
+  echo "Release de teste fora do Compose de teste ($APP_E2E_IMAGE)"
+  start "$prefix-e2e-no-marker" "${APP_ENV[@]}" -e SSRF_ALLOWLIST=fixtures "$APP_E2E_IMAGE"
+  start "$prefix-e2e-marker" "${APP_ENV[@]}" -e SSRF_ALLOWLIST=fixtures -e RAMPA_E2E=1 "$APP_E2E_IMAGE"
+  expect_refusal "$prefix-e2e-no-marker" "$REFUSAL"
+  expect_running "$prefix-e2e-marker" "Running RampaWeb.Endpoint" "controle: com a allowlist e RAMPA_E2E=1"
+fi
 
 echo "Scanner de produção ($SCANNER_IMAGE)"
 start "$prefix-scanner-allowlist" -e NODE_ENV=production -e SSRF_ALLOWLIST=fixtures "$SCANNER_IMAGE"

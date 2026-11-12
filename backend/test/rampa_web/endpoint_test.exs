@@ -6,9 +6,12 @@ defmodule RampaWeb.EndpointTest do
 
   use RampaWeb.ConnCase, async: true
 
-  test "o /live do LiveView não existe fora de dev", %{conn: conn} do
+  test "o /live do LiveView não existe fora de dev: cai no fallback da SPA", %{conn: conn} do
     for path <- ["/live/websocket", "/live/longpoll"] do
-      assert %{"error" => %{"code" => "not_found"}} = conn |> get(path) |> json_response(404)
+      conn = conn |> recycle() |> get(path)
+      # O transporte do LiveView recusaria o pedido sem upgrade (400); aqui é o index.html.
+      assert conn.status == 200
+      assert conn.resp_body =~ "<div id=\"root\">"
     end
   end
 

@@ -23,15 +23,15 @@
 #   http://app-daily-via-proxy:4000  instância com teto diário baixo, banco próprio
 #   http://scanner:4100              scanner
 #   http://fixtures/                 fixtures (como o app e o scanner enxergam)
-#   http://web/                      frontend com /api e /socket repassados ao app (telas)
+# As telas também saem do app (o build do React em `priv/static`, como em produção): os specs
+# que usam o navegador abrem `http://app-via-proxy:4000/`.
 name: rampa-e2e
 
 x-app-env: &app-env
   PHX_SERVER: "true"
   PHX_HOST: app
-  # Origens do websocket `/socket` (RF-RA004): os nomes pelos quais o runner abre o app,
-  # inclusive o frontend do serviço `web`.
-  PHX_ALLOWED_ORIGINS: http://app-via-proxy:4000,http://app-direct:4000,http://app-daily-via-proxy:4000,http://web
+  # Origens do websocket `/socket` (RF-RA004): os nomes pelos quais o runner abre o app.
+  PHX_ALLOWED_ORIGINS: http://app-via-proxy:4000,http://app-direct:4000,http://app-daily-via-proxy:4000
   PORT: "4000"
   POOL_SIZE: "10"
   SCANNER_URL: http://scanner:4100
@@ -169,24 +169,6 @@ services:
       timeout: 3s
       retries: 30
 
-  # Frontend para os specs que usam o navegador (`infra/test/web.Dockerfile`): nginx com o
-  # build do React e `/api` e `/socket` repassados ao `app` pela faixa confiável (o papel do
-  # Traefik). Fica só na rede `proxy`: o runner o alcança e ele alcança o app.
-  web:
-    build:
-      context: ..
-      dockerfile: infra/test/web.Dockerfile
-    image: rampa-e2e-web
-    networks: [proxy]
-    depends_on:
-      app:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
   # Runner do Playwright (`e2e/Dockerfile`, `e2e/playwright.integrado.config.ts`). Fora do
   # `up` (perfil próprio): `docker compose run e2e [args do playwright]`. A saída fica em
   # `/e2e/out` (`infra/test/run-e2e.sh` copia para `e2e/test-results/integrado/`).
@@ -203,7 +185,8 @@ services:
       RAMPA_SCANNER_URL: http://scanner:4100
       RAMPA_FIXTURES_URL: http://fixtures
       RAMPA_TRUSTED_PROXIES: 172.29.250.0/24
-      RAMPA_WEB_URL: http://web
+      # O frontend é servido pelo próprio app, pela faixa confiável.
+      RAMPA_WEB_URL: http://app-via-proxy:4000
     networks: [proxy, direct, scan]
     depends_on:
       app:
@@ -211,8 +194,6 @@ services:
       app-daily:
         condition: service_healthy
       fixtures:
-        condition: service_healthy
-      web:
         condition: service_healthy
 
   # Release de PRODUÇÃO (MIX_ENV=prod), só para provar que ela se recusa a subir com a

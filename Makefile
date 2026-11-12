@@ -5,7 +5,7 @@ comma := ,
 full := $(filter 1,$(FULL))
 npm_ci := $(filter 1,$(NPM_CI))
 
-.PHONY: setup services down dev test test-backend test-load test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract api-types
+.PHONY: setup services down dev test test-backend test-load test-frontend test-scanner e2e e2e-integrado e2e-integrado-up e2e-integrado-run e2e-integrado-down check-infra lint lint-backend lint-frontend lint-scanner lint-e2e ci openapi scanner-contract api-types
 
 setup: services ## Instala dependências e prepara o banco
 	cd backend && mix deps.get && mix ecto.setup
@@ -19,7 +19,8 @@ services: ## Sobe banco e scanner em containers
 down: ## Para os containers
 	$(COMPOSE) down
 
-dev: services ## Sobe tudo: banco e scanner (Docker), Phoenix em :4000, Vite em :5173
+dev: services ## Sobe tudo: banco e scanner (Docker), migrations, Phoenix em :4000, Vite em :5173
+	cd backend && mix ecto.migrate
 	@trap 'kill 0' EXIT; \
 	(cd backend && mix phx.server) & \
 	(cd frontend && npm run dev) & \
@@ -56,6 +57,16 @@ e2e-integrado-run: ## Roda os specs de e2e/integrado no Compose de teste de pé
 e2e-integrado-down: ## Guarda os logs e derruba o Compose de teste
 	infra/test/run-e2e.sh down
 
+# Deploy sem subir nada (PRD §7): `shellcheck` dos scripts de `infra/`, as regras do Compose de
+# produção (`docker compose config` + `jq`), a decisão de pular o deploy
+# (`infra/ci/should-deploy.sh`, com `gh` falso) e o `infra/deploy.sh` com `docker` falso, num
+# container Ubuntu 24.04. Precisa do Docker, do Git, do `shellcheck` e do `jq`.
+check-infra: ## Confere os scripts de deploy e o Compose de produção, sem subir nada
+	shellcheck infra/deploy.sh infra/ci/*.sh infra/test/*.sh
+	infra/test/check-compose-prod.sh
+	infra/test/check-should-deploy.sh
+	infra/test/check-deploy.sh
+
 lint: lint-backend lint-frontend lint-scanner lint-e2e ## Formatação, lint e tipos (backend, frontend, scanner e e2e)
 
 lint-backend:
@@ -77,6 +88,7 @@ lint-e2e:
 #   NPM_CI=1  reinstala as dependências npm com `npm ci` antes de cada parte, como o CI (por
 #             padrão usa o node_modules que já está instalado);
 #   FULL=1    roda também os E2E (`make e2e` e `make e2e-integrado`, que precisa do Docker).
+# O `make check-infra` do job do E2E integrado roda sempre (precisa do Docker, `shellcheck` e `jq`).
 ci: ## Passos do CI na ordem do ci.yml (FULL=1: também os E2E; NPM_CI=1: `npm ci` antes)
 	infra/ci/check-toolchain.sh
 	@echo "==> Backend (format, credo, ExUnit)"
@@ -98,7 +110,8 @@ ci: ## Passos do CI na ordem do ci.yml (FULL=1: também os E2E; NPM_CI=1: `npm c
 	$(if $(npm_ci),cd e2e && npm ci)
 	$(MAKE) --no-print-directory lint-e2e
 	$(if $(full),$(MAKE) --no-print-directory e2e)
-	$(if $(full),@echo "==> E2E integrado (API + scanner)")
+	@echo "==> E2E integrado (scripts e Compose de produção$(if $(full),$(comma) API + scanner))"
+	$(MAKE) --no-print-directory check-infra
 	$(if $(full),$(MAKE) --no-print-directory e2e-integrado)
 	@echo "==> make ci: tudo verde$(if $(full),, (sem os E2E; FULL=1 roda também))"
 
