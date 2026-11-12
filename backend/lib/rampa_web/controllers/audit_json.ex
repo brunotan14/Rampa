@@ -2,8 +2,10 @@ defmodule RampaWeb.AuditJSON do
   @moduledoc """
   Resumo da auditoria (`GET /api/audits/:id`, RF-RA005). Nunca expõe `requester_ip_hash` nem
   `idempotency_key`. O `error` interno vira `{ code, message }` com a mensagem pronta
-  (`RampaWeb.ErrorMessages`). `revision` é a mesma do canal `audit:<id>` (RF-RA004): o cliente
-  fica com o estado de maior `revision`, venha daqui ou do canal. `score` é `null` até o M3.
+  (`RampaWeb.ErrorMessages`), com o `http_status` da página que falhou quando houver
+  (RF-RA029). `login_wall_pages` conta as páginas que pedem login (RF-RA028). `revision` é a
+  mesma do canal `audit:<id>` (RF-RA004): o cliente fica com o estado de maior `revision`,
+  venha daqui ou do canal. `score` é `null` até o M3.
   """
 
   alias Rampa.Audits.Audit
@@ -23,14 +25,15 @@ defmodule RampaWeb.AuditJSON do
       totals_by_severity: summary.totals_by_severity,
       needs_review_by_severity: summary.needs_review_by_severity,
       needs_review_count: summary.needs_review_count,
+      login_wall_pages: summary.login_wall_pages,
       top_issues: summary.top_issues,
-      error: error(audit.error),
+      error: error(audit.error, audit.error_http_status),
       started_at: audit.started_at,
       finished_at: audit.finished_at,
       inserted_at: audit.inserted_at
     }
   end
 
-  defp error(nil), do: nil
-  defp error(code), do: ErrorMessages.error(code)
+  defp error(nil, _http_status), do: nil
+  defp error(code, http_status), do: ErrorMessages.page_error(code, http_status)
 end

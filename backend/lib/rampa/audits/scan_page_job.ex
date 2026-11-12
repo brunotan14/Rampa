@@ -18,14 +18,17 @@ defmodule Rampa.Audits.ScanPageJob do
   Tentativas (`max_attempts: 2`):
 
     * definitivos: as recusas do `URLGuard` (menos `dns_error`), `blocked_address`,
-      `invalid_url`, `resource_limit`, `http_error`, `invalid_request` e
-      `invalid_scan_result` fecham a tarefa `failed` na hora. `invalid_scan_result` é uma
+      `invalid_url`, `resource_limit`, `invalid_request`, `invalid_scan_result` e o
+      `http_error` com outro status que não 429, 502, 503 ou 504 (inclusive sem status:
+      400, 401, 403, 404, 410, 500...) fecham a tarefa `failed` na hora. `invalid_scan_result` é uma
       resposta 200 com a versão certa do contrato, mas fora do schema, ou um achado que o
       changeset recusa na gravação, ou a lista de regras aprovadas acima do limite do banco (os
       dados do scanner): o mesmo scanner devolveria o
       mesmo resultado;
-    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, os
-      erros `timeout`, `navigation_failed`, `analysis_failed` e `unavailable` do scanner,
+    * qualquer outra falha pode ser passageira e ganha uma nova tentativa: `dns_error`, o
+      `http_error` com 429, 502, 503 ou 504 (RF-RA029: site instável ou limitando robôs; o
+      `Retry-After` não é lido), os erros `timeout`, `navigation_failed`, `analysis_failed`
+      e `unavailable` do scanner,
       `contract_mismatch` (versão do contrato diferente, como durante um deploy em que o
       scanner e o app trocam em momentos diferentes; uma nova tentativa só, e a divergência
       fica no log como erro), o prazo da varredura estourado (`timeout`), os erros da
@@ -50,6 +53,13 @@ defmodule Rampa.Audits.ScanPageJob do
   prazo de `running` (timeout + folga) passa. O `timeout` fica abaixo do `rescue_after` do
   `Oban.Lifeline`: um job vivo nunca é resgatado.
 
+  Espera entre as tentativas (`backoff/1`): `config :rampa, :scan_retry_backoff_seconds`,
+  fixa e sem depender do `Retry-After` do site (só no Compose de teste ela é curta).
+
+  Na falha que fecha a tarefa, a página grava o status HTTP do documento (só o do
+  `http_error`, senão `nil`) e a decisão de barreira de login sobre ele
+  (`Rampa.Audits.fail_task/4`, RF-RA028 e RF-RA029).
+
   Um job por página por vez: `unique` em `page_id` nos estados não finais do Oban.
   """
 
@@ -73,7 +83,6 @@ defmodule Rampa.Audits.ScanPageJob do
     :invalid_url,
     :unresolvable,
     :resource_limit,
-    :http_error,
     :invalid_request,
     :invalid_scan_result
   ]
@@ -82,8 +91,22 @@ defmodule Rampa.Audits.ScanPageJob do
   # cancelado sem marcar falha, como quando `start_task/3` devolve o mesmo.
   @nothing_to_record [:already_finished, :task_not_found, :page_not_found]
 
+  # `http_error` passageiro (RF-RA029): o site pode voltar numa nova tentativa.
+  @transient_http_statuses [429, 502, 503, 504]
+
   @impl Oban.Worker
   def timeout(_job), do: @timeout_ms
+
+  @impl Oban.Worker
+  def backoff(_job), do: Application.fetch_env!(:rampa, :scan_retry_backoff_seconds)
+
+  @doc """
+  A falha é definitiva (não melhora com nova tentativa)? `http_error` depende do status do
+  documento: 429, 502, 503 e 504 são passageiros; o resto, inclusive sem status, definitivo.
+  """
+  @spec definitive?(atom(), integer() | nil) :: boolean()
+  def definitive?(:http_error, status), do: status not in @transient_http_statuses
+  def definitive?(code, _status), do: code in @definitive
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"page_id" => page_id}} = job) do
@@ -116,6 +139,7 @@ defmodule Rampa.Audits.ScanPageJob do
       {:ok, :ok} -> :ok
       {:ok, {:error, reason}} when reason in @nothing_to_record -> {:cancel, reason}
       {:ok, {:error, code, detail}} -> fail(task, job, code, detail)
+      {:ok, {:error, code, detail, http_status}} -> fail(task, job, code, detail, http_status)
       {:exit, reason} -> crashed(task, job, reason)
       nil -> fail(task, job, :timeout, "a varredura passou de #{deadline_ms()} ms")
     end
@@ -162,8 +186,11 @@ defmodule Rampa.Audits.ScanPageJob do
 
   defp scan(url) do
     case Client.impl().scan(url) do
-      {:ok, result} -> {:ok, result}
-      {:error, %{code: code, detail: detail}} -> {:error, code, detail}
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, %{code: code, detail: detail} = error} ->
+        {:error, code, detail, error[:http_status]}
     end
   end
 
@@ -196,23 +223,23 @@ defmodule Rampa.Audits.ScanPageJob do
   # Caminho único de falha: definitiva ou na última tentativa, a tarefa fecha `failed` e o job
   # é cancelado. A última tentativa conta também as da tarefa (depois de um reenfileiramento
   # pela reconciliação, o `attempt` do Oban recomeça do 1).
-  defp fail(task, job, code, detail) do
-    definitive? = code in @definitive
+  defp fail(task, job, code, detail, http_status \\ nil) do
+    definitive? = definitive?(code, http_status)
     last_attempt? = max(job.attempt, task.attempt) >= job.max_attempts
 
     Logger.warning(
       "scan: tentativa #{task.attempt}/#{job.max_attempts} falhou: #{code}: #{detail}"
     )
 
-    closed? = (definitive? or last_attempt?) and mark_failed(task, code)
+    closed? = (definitive? or last_attempt?) and mark_failed(task, code, http_status)
 
     if closed? or definitive?, do: {:cancel, code}, else: {:error, code}
   end
 
   # Devolve se a tarefa foi fechada. Não pode esconder a falha original: um erro aqui só é
   # registrado no log, e a tarefa que ficar `running` é fechada pela reconciliação.
-  defp mark_failed(task, code) do
-    case Audits.fail_task(task.page_id, :scan, code) do
+  defp mark_failed(task, code, http_status) do
+    case Audits.fail_task(task.page_id, :scan, code, http_status: http_status) do
       {:ok, _page} ->
         true
 

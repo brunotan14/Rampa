@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar</title>
+</head>
+<body>
+  <header><p>Fixture do Rampa</p></header>
+  <main>
+    <h1>Entrar na sua conta</h1>
+    <!-- RF-RA028: tela de login com campo de senha visível. Sem ação: o formulário não envia
+         nada, e o Rampa nunca preenche formulário de login. -->
+    <form>
+      <p>
+        <label for="usuario">E-mail</label>
+        <input id="usuario" name="usuario" type="email" autocomplete="username">
+      </p>
+      <p>
+        <label for="senha">Senha</label>
+        <input id="senha" name="senha" type="Password" autocomplete="current-password">
+      </p>
+      <p><button type="button">Entrar</button></p>
+    </form>
+  </main>
+</body>
+</html>

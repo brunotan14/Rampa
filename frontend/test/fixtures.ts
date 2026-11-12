@@ -32,6 +32,7 @@ export function auditSummary(overrides: Partial<AuditSummary> = {}): AuditSummar
     totals_by_severity: zero,
     needs_review_by_severity: zero,
     needs_review_count: 0,
+    login_wall_pages: 0,
     score: null,
     top_issues: [],
     error: null,

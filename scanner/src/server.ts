@@ -2,8 +2,18 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { errors, type Browser, type BrowserContext, type Page } from "playwright";
 import { runAxe } from "./axe.js";
 import { scanError, scanResponse } from "./contract.js";
-import { SCAN_ERROR_STATUS, SCAN_REQUEST_SCHEMA, type AxeFacts, type ScanError, type ScanErrorCode, type ScanRequest, type ScanResponse } from "./contract.gen.js";
+import {
+  SCAN_ERROR_STATUS,
+  SCAN_REQUEST_SCHEMA,
+  type AxeFacts,
+  type LoginWallFacts,
+  type ScanError,
+  type ScanErrorCode,
+  type ScanRequest,
+  type ScanResponse,
+} from "./contract.gen.js";
 import { trackDocument, type DocumentTracker } from "./document.js";
+import { loginWallFacts } from "./login.js";
 import { classifyRequests, type RouteState } from "./ssrf/intercept.js";
 import { checkUrl, defaultPolicy, type BlockReason, type SsrfPolicy } from "./ssrf/policy.js";
 import { DEFAULT_PROXY_LIMITS, startScanProxy, type ProxyLimits, type ScanProxy } from "./ssrf/proxy.js";
@@ -28,6 +38,9 @@ export interface ServerOptions {
   navigationTimeoutMs?: number;
   // Coleta do axe; substituível nos testes.
   analyze?: (page: Page) => Promise<AxeFacts>;
+  // Fatos de barreira de login (RF-RA028); substituível nos testes. `undefined` deixa o
+  // campo fora da resposta.
+  loginWall?: (page: Page) => Promise<LoginWallFacts | undefined>;
   // Proteção contra SSRF. Em produção só a `allowlist` vem de fora (`SSRF_ALLOWLIST`); os
   // testes trocam o DNS e acrescentam às portas a do servidor local.
   ssrf?: Partial<SsrfPolicy>;
@@ -38,10 +51,11 @@ export interface ServerOptions {
 type ErrorStatus = (typeof SCAN_ERROR_STATUS)[ScanErrorCode];
 type Outcome = { code: 200; body: ScanResponse } | { code: ErrorStatus; body: ScanError };
 
-// O status HTTP de cada código vem do schema do contrato (`x-http-status`).
-const fail = (error: ScanErrorCode, detail: string): Outcome => ({
+// O status HTTP de cada código vem do schema do contrato (`x-http-status`). `httpStatus` é o
+// status do documento, só no `http_error` (RF-RA029).
+const fail = (error: ScanErrorCode, detail: string, httpStatus?: number): Outcome => ({
   code: SCAN_ERROR_STATUS[error],
-  body: scanError(error, detail),
+  body: scanError(error, detail, httpStatus),
 });
 
 // URL recusada pelo `checkUrl`: endereço proibido ou URL inválida.
@@ -54,6 +68,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
   const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS;
   const navigationTimeoutMs = options.navigationTimeoutMs ?? NAVIGATION_TIMEOUT_MS;
   const analyze = options.analyze ?? runAxe;
+  const loginWall = options.loginWall ?? loginWallFacts;
   const policy = defaultPolicy(options.ssrf);
   const limits: ProxyLimits = { ...DEFAULT_PROXY_LIMITS, ...options.limits };
   // Sem log só no Vitest (que define `VITEST`). O `NODE_ENV=test` do Compose de teste mantém
@@ -112,7 +127,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
 
     // Página de erro não é auditada: o axe acharia problemas da página de erro, não do site.
     const status = doc.status;
-    if (status !== null && status >= 400) return fail("http_error", `HTTP ${status}`);
+    if (status !== null && status >= 400) return fail("http_error", `HTTP ${status}`, status);
 
     let facts: { title: string; axe: AxeFacts };
     try {
@@ -120,6 +135,9 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     } catch (error) {
       return verdict() ?? fail("analysis_failed", message(error));
     }
+
+    // Num passo à parte, que nunca falha a varredura: sem o fato, o campo fica de fora.
+    const login = await loginWall(page).catch(() => undefined);
 
     const late = verdict();
     if (late) return late;
@@ -132,6 +150,7 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
         http_status: status,
         ...facts,
         blocked_requests: route.blockedRequests + proxy.blocks.length,
+        ...(login === undefined ? {} : { login_wall: login }),
       }),
     };
   }

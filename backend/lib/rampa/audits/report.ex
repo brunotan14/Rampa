@@ -57,6 +57,7 @@ defmodule Rampa.Audits.Report do
     :error,
     :axe_version,
     :scanned_at,
+    :login_wall,
     :inserted_at
   ]
 
@@ -79,6 +80,7 @@ defmodule Rampa.Audits.Report do
           totals_by_severity: severity_totals(),
           needs_review_by_severity: severity_totals(),
           needs_review_count: non_neg_integer(),
+          login_wall_pages: non_neg_integer(),
           top_issues: [top_issue()]
         }
 
@@ -107,8 +109,9 @@ defmodule Rampa.Audits.Report do
 
   @doc """
   Resumo da auditoria: a auditoria, os totais por severidade dos achados confirmados
-  (`needs_review = false`) e dos que pedem revisão, e o top #{@top_issues_limit} das regras
-  confirmadas, numa instrução só.
+  (`needs_review = false`) e dos que pedem revisão, quantas páginas pedem login
+  (`login_wall_pages`, RF-RA028: contado na consulta, nunca guardado) e o top
+  #{@top_issues_limit} das regras confirmadas, numa instrução só.
 
   Top #{@top_issues_limit}: regras com achados confirmados, por páginas afetadas
   (decrescente), severidade mais grave, ocorrências (decrescente) e `rule_id`. A severidade
@@ -118,9 +121,10 @@ defmodule Rampa.Audits.Report do
   @spec summary(String.t()) :: {:ok, summary()} | {:error, :audit_not_found}
   def summary(id) do
     with {:ok, uuid} <- CanonicalUUID.cast(id),
-         [{%Audit{} = audit, counts, _top} | _] = rows <- Repo.all(summary_query(uuid)) do
+         [{%Audit{} = audit, counts, login_wall_pages, _top} | _] = rows <-
+           Repo.all(summary_query(uuid)) do
       top =
-        for {_audit, _counts, %{issue: %{rule_id: rule_id}} = row} <- rows,
+        for {_audit, _counts, _login_wall_pages, %{issue: %{rule_id: rule_id}} = row} <- rows,
             rule_id != nil,
             do: top_issue(row)
 
@@ -132,6 +136,7 @@ defmodule Rampa.Audits.Report do
          totals_by_severity: confirmed,
          needs_review_by_severity: review,
          needs_review_count: needs_review,
+         login_wall_pages: login_wall_pages,
          top_issues: top
        }}
     else
@@ -146,6 +151,7 @@ defmodule Rampa.Audits.Report do
   defp summary_query(audit_id) do
     from a in Audit,
       cross_join: c in subquery(FindingCounts.query(:audit_id, audit_id)),
+      cross_join: l in subquery(login_wall_pages_query(audit_id)),
       left_join: t in subquery(top_issues_query(audit_id)),
       as: :top,
       on: true,
@@ -158,7 +164,14 @@ defmodule Rampa.Audits.Report do
         desc: t.occurrences,
         asc: t.rule_id
       ],
-      select: {a, c, %{issue: t, sample: s}}
+      select: {a, c, l.count, %{issue: t, sample: s}}
+  end
+
+  # Páginas que pedem login (RF-RA028). Agregado sem `GROUP BY`: sempre uma linha.
+  defp login_wall_pages_query(audit_id) do
+    from p in Page,
+      where: p.audit_id == ^audit_id and p.login_wall == true,
+      select: %{count: count(p.id)}
   end
 
   # O achado confirmado mais grave da regra (o primeiro gravado no empate). Lê pelo índice

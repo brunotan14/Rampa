@@ -22,7 +22,7 @@ export type AxeSelector = string;
  */
 export type AxeTarget = (AxeSelector | AxeSelector[])[];
 /**
- * Códigos de erro do scanner. O status HTTP de cada um fica em `x-http-status` (palavra-chave própria do Rampa, sem efeito na validação). `blocked_address`: a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url`: URL com credenciais ou host inválido. `resource_limit`: a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout`: a página não carregou em 30 s ou a análise passou do limite total. `http_error`: o documento respondeu com status >= 400 (`detail`: "HTTP 404"); o axe não roda. `navigation_failed`: a página não abriu. `analysis_failed`: a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).
+ * Códigos de erro do scanner. O status HTTP de cada um fica em `x-http-status` (palavra-chave própria do Rampa, sem efeito na validação). `blocked_address`: a URL, um salto de redirecionamento do documento ou uma navegação do documento principal vai para endereço proibido ou porta fora de 80/443. `invalid_url`: URL com credenciais ou host inválido. `resource_limit`: a varredura passou do teto de dados ou de conexões simultâneas do proxy de saída. `timeout`: a página não carregou em 30 s ou a análise passou do limite total. `http_error`: o documento respondeu com status >= 400 (`detail`: "HTTP 404", e o status em `http_status`); o axe não roda. `navigation_failed`: a página não abriu. `analysis_failed`: a página abriu, mas a coleta falhou depois (axe, título, contexto destruído).
  */
 export type ScanErrorCode =
   | "blocked_address"
@@ -55,6 +55,7 @@ export interface ScanResponse {
    * Requisições fora do documento principal recusadas pela proteção contra SSRF (endereço, nome ou porta), no route ou só no proxy, cada uma contada uma vez. Satura em 10000.
    */
   blocked_requests: number;
+  login_wall?: LoginWallFacts;
 }
 /**
  * Resultado do axe-core (RF-RA003), só com os campos do contrato. O scanner não decide severidade.
@@ -139,6 +140,15 @@ export interface AxePass {
   nodes_total: number;
 }
 /**
+ * Fatos para o aviso de barreira de login (RF-RA028), sem decisão: quem decide se a página pede login é o backend, junto com `final_url` e `http_status`. Opcional (acrescentado sem subir a versão): ausente quando a checagem falhou ou num scanner anterior; o backend grava "não sabido" (`NULL`). Nada da página vem aqui além de um booleano.
+ */
+export interface LoginWallFacts {
+  /**
+   * Há um `input[type=password]` (sem diferenciar maiúsculas) visível no documento principal: com tamanho, fora de `display: none` e de `visibility: hidden`. Frames não contam.
+   */
+  password_field: boolean;
+}
+/**
  * Resposta de erro, com o status HTTP dado pelo código (`x-http-status` em `ScanErrorCode`).
  */
 export interface ScanError {
@@ -148,6 +158,10 @@ export interface ScanError {
    * Explicação técnica para log, em texto livre; pode citar a página. Cortada em 2048 caracteres.
    */
   detail: string;
+  /**
+   * Status HTTP do documento, só no `http_error` (RF-RA029). Opcional (acrescentado sem subir a versão): o backend usa este campo, nunca o `detail`, e trata a ausência como status desconhecido.
+   */
+  http_status?: number;
 }
 
 /**

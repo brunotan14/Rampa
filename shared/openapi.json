@@ -29,6 +29,12 @@
             ],
             "type": "string"
           },
+          "http_status": {
+            "description": "Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro (`http_error`). Ausente quando não há status. A `message` já o cita.",
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
           "message": {
             "type": "string"
           }
@@ -93,6 +99,11 @@
             "description": "Criação (UTC).",
             "format": "date-time",
             "type": "string"
+          },
+          "login_wall_pages": {
+            "description": "Páginas que pedem login (RF-RA028): o Rampa auditou só o que um visitante anônimo vê. Maior que zero, a tela mostra o aviso de barreira de login.",
+            "minimum": 0,
+            "type": "integer"
           },
           "needs_review_by_severity": {
             "allOf": [
@@ -182,6 +193,7 @@
           "totals_by_severity",
           "needs_review_by_severity",
           "needs_review_count",
+          "login_wall_pages",
           "top_issues",
           "error",
           "started_at",
@@ -898,6 +910,11 @@
             "format": "uuid",
             "type": "string"
           },
+          "login_wall": {
+            "description": "A página pede login (RF-RA028): status 401 ou 403, ou campo de senha visível depois de um redirecionamento para outro caminho ou origem. `null` quando o Rampa não sabe (fatos ausentes).",
+            "nullable": true,
+            "type": "boolean"
+          },
           "needs_review_count": {
             "minimum": 0,
             "type": "integer"
@@ -949,6 +966,7 @@
           "status",
           "http_status",
           "error",
+          "login_wall",
           "scanned_at",
           "counts_by_severity",
           "needs_review_count",
@@ -1017,6 +1035,11 @@
             "format": "uuid",
             "type": "string"
           },
+          "login_wall": {
+            "description": "A página pede login (RF-RA028): status 401 ou 403, ou campo de senha visível depois de um redirecionamento para outro caminho ou origem. `null` quando o Rampa não sabe (fatos ausentes).",
+            "nullable": true,
+            "type": "boolean"
+          },
           "needs_review_count": {
             "minimum": 0,
             "type": "integer"
@@ -1059,6 +1082,7 @@
           "status",
           "http_status",
           "error",
+          "login_wall",
           "scanned_at",
           "counts_by_severity",
           "needs_review_count",

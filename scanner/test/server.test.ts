@@ -16,11 +16,13 @@ const fixturesDir = new URL("./fixtures/", import.meta.url);
 // Resultado esperado de cada fixture (`<nome>.expected.json`). `violations` é comparação
 // exata (regra, impacto e número de nós); `incomplete` é "contém pelo menos". `passes`
 // (RF-RA017) é conferido por subconjunto: as regras de `passes_include` estão lá e as de
-// `passes_exclude` não (a lista exata muda com a versão do axe).
+// `passes_exclude` não (a lista exata muda com a versão do axe). `login_wall` (RF-RA028) é
+// comparação exata.
 interface Expected {
   title: string;
   http_status: number;
   blocked_requests: number;
+  login_wall: { password_field: boolean };
   violations: { id: string; impact: string; nodes: number }[];
   incomplete: { id: string; nodes: number }[];
   passes_include: string[];
@@ -36,6 +38,8 @@ const fixtureNames = readdirSync(fixturesDir)
 const LONG_TITLE = "Título ".repeat(200);
 const MANY_IMAGES = 30;
 const pixel = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+// Redirecionamento (302) dentro do servidor de fixtures: o destino é a página com senha.
+const redirects: Record<string, string> = { "/__redireciona-entrar": "/entrar.html" };
 const generatedPages: Record<string, string> = {
   "/__titulo-longo": `<!doctype html><html lang="pt-BR"><title>${LONG_TITLE}</title><main><h1>Oi</h1></main>`,
   "/__muitas-imagens": `<!doctype html><html lang="pt-BR"><title>Muitas imagens</title><main><h1>Galeria</h1>${Array.from(
@@ -57,6 +61,15 @@ beforeAll(async () => {
     if (req.url === "/__lento") {
       // Documento que não chega: segura a navegação até o prazo total estourar.
       hanging.add(res);
+      return;
+    }
+    if (req.url === "/__401") {
+      res.writeHead(401, { "content-type": "text/html; charset=utf-8", "www-authenticate": "Basic" }).end("<title>Entre</title>");
+      return;
+    }
+    const location = redirects[req.url ?? ""];
+    if (location) {
+      res.writeHead(302, { location }).end();
       return;
     }
     const generated = generatedPages[req.url ?? ""];
@@ -135,6 +148,7 @@ describe("POST /scan com cada fixture", () => {
     expect(body.title).toBe(expected.title);
     expect(body.http_status).toBe(expected.http_status);
     expect(body.blocked_requests).toBe(expected.blocked_requests);
+    expect(body.login_wall).toEqual(expected.login_wall);
     expect(body.axe.version).toMatch(/^4\.\d+\.\d+/);
 
     const violations = body.axe.violations
@@ -191,7 +205,13 @@ describe("POST /scan", () => {
   it("devolve http_error sem rodar o axe quando a página responde com erro", async () => {
     const res = await scan(`${fixturesUrl}/nao-existe.html`);
     expect(res.statusCode).toBe(502);
-    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "http_error", detail: "HTTP 404" });
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "http_error", detail: "HTTP 404", http_status: 404 });
+  });
+
+  it("devolve http_error com o status 401 quando a página pede autenticação (RF-RA028, RF-RA029)", async () => {
+    const res = await scan(`${fixturesUrl}/__401`);
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ contract_version: CONTRACT_VERSION, error: "http_error", detail: "HTTP 401", http_status: 401 });
   });
 
   it("devolve navigation_failed quando a página não abre", async () => {
@@ -265,6 +285,40 @@ describe("falha depois da navegação", () => {
     } finally {
       await broken.close();
     }
+  });
+});
+
+describe("RF-RA028: fatos de barreira de login", () => {
+  it("informa o campo de senha visível no destino de um redirecionamento, com a final_url", async () => {
+    const res = await scan(`${fixturesUrl}/__redireciona-entrar`);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<ScanResponse>();
+    expect(body.final_url).toBe(`${fixturesUrl}/entrar.html`);
+    expect(body.http_status).toBe(200);
+    expect(body.login_wall).toEqual({ password_field: true });
+  });
+
+  it("deixa o campo de fora quando a checagem falha, sem derrubar a varredura", async () => {
+    const broken = buildServer(
+      browser,
+      serverOptions({
+        loginWall: async () => {
+          throw new Error("Execution context was destroyed");
+        },
+      }),
+    );
+    try {
+      const res = await scanOn(broken, `${fixturesUrl}/entrar.html`);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).not.toHaveProperty("login_wall");
+    } finally {
+      await broken.close();
+    }
+  });
+
+  it("não manda nada da página além do booleano", async () => {
+    const res = await scan(`${fixturesUrl}/entrar.html`);
+    expect(Object.keys(res.json<ScanResponse>().login_wall ?? {})).toEqual(["password_field"]);
   });
 });
 

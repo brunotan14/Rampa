@@ -37,6 +37,8 @@ defmodule RampaWeb.PageControllerTest do
         url: "https://exemplo.com/b",
         status: :failed,
         error: "http_error",
+        http_status: 401,
+        login_wall: true,
         inserted_at: ~U[2026-11-10 12:00:01Z]
       })
 
@@ -65,8 +67,14 @@ defmodule RampaWeb.PageControllerTest do
     refute Map.has_key?(first, "passed_rules")
 
     assert second["error"]["code"] == "http_error"
-    assert second["error"]["message"] =~ "erro HTTP"
+    assert second["error"]["http_status"] == 401
+    assert second["error"]["message"] =~ "Esta página pede login (HTTP 401)"
+    assert second["http_status"] == 401
     assert second["passed_count"] == nil
+
+    # RF-RA028: `login_wall` em toda página; `null` quando não se sabe.
+    assert first["login_wall"] == nil
+    assert second["login_wall"] == true
   end
 
   # Critério de aceite do RF-RA017 no backend: a lista de aprovadas sai com a regra.
@@ -93,6 +101,7 @@ defmodule RampaWeb.PageControllerTest do
       |> json_response(200)
 
     assert failed["passed_rules"] == nil
+    assert failed["login_wall"] == true
   end
 
   test "página de outra auditoria é 404 page_not_found; auditoria inexistente, audit_not_found",

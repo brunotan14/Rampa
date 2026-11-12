@@ -1,0 +1,10 @@
+{
+  "title": "Entrar",
+  "http_status": 200,
+  "blocked_requests": 0,
+  "login_wall": { "password_field": true },
+  "violations": [],
+  "incomplete": [],
+  "passes_include": ["document-title", "html-has-lang", "label"],
+  "passes_exclude": []
+}

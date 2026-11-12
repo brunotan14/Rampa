@@ -896,4 +896,203 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert received() == []
     end
   end
+
+  # RF-RA029: o status do documento no `http_error` decide a nova tentativa e fica gravado.
+  describe "RF-RA029: http_error por status" do
+    defp http_error(status),
+      do: {:error, %{code: :http_error, detail: "HTTP #{status}", http_status: status}}
+
+    test "a espera entre as tentativas vem da configuração" do
+      assert ScanPageJob.backoff(%Oban.Job{attempt: 1}) ==
+               Application.fetch_env!(:rampa, :scan_retry_backoff_seconds)
+    end
+
+    test "429, 502, 503 e 504 são passageiros; o resto do http_error é definitivo" do
+      for status <- [429, 502, 503, 504] do
+        refute ScanPageJob.definitive?(:http_error, status), "#{status}"
+      end
+
+      for status <- [400, 401, 403, 404, 405, 410, 451, 500, 501, 505, nil] do
+        assert ScanPageJob.definitive?(:http_error, status), inspect(status)
+      end
+
+      refute ScanPageJob.definitive?(:timeout, nil)
+      assert ScanPageJob.definitive?(:blocked_address, nil)
+    end
+
+    for status <- [429, 502, 503, 504] do
+      @tag :capture_log
+      test "#{status} tenta de novo e, na última tentativa, grava o status na página e na auditoria" do
+        status = unquote(status)
+        page = page_fixture()
+
+        expect_scan(page, http_error(status))
+        assert {:error, :http_error} = perform(page, attempt: 1)
+        assert %Page{status: :scanning, error: nil, http_status: nil} = reload(page)
+        assert %Audit{status: :running, error: nil, error_http_status: nil} = audit_of(page)
+
+        expect_scan(page, http_error(status))
+        assert {:cancel, :http_error} = perform(page, attempt: 2)
+
+        assert %Page{status: :failed, error: "http_error", http_status: ^status} = reload(page)
+
+        assert %Audit{status: :failed, error: "http_error", error_http_status: ^status} =
+                 audit_of(page)
+      end
+    end
+
+    for status <- [400, 401, 403, 404, 410, 500] do
+      @tag :capture_log
+      test "#{status} é definitivo na primeira tentativa, com o status gravado" do
+        status = unquote(status)
+        page = page_fixture()
+        expect_scan(page, http_error(status))
+
+        assert {:cancel, :http_error} = perform(page, attempt: 1)
+
+        assert %Page{status: :failed, error: "http_error", http_status: ^status} = reload(page)
+
+        assert %Audit{status: :failed, error: "http_error", error_http_status: ^status} =
+                 audit_of(page)
+      end
+    end
+
+    @tag :capture_log
+    test "http_error sem status é definitivo e grava status nulo" do
+      page = page_fixture()
+      expect_scan(page, {:error, %{code: :http_error, detail: "HTTP 418"}})
+
+      assert {:cancel, :http_error} = perform(page, attempt: 1)
+      assert %Page{status: :failed, http_status: nil, login_wall: nil} = reload(page)
+      assert %Audit{error: "http_error", error_http_status: nil} = audit_of(page)
+    end
+
+    @tag :capture_log
+    test "503 na primeira tentativa e timeout na última: o status fica nulo, não o do 503" do
+      page = page_fixture()
+      expect_scan(page, http_error(503))
+      assert {:error, :http_error} = perform(page, attempt: 1)
+
+      expect_scan(page, {:error, %{code: :timeout, detail: "lento"}})
+      assert {:cancel, :timeout} = perform(page, attempt: 2)
+
+      assert %Page{status: :failed, error: "timeout", http_status: nil} = reload(page)
+      assert %Audit{error: "timeout", error_http_status: nil} = audit_of(page)
+    end
+
+    @tag :capture_log
+    test "503 e depois 200: a auditoria é concluída com os achados" do
+      page = page_fixture()
+      expect_scan(page, http_error(503))
+      assert {:error, :http_error} = perform(page, attempt: 1)
+
+      expect_scan(page, {:ok, scanner_response("img-sem-alt")})
+      assert :ok = perform(page, attempt: 2)
+
+      assert %Page{status: :done, error: nil, http_status: 200} = reload(page)
+
+      assert %Audit{status: :completed, error: nil, error_http_status: nil, pages_scanned: 1} =
+               audit_of(page)
+
+      assert [%Finding{rule_id: "image-alt"}] = findings(page)
+    end
+
+    @tag :capture_log
+    test "falha que vem da reconciliação (stale) grava status nulo" do
+      page = page_fixture(%{status: :scanning, task: %{attempt: 2, requeues: 3}})
+
+      assert %{failed: 1} =
+               Rampa.Audits.reconcile_stale_tasks(
+                 now: DateTime.add(DateTime.utc_now(), 3_600),
+                 max_requeues: 0
+               )
+
+      assert %Page{status: :failed, error: "stale", http_status: nil, login_wall: nil} =
+               reload(page)
+    end
+  end
+
+  # RF-RA028: a página guarda a decisão de `Rampa.Audits.LoginWall` sobre os fatos do scanner.
+  describe "RF-RA028: barreira de login" do
+    defp with_login(final_url, password_field) do
+      scanner_response("limpa")
+      |> Map.put("final_url", final_url)
+      |> Map.put("login_wall", %{"password_field" => password_field})
+    end
+
+    test "redirecionamento para uma tela com senha marca a página e conta no resumo" do
+      page = page_fixture(%{url: "https://exemplo.com/painel"})
+      expect_scan(page, {:ok, with_login("https://exemplo.com/entrar", true)})
+
+      assert :ok = perform(page)
+
+      assert %Page{status: :done, login_wall: true} = reload(page)
+      assert {:ok, %{login_wall_pages: 1}} = Rampa.Audits.get_audit_summary(page.audit_id)
+    end
+
+    test "senha visível sem redirecionamento não é barreira" do
+      page = page_fixture(%{url: "https://exemplo.com/"})
+      expect_scan(page, {:ok, with_login("https://exemplo.com/", true)})
+
+      assert :ok = perform(page)
+
+      assert %Page{login_wall: false} = reload(page)
+      assert {:ok, %{login_wall_pages: 0}} = Rampa.Audits.get_audit_summary(page.audit_id)
+    end
+
+    test "limpa.html, sem senha: não é barreira" do
+      page = page_fixture(%{url: "https://exemplo.com/limpa.html"})
+      expect_scan(page, {:ok, with_login("https://exemplo.com/limpa.html", false)})
+
+      assert :ok = perform(page)
+      assert %Page{login_wall: false} = reload(page)
+    end
+
+    test "scanner sem o campo login_wall: não se sabe" do
+      page = page_fixture()
+      expect_scan(page, {:ok, scanner_response("limpa")})
+
+      assert :ok = perform(page)
+      assert %Page{login_wall: nil} = reload(page)
+    end
+
+    @tag :capture_log
+    test "401 marca barreira mesmo com a página falha, e conta no resumo" do
+      page = page_fixture()
+
+      expect_scan(
+        page,
+        {:error, %{code: :http_error, detail: "HTTP 401", http_status: 401}}
+      )
+
+      assert {:cancel, :http_error} = perform(page, attempt: 1)
+
+      assert %Page{status: :failed, login_wall: true, http_status: 401} = reload(page)
+      assert {:ok, %{login_wall_pages: 1}} = Rampa.Audits.get_audit_summary(page.audit_id)
+    end
+
+    @tag :capture_log
+    test "404 não marca barreira (não se sabe)" do
+      page = page_fixture()
+
+      expect_scan(
+        page,
+        {:error, %{code: :http_error, detail: "HTTP 404", http_status: 404}}
+      )
+
+      assert {:cancel, :http_error} = perform(page, attempt: 1)
+      assert %Page{status: :failed, login_wall: nil} = reload(page)
+    end
+
+    test "a resposta real do scanner, pelo cliente HTTP, chega com o login_wall" do
+      page = page_fixture(%{url: "https://exemplo.com/painel"})
+      body = with_login("https://exemplo.com/entrar", true)
+
+      Req.Test.stub(HTTP, &Req.Test.json(&1, body))
+      expect(ClientMock, :scan, &HTTP.scan/1)
+
+      assert :ok = perform(page)
+      assert %Page{login_wall: true} = reload(page)
+    end
+  end
 end

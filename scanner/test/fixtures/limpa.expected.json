@@ -2,6 +2,7 @@
   "title": "Página limpa",
   "http_status": 200,
   "blocked_requests": 0,
+  "login_wall": { "password_field": false },
   "violations": [],
   "incomplete": [],
   "passes_include": ["image-alt", "document-title", "html-has-lang"],

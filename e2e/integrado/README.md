@@ -41,6 +41,8 @@ compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsí
 - `apiError(result)`: confere o formato `{ error: { code, message } }` e devolve o `error`.
 - `getAudit(request, id)` e `waitForAuditEnd(request, id, { timeoutMs })`: resumo; o segundo espera `completed`, `failed` ou `cancelled` (padrão 60 s).
 - `listFindings(request, id, { filters })`: todos os achados, seguindo o cursor.
+- `listPages(request, id)`: as páginas da auditoria (`http_status`, `error`, `login_wall`).
+- `fixtureHits(request, "instavel/<uuid>")`: quantas vezes uma rota com contador do site de fixtures foi pedida.
 - `scanDirect(request, url)`: resposta do scanner, com `blocked_requests` (não é gravado no banco).
 - `retryAfterSeconds(result)`: o cabeçalho `Retry-After` de uma recusa 429.
 
@@ -59,6 +61,8 @@ Também em `support/`: `messages.ts` (os textos de `error.message` que os crité
 | `rf-ra002-protecao-ssrf.spec.ts` | RF-RA002 CA1, CA2, CA3 e CA6 |
 | `rf-ra002-limites.spec.ts` | RF-RA002 CA4, `X-Forwarded-For` fora da faixa confiável e teto diário (os dois baldes exclusivos) |
 | `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |
+| `rf-ra028-barreira-login.spec.ts` | RF-RA028 CA1 a CA3 pela API (`login_wall` da página e `login_wall_pages` do resumo) e a senha sem redirecionamento; o aviso na tela vem na `feat/tela-relatorio` e o CA4 (medição) está nos testes do backend |
+| `rf-ra029-falha-acesso.spec.ts` | RF-RA029 CA1 a CA4 pela API: mensagem e `http_status` do 404, nova tentativa no 503, 503 e depois 200, e a nova auditoria da mesma URL (o botão "Auditar de novo" e o CA5 vêm com a tela) |
 | `frontend-servido.spec.ts` | PRD §7 e RNF-RA008: o app serve o build do React (fallback da SPA no link direto) com a CSP, sem violação no navegador do início ao fim da auditoria |
 
 O RF-RA002 CA5 (produção não sobe com a allowlist) e o isolamento de rede do scanner são
@@ -79,7 +83,21 @@ provados pelos scripts da seção abaixo, não pelos specs.
 ## Fixtures
 
 Em `http://fixtures/`: as páginas de `scanner/test/fixtures/` (`img-sem-alt.html`,
-`limpa.html`, `contraste-incerto.html`; `/` serve a `limpa.html`; caminho inexistente dá 404).
+`limpa.html`, `contraste-incerto.html`, `entrar.html` com campo de senha, `senha-escondida.html`;
+`/` serve a `limpa.html`; caminho inexistente dá 404) e as rotas do RF-RA028 e do RF-RA029
+(`infra/test/fixtures-nginx.conf`; as com contador em `infra/test/fixtures-njs.js`):
+
+| Caminho | O que faz |
+|---|---|
+| `painel` | 302 para `/entrar.html` (tela com campo de senha) |
+| `restrito` | 401 |
+| `instavel/<uuid>` | 503 na primeira visita, depois a `img-sem-alt.html` (200) |
+| `sempre-503/<uuid>` | 503 sempre |
+| `instavel/<uuid>/hits`, `sempre-503/<uuid>/hits` | `{"hits": N}`: quantas vezes o documento foi pedido |
+
+Use um UUID novo por teste nas rotas com contador. No Compose de teste a nova tentativa da
+varredura sai 1 s depois da falha passageira (`config/e2e.exs`).
+
 Em `http://fixtures/ssrf/` (`fixtures/` desta pasta e `infra/test/fixtures-nginx.conf`):
 
 | Caminho | O que faz | Resultado observado |

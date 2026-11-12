@@ -39,6 +39,8 @@ defmodule Rampa.Audits.Audit do
     field :requester_ip_hash, :string
     field :idempotency_key, :string
     field :error, :string
+    # Status HTTP da página cuja falha encerrou a auditoria (RF-RA029), junto com `error`.
+    field :error_http_status, :integer
     field :started_at, :utc_datetime
     field :finished_at, :utc_datetime
     field :expires_at, :utc_datetime
@@ -66,7 +68,10 @@ defmodule Rampa.Audits.Audit do
     |> unique_constraint(:idempotency_key, name: :audits_requester_idempotency_key_index)
   end
 
-  @doc "Mudança de andamento feita pelos jobs: status, contadores, erro e horários."
+  @doc """
+  Mudança de andamento feita pelos jobs: status, contadores, erro (com o status HTTP da página
+  que falhou) e horários.
+  """
   @spec progress_changeset(t(), map()) :: Ecto.Changeset.t()
   def progress_changeset(audit, attrs) do
     audit
@@ -76,10 +81,12 @@ defmodule Rampa.Audits.Audit do
       :pages_scanned,
       :pages_failed,
       :error,
+      :error_http_status,
       :started_at,
       :finished_at
     ])
     |> validate_required([:status])
+    |> validate_number(:error_http_status, greater_than_or_equal_to: 100, less_than: 600)
     |> validate_number(:pages_found, greater_than_or_equal_to: 0)
     |> validate_number(:pages_scanned, greater_than_or_equal_to: 0)
     |> validate_number(:pages_failed, greater_than_or_equal_to: 0)
@@ -87,6 +94,7 @@ defmodule Rampa.Audits.Audit do
     |> check_constraint(:status, name: :status_valid)
     |> check_constraint(:pages_found, name: :counters_non_negative)
     |> check_constraint(:finished_at, name: :finished_requires_finished_at)
+    |> check_constraint(:error_http_status, name: :error_http_status_range)
   end
 
   @doc "Estados em que a auditoria não aceita mais mudança."

@@ -144,14 +144,19 @@ defmodule Rampa.Scanner.Contract do
   @doc """
   Interpreta o corpo de uma resposta de erro (HTTP diferente de 200). O código vem primeiro:
 
-    * `"error"` com um código do contrato → `{:ok, %{code, detail}}` com o código real, mesmo
-      com a versão ausente ou diferente (só um aviso no log) e mesmo fora do schema: o
-      `detail` é cortado no limite do contrato, ou vira `"HTTP <status>"` se faltar;
+    * `"error"` com um código do contrato → `{:ok, %{code, detail, http_status}}` com o código
+      real, mesmo com a versão ausente ou diferente (só um aviso no log) e mesmo fora do
+      schema: o `detail` é cortado no limite do contrato, ou vira `"HTTP <status>"` se faltar.
+      `http_status` (RF-RA029) é o status do documento que o scanner informou no campo
+      próprio, só no `http_error` e só se for inteiro de 400 a 599; fora disso, `nil`. Nunca é
+      lido do `detail`, que é texto livre;
     * código desconhecido com `contract_version` de outra versão → `:contract_mismatch`;
     * qualquer outra coisa → `:unknown` (o cliente decide pelo status HTTP).
   """
   @spec scanner_error(pos_integer(), term()) ::
-          {:ok, %{code: atom(), detail: String.t()}} | {:error, failure()} | :unknown
+          {:ok, %{code: atom(), detail: String.t(), http_status: 400..599 | nil}}
+          | {:error, failure()}
+          | :unknown
   def scanner_error(status, %{"error" => name} = body)
       when is_map_key(@error_codes_by_name, name) do
     warn_divergent_version(body["contract_version"], name)
@@ -160,13 +165,23 @@ defmodule Rampa.Scanner.Contract do
       Logger.warning("erro do scanner fora do contrato (#{name}): #{detail}")
     end
 
-    {:ok, %{code: Map.fetch!(@error_codes_by_name, name), detail: error_detail(body, status)}}
+    code = Map.fetch!(@error_codes_by_name, name)
+
+    {:ok,
+     %{code: code, detail: error_detail(body, status), http_status: document_status(code, body)}}
   end
 
   def scanner_error(_status, %{"contract_version" => version}) when version != @version,
     do: mismatch(version)
 
   def scanner_error(_status, _body), do: :unknown
+
+  # Status do documento no `http_error`: só o campo próprio, inteiro de 400 a 599.
+  defp document_status(:http_error, %{"http_status" => status})
+       when is_integer(status) and status in 400..599,
+       do: status
+
+  defp document_status(_code, _body), do: nil
 
   defp error_detail(%{"detail" => detail}, _status) when is_binary(detail),
     do: String.slice(detail, 0, @detail_max_length)

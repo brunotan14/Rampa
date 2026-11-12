@@ -28,6 +28,8 @@ defmodule Rampa.Audits.Page do
     # "nodes_total"}`, sem as que também falharam na página
     # (`Rampa.Audits.AxeMapper.passed_rules/1`). `nil` = não coletado.
     field :passed_rules, JSONList
+    # A página pede login (RF-RA028), segundo `Rampa.Audits.LoginWall`. `nil` = não sabido.
+    field :login_wall, :boolean
 
     belongs_to :audit, Audit
     has_many :findings, Finding
@@ -62,7 +64,8 @@ defmodule Rampa.Audits.Page do
       :title,
       :axe_version,
       :scanned_at,
-      :passed_rules
+      :passed_rules,
+      :login_wall
     ])
     |> validate_required([:status])
     |> validate_number(:http_status, greater_than_or_equal_to: 100, less_than: 600)

@@ -42,7 +42,8 @@ defmodule Rampa.Scanner.HTTPTest do
         })
       end)
 
-      assert HTTP.scan("https://exemplo.com/") == {:error, %{code: code, detail: "detalhe"}}
+      assert HTTP.scan("https://exemplo.com/") ==
+               {:error, %{code: code, detail: "detalhe", http_status: nil}}
     end
   end
 
@@ -144,7 +145,49 @@ defmodule Rampa.Scanner.HTTPTest do
       error_stub(502, %{"contract_version" => "1", "error" => "http_error"})
 
       assert HTTP.scan("https://exemplo.com/") ==
-               {:error, %{code: :http_error, detail: "HTTP 502"}}
+               {:error, %{code: :http_error, detail: "HTTP 502", http_status: nil}}
+    end
+
+    # RF-RA029: o status do documento vem do campo próprio, nunca do `detail` (texto livre).
+    test "http_error com http_status devolve o status do documento" do
+      error_stub(502, %{
+        "contract_version" => "1",
+        "error" => "http_error",
+        "detail" => "HTTP 503",
+        "http_status" => 503
+      })
+
+      assert HTTP.scan("https://exemplo.com/") ==
+               {:error, %{code: :http_error, detail: "HTTP 503", http_status: 503}}
+    end
+
+    @tag :capture_log
+    test "http_status fora de 400 a 599 ou que não é inteiro vira nil, sem ler o detail" do
+      for status <- [999, 200, 399, 600, "503", 503.0, nil] do
+        error_stub(502, %{
+          "contract_version" => "1",
+          "error" => "http_error",
+          "detail" => "HTTP 503",
+          "http_status" => status
+        })
+
+        assert HTTP.scan("https://exemplo.com/") ==
+                 {:error, %{code: :http_error, detail: "HTTP 503", http_status: nil}},
+               "http_status #{inspect(status)}"
+      end
+    end
+
+    @tag :capture_log
+    test "http_status em outro código que não http_error é ignorado" do
+      error_stub(504, %{
+        "contract_version" => "1",
+        "error" => "timeout",
+        "detail" => "lento",
+        "http_status" => 503
+      })
+
+      assert HTTP.scan("https://exemplo.com/") ==
+               {:error, %{code: :timeout, detail: "lento", http_status: nil}}
     end
 
     @tag :capture_log
@@ -171,7 +214,9 @@ defmodule Rampa.Scanner.HTTPTest do
               %{"contract_version" => "9", "error" => Atom.to_string(code), "detail" => "d"}
             ] do
           error_stub(422, body)
-          assert HTTP.scan("https://exemplo.com/") == {:error, %{code: code, detail: "d"}}
+
+          assert HTTP.scan("https://exemplo.com/") ==
+                   {:error, %{code: code, detail: "d", http_status: nil}}
         end
       end
     end

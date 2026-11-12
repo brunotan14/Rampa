@@ -61,6 +61,11 @@ config :rampa, :task_reconciliation,
 # (100 s) + gravação, com folga, e abaixo do `timeout` do job (3 min), que fica de reserva.
 config :rampa, :scan_deadline_ms, 150_000
 
+# Espera, em segundos, antes da nova tentativa de uma varredura com falha passageira
+# (`ScanPageJob.backoff/1`: `timeout`, scanner fora do ar, site com 429/502/503/504). Fixa,
+# sem ler o `Retry-After` do site. Curta só no Compose de teste (`config/e2e.exs`).
+config :rampa, :scan_retry_backoff_seconds, 20
+
 config :rampa, :scanner_client, Rampa.Scanner.HTTP
 
 # Proteção contra SSRF (RF-RA002): DNS atrás de behaviour; `:env` permite a
