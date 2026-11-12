@@ -13,8 +13,9 @@ name: Deploy
 #
 # Segredos: `DEPLOY_SSH_KEY`, `DEPLOY_HOST` e `DEPLOY_KNOWN_HOSTS` existem só no environment
 # `staging` (restrito à `main`). Num workflow reutilizável, o `environment` fica no job DESTE
-# arquivo, e os segredos do environment chegam direto a esse job, sem `secrets: inherit` no
-# chamador. O host nunca aparece no log nem no arquivo (o environment não declara `url`).
+# arquivo, e o chamador (`ci.yml`) passa `secrets: inherit`: sem ele os segredos do
+# environment chegam vazios. No `workflow_dispatch` chegam direto. O host nunca aparece no
+# log nem no arquivo (o environment não declara `url`).
 #
 # Sem actions de terceiros (regra do repositório): login, build e push pelo próprio `docker`.
 
