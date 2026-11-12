@@ -11,6 +11,27 @@ export function plural(count: number, one: string, many: string): string {
 const numberFormat = new Intl.NumberFormat("pt-BR");
 export const formatNumber = (value: number) => numberFormat.format(value);
 
+// Datas e horas no fuso de quem usa (04-conteudo.md: `10/11/2026`, `14:32`).
+const timeFormat = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const timeSecondsFormat = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const dateFormat = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+export const formatTime = (date: Date) => timeFormat.format(date);
+export const formatTimeWithSeconds = (date: Date) => timeSecondsFormat.format(date);
+export const formatDate = (date: Date) => dateFormat.format(date);
+
+const sameDay = (a: Date, b: Date) => formatDate(a) === formatDate(b);
+
+/** "das 14:32" no mesmo dia; "de 13/11/2026, às 00:00" em outro dia. */
+export function formatFrom(date: Date, now: Date = new Date()): string {
+  return sameDay(date, now) ? `das ${formatTime(date)}` : `de ${formatDate(date)}, às ${formatTime(date)}`;
+}
+
+/** "às 14:00" no mesmo dia; "em 12/11/2026, às 14:00" em outro dia. */
+export function formatAt(date: Date, now: Date = new Date()): string {
+  return sameDay(date, now) ? `às ${formatTime(date)}` : `em ${formatDate(date)}, às ${formatTime(date)}`;
+}
+
 /** Códigos com mensagem própria: os da API, os de erro de página/auditoria e os do cliente. */
 export type ErrorMessageCode = KnownErrorCode | AuditError["code"];
 
@@ -72,11 +93,149 @@ export const ptBR = {
     footer: "Rampa: auditoria de acessibilidade web, em português.",
   },
   home: {
+    // O h1 é igual ao <title>; o trecho em destaque é só visual (cor do cerrado).
     title: "Seu site, para todo mundo",
-    intro:
-      "O Rampa está em construção. Em breve você vai colar o endereço do seu site e descobrir o que impede pessoas de usá-lo, e como corrigir.",
+    titleEmphasis: "todo mundo",
+    pill: "Auditoria de acessibilidade em português",
+    lead: "Cole o endereço. Em poucos minutos você sabe o que impede pessoas de usar o seu site e como corrigir.",
+    trustLabel: "O que vem em toda auditoria",
+    trust: ["Critérios da WCAG 2.2 nível AA", "Verificação automática com o axe-core", "Relatório em português"],
+    howTitle: "Como funciona",
+    how: [
+      {
+        title: "Cole o endereço",
+        text: "O Rampa abre a página num navegador de verdade, como uma pessoa faria. Por enquanto, analisamos só a página do endereço informado.",
+      },
+      {
+        title: "A gente verifica",
+        text: "O axe-core confere as regras automáticas da WCAG 2.2 nível AA e aponta onde cada problema aparece.",
+      },
+      {
+        title: "Você corrige",
+        text: "Cada problema vem com a regra, o critério da WCAG e o trecho de código onde ele está.",
+      },
+    ],
+    // "Um relatório que todo mundo entende" (TelaInicial): exemplo com dados fictícios.
+    example: {
+      title: "Um relatório que todo mundo entende",
+      note: "Exemplo com dados fictícios.",
+      score: 72,
+      scoreText: "Para quem decide: uma nota, o que ela significa e o que fazer primeiro.",
+      summaryTitle: "47 problemas em 56 páginas",
+      barLabel: "Problemas por severidade no exemplo",
+      counts: { critico: 5, serio: 8, moderado: 11, menor: 12, revisao: 11 },
+    },
     disclaimer:
       "A verificação automática não garante conformidade e não substitui a avaliação com pessoas e tecnologias assistivas.",
+  },
+  // design/components/ScoreIndicator (PRD §10.6: sempre com este rótulo; nunca "nota de
+  // acessibilidade" nem "conformidade").
+  score: {
+    label: "Indicador de problemas encontrados automaticamente",
+    outOf: "de 100",
+    bands: {
+      excelente: "Excelente",
+      bom: "Bom",
+      atencao: "Precisa de atenção",
+      graves: "Barreiras graves",
+    },
+  },
+  // design/components/UrlAuditField
+  urlField: {
+    form: "Nova auditoria",
+    label: "Endereço do site",
+    hint: "Ex.: exemplo.com.br. Por enquanto, o Rampa analisa só a página deste endereço.",
+    submit: "Auditar",
+    submitting: "Iniciando…",
+    empty: "Cole o endereço do site que você quer auditar.",
+    // 429 com `retry_after`: o horário vai no fuso de quem usa (`formatFrom`).
+    rateLimited: (from: string) => `Você atingiu o limite de auditorias por hora. Tente de novo a partir ${from}.`,
+    dailyLimitReached: (from: string) => `O limite de auditorias de hoje acabou. Tente de novo a partir ${from}.`,
+  },
+  audit: {
+    loadingTitle: "Carregando auditoria",
+    loading: "Carregando a auditoria…",
+    // h1 da tela de progresso (TelaVarredura), com o host quando já se sabe.
+    title: {
+      running: (host: string) => `Auditando ${host}`,
+      completed: (host: string) => `Auditoria de ${host} concluída`,
+      failed: (host: string) => `A auditoria de ${host} parou`,
+      cancelled: (host: string) => `Auditoria de ${host} cancelada`,
+    },
+    titleNoHost: {
+      running: "Auditoria em andamento",
+      completed: "Auditoria concluída",
+      failed: "A auditoria parou",
+      cancelled: "Auditoria cancelada",
+    },
+    started: (when: string, pages: string) => `Iniciada ${when} · WCAG 2.2 nível AA · até ${pages}`,
+    notFoundTitle: "Auditoria não encontrada",
+    notFoundState: "Não encontramos esta auditoria",
+    loadErrorTitle: "Não conseguimos carregar a auditoria",
+    retry: "Tentar de novo",
+    newAudit: "Fazer uma nova auditoria",
+    viewReport: "Ver relatório",
+    steps: {
+      label: "Etapas da auditoria",
+      // No M2 a etapa vem do `status` (PRD §9); a análise de IA entra no M4.
+      items: ["Na fila", "Varredura automática", "Relatório"],
+      state: { done: "concluída", current: "em andamento", pending: "pendente", stopped: "interrompida" },
+    },
+    // design/components/ScanProgress
+    scan: {
+      title: {
+        queued: "Na fila para começar",
+        discovering: "Procurando páginas…",
+        running: "Analisando o site…",
+        done: "Varredura concluída",
+        failed: "A varredura parou",
+        cancelled: "Varredura cancelada",
+      },
+      progressIndeterminate: "Procurando páginas, total ainda desconhecido",
+      progressValue: (pct: number, finished: number, found: number) =>
+        `${formatNumber(pct)}%, ${formatNumber(finished)} de ${plural(found, "página verificada", "páginas verificadas")}`,
+      statsLabel: "Páginas",
+      found: "Encontradas",
+      scanned: "Analisadas",
+      failed: "Com falha",
+      // 04-conteudo.md, "Anúncios para leitor de tela": a cada 25%, no máximo uma vez a cada 10 s.
+      // Os números são os mesmos do percentual (páginas terminadas, com e sem falha).
+      milestone: (pct: number, finished: number, found: number, failed: number) =>
+        `${formatNumber(pct)}% concluído. ${formatNumber(finished)} de ${plural(found, "página verificada", "páginas verificadas")}` +
+        (failed > 0 ? `, ${formatNumber(failed)} com falha.` : "."),
+      leaveHint: "Você pode sair desta página e voltar pelo mesmo endereço: a auditoria continua.",
+      failedFallback: "Não conseguimos continuar a auditoria.",
+    },
+    connection: {
+      connecting: "Conectando ao andamento ao vivo…",
+      open: "Ao vivo",
+      reconnecting: "Sem conexão. Tentando reconectar; os números podem estar atrasados.",
+      // Join recusado (ex.: `channel_limit_reached`): o resumo é buscado a cada 30 s.
+      offlineTitle: "Sem atualização ao vivo",
+      offlineText: "Os números são atualizados a cada 30 segundos.",
+    },
+    findings: {
+      titleRunning: "Problemas encontrados até agora",
+      titleDone: "Problemas encontrados",
+      note: "Só os problemas que a verificação automática confirmou. Os números mudam até o fim da varredura.",
+      noteDone: "Só os problemas que a verificação automática confirmou.",
+    },
+    // design/components/ActivityFeed
+    feed: {
+      title: "Atividade",
+      empty: "Esperando a primeira página…",
+      page: "Página",
+      scanned: (problems: number) => `analisada: ${plural(problems, "problema", "problemas")}`,
+      failed: (reason: string) => `com falha. ${reason}`,
+    },
+    report: {
+      title: (host: string) => `Relatório de ${host}`,
+      titleNoHost: "Relatório da auditoria",
+      stateTitle: "O relatório está em construção",
+      summary: (problems: number, pages: number) =>
+        `A auditoria terminou: ${plural(problems, "problema", "problemas")} em ${plural(pages, "página", "páginas")}.`,
+      text: "Em breve o relatório completo vai aparecer aqui. Guarde o endereço desta página para voltar depois.",
+    },
   },
   notFound: {
     title: "Página não encontrada",
@@ -92,14 +251,13 @@ export const ptBR = {
   report: {
     // Títulos provisórios das rotas do relatório; as telas entram na `feat/tela-relatorio`.
     titles: {
-      audit: "Auditoria",
       pages: "Páginas da auditoria",
       page: "Página da auditoria",
       finding: "Problema da auditoria",
     },
     underConstruction: {
       title: "Esta tela está em construção",
-      text: "Em breve o andamento e o relatório desta auditoria vão aparecer aqui. Guarde o endereço desta página para voltar depois.",
+      text: "Em breve esta parte do relatório vai aparecer aqui. Guarde o endereço desta página para voltar depois.",
       back: "Voltar para a página inicial",
     },
   },
@@ -120,6 +278,13 @@ export const ptBR = {
       menor: "Menor",
       sucesso: "Aprovado",
       revisao: "Confirme manualmente",
+    },
+    // Cabeçalho de contagem (cards da tela de progresso).
+    plural: {
+      critico: "Críticos",
+      serio: "Sérios",
+      moderado: "Moderados",
+      menor: "Menores",
     },
     // Com contagem: "3 críticos", "1 sério", "12 menores".
     count: {

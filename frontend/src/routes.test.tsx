@@ -6,7 +6,6 @@ const PAGE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 
 describe("rotas", () => {
   it.each([
-    [`/auditorias/${AUDIT}`, "Auditoria"],
     [`/auditorias/${AUDIT}/paginas`, "Páginas da auditoria"],
     [`/auditorias/${AUDIT}/paginas/${PAGE}`, "Página da auditoria"],
     [`/auditorias/${AUDIT}/problemas/${PAGE}`, "Problema da auditoria"],

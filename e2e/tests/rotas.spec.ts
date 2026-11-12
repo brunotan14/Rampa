@@ -2,10 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { axeViolations } from "./a11y.js";
 
 // Rotas da base do frontend (M2, feat/frontend-base): o aviso de tela em construção das rotas
-// da auditoria e o 404, com axe, teclado, reflow e espaçamento de texto.
+// do relatório e o 404, com axe, teclado, reflow e espaçamento de texto. A própria auditoria
+// (`/auditorias/:id`) tem a tela de progresso (`tela-progresso.spec.ts`).
 const AUDIT = "3f2b8c1e-7a4d-4e5f-9b0c-1d2e3f4a5b6c";
 const SCREENS = [
-  { path: `/auditorias/${AUDIT}`, h1: "Auditoria" },
   { path: `/auditorias/${AUDIT}/paginas`, h1: "Páginas da auditoria" },
   { path: "/auditorias/nao-e-um-id", h1: "Página não encontrada" },
   { path: "/nao-existe", h1: "Página não encontrada" },
@@ -58,7 +58,7 @@ for (const { path, h1 } of SCREENS) {
 }
 
 test("na tela em construção, a ordem do Tab é pular, logo, navegação, voltar", async ({ page }) => {
-  await page.goto(`/auditorias/${AUDIT}`);
+  await page.goto(`/auditorias/${AUDIT}/paginas`);
   const order = ["Pular para o conteúdo", "Rampa, página inicial", "Nova auditoria", "Voltar para a página inicial"];
   for (const name of order) {
     await page.keyboard.press("Tab");
@@ -67,7 +67,7 @@ test("na tela em construção, a ordem do Tab é pular, logo, navegação, volta
 });
 
 test("seguir um link interno leva o foco ao h1 da nova tela e troca o título", async ({ page }) => {
-  await page.goto(`/auditorias/${AUDIT}`);
+  await page.goto(`/auditorias/${AUDIT}/paginas`);
   await page.getByRole("link", { name: "Voltar para a página inicial" }).focus();
   await page.keyboard.press("Enter");
   const h1 = page.getByRole("heading", { level: 1, name: "Seu site, para todo mundo" });
@@ -77,7 +77,7 @@ test("seguir um link interno leva o foco ao h1 da nova tela e troca o título", 
 });
 
 test("o foco do teclado tem anel visível nos links da tela", async ({ page }) => {
-  await page.goto(`/auditorias/${AUDIT}`);
+  await page.goto(`/auditorias/${AUDIT}/paginas`);
   for (let i = 0; i < 4; i++) {
     await page.keyboard.press("Tab");
     const outline = await page.evaluate(() => {

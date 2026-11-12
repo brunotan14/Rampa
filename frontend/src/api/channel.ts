@@ -86,7 +86,11 @@ export interface AuditChannelState {
   revision: number | null;
   progress: ChannelProgress | null;
   connection: ConnectionState;
-  /** Join recusado (`audit_not_found`, `channel_limit_reached`): o canal para de tentar. */
+  /**
+   * Join recusado (`audit_not_found`, `channel_limit_reached`): o canal para de tentar. Fora
+   * o `audit_not_found`, o estado continua chegando pelo `GET /api/audits/:id` periódico
+   * (a cada `SILENCE_MS`), sem atualização ao vivo.
+   */
   error: ApiError | null;
   /** Páginas terminadas, na ordem de chegada (para o feed de atividade da tela). */
   pages: PageActivity[];
@@ -144,7 +148,8 @@ export function mergePages(feed: readonly PageActivity[], list: readonly PageSum
   return added.length === 0 ? (feed as PageActivity[]) : [...feed, ...added];
 }
 
-function announcementFor(progress: ChannelProgress): string {
+/** Texto da região viva para uma auditoria encerrada (conclusão, falha ou cancelamento). */
+export function announcementFor(progress: ChannelProgress): string {
   switch (progress.status) {
     case "completed":
       return t.channel.completed(totalProblems(progress.totals_by_severity), progress.pages_scanned, progress.pages_failed);
@@ -208,13 +213,14 @@ function toIncoming(event: AuditChannelEvent | "join", payload: unknown): Incomi
   return incoming;
 }
 
-function fromSummary(summary: AuditSummary): Incoming {
+/** O `progress` contido no resumo de `GET /api/audits/:id` (mesmos nomes, PRD §9). */
+export function progressFromSummary(summary: AuditSummary): ChannelProgress {
   const { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error } = summary;
-  return {
-    revision: summary.revision,
-    progress: { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error },
-    source: "get",
-  };
+  return { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error };
+}
+
+function fromSummary(summary: AuditSummary): Incoming {
+  return { revision: summary.revision, progress: progressFromSummary(summary), source: "get" };
 }
 
 function joinError(response: unknown): ApiError {
@@ -339,11 +345,12 @@ export function useAuditChannel(auditId: string): AuditChannelState {
     };
 
     // Regra 3: 30 s sem evento com a auditoria em andamento → GET. Encerrada, não há mais
-    // evento a esperar.
+    // evento a esperar. Sem canal (join recusado por outro motivo que não a auditoria
+    // inexistente), é este GET que mantém a tela em dia.
     function checkSilence() {
       silenceTimer = null;
       const { progress, error } = stateRef.current;
-      if (!active || error !== null || (progress !== null && isFinalStatus(progress.status))) return;
+      if (!active || error?.code === "audit_not_found" || (progress !== null && isFinalStatus(progress.status))) return;
       queryClient
         .fetchQuery({
           queryKey: queryKeys.audit(auditId),
@@ -382,10 +389,14 @@ export function useAuditChannel(auditId: string): AuditChannelState {
       })
       .receive("error", (response) => {
         if (!active) return;
-        // Auditoria inexistente ou limite de canais: tentar de novo não muda a resposta.
+        // Auditoria inexistente ou limite de canais: tentar o join de novo não muda a resposta.
         leave();
-        commit({ ...stateRef.current, error: joinError(response) });
+        const error = joinError(response);
+        commit({ ...stateRef.current, error });
         if (silenceTimer !== null) clearTimeout(silenceTimer);
+        silenceTimer = null;
+        // Sem canal, o estado vem do GET: um agora e depois um a cada `SILENCE_MS`.
+        if (error.code !== "audit_not_found") checkSilence();
       })
       .receive("timeout", () => {
         if (active && stateRef.current.connection === "open") commit({ ...stateRef.current, connection: "reconnecting" });

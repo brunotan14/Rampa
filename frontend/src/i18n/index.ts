@@ -2,7 +2,16 @@
 // entra como outro arquivo com a mesma forma de `ptBR`.
 import { ptBR } from "./pt-BR";
 
-export { formatNumber, plural, type ErrorMessageCode } from "./pt-BR";
+export {
+  formatAt,
+  formatDate,
+  formatFrom,
+  formatNumber,
+  formatTime,
+  formatTimeWithSeconds,
+  plural,
+  type ErrorMessageCode,
+} from "./pt-BR";
 
 export const t = ptBR;
 
