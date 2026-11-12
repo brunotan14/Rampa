@@ -26,6 +26,7 @@ Saída em `e2e/test-results/integrado/` (`report/`, `artifacts/` com os traces e
 | `env.apiDailyUrl` (`http://app-daily-via-proxy:4000`) | Instância com `AUDITS_DAILY_LIMIT=3`, banco próprio. |
 | `env.scannerUrl` (`http://scanner:4100`) | Scanner direto (`POST /scan`). |
 | `env.fixturesUrl` (`http://fixtures`) | Site de fixtures, como o app e o scanner o enxergam. |
+| `env.webUrl` (`http://web`) | Frontend (build do React em nginx, `infra/test/web.Dockerfile`), com `/api` e `/socket` repassados ao app pela faixa confiável. Para os casos que usam o navegador; o IP simulado vai no `X-Forwarded-For` do contexto. |
 
 Use sempre esses nomes, nunca o nome do serviço (`app`): ele resolve em qualquer rede
 compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsível.
@@ -53,7 +54,8 @@ Também em `support/`: `messages.ts` (os textos de `error.message` que os crité
 | Spec | Cobre |
 |---|---|
 | `smoke.spec.ts` | Fumaça de ponta a ponta; é o RF-RA003 CA1 (`img-sem-alt.html`) |
-| `rf-ra001-iniciar-auditoria.spec.ts` | RF-RA001 CA1 a CA3. A tela de progresso (CA1) está como `fixme` até o M2 |
+| `rf-ra001-iniciar-auditoria.spec.ts` | RF-RA001 CA1 a CA3, com o CA1 também pela tela (formulário → tela de progresso) |
+| `rf-ra004-progresso.spec.ts` | RF-RA004 CA1 e CA2 com o canal real (uma página no M2); a queda de conexão (CA3) e as 5 páginas ficam no `make e2e`, com o canal simulado |
 | `rf-ra002-protecao-ssrf.spec.ts` | RF-RA002 CA1, CA2, CA3 e CA6 |
 | `rf-ra002-limites.spec.ts` | RF-RA002 CA4, `X-Forwarded-For` fora da faixa confiável e teto diário (os dois baldes exclusivos) |
 | `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |

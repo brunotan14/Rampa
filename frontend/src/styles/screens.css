@@ -1,0 +1,143 @@
+/* Telas montadas (design/components/Tela*). Só tokens de tokens.css. */
+
+/* --- Tela inicial: faixa de destaque em azulejo profundo ------------------------------------
+   Um tema local: os tokens semânticos são redefinidos dentro da faixa (TelaInicial, contraste
+   conferido no design system: texto 15,97:1, dica 10,58:1, botão 7,99:1, anel 7,55:1). As cores
+   são fixas, então valem nos três temas. */
+.rp-hero-band {
+  --surface: var(--azulejo-950);
+  --surface-raised: var(--concreto-0);
+  --ink: var(--concreto-50);
+  --ink-muted: var(--azulejo-200);
+  --line: var(--azulejo-800);
+  --line-strong: var(--concreto-400);
+  --action: var(--azulejo-300);
+  --action-hover: var(--azulejo-200);
+  --action-active: var(--azulejo-100);
+  --on-action: var(--concreto-950);
+  --focus-ring: var(--azulejo-300);
+  --link: var(--azulejo-200);
+  --critico: var(--carmim-200);
+  --brand-accent: var(--cerrado-300);
+  --button-primary-bg: var(--action);
+  --button-primary-bg-hover: var(--action-hover);
+  --button-primary-bg-active: var(--action-active);
+  --button-primary-ink: var(--on-action);
+  --input-bg: var(--concreto-0);
+  --input-border: var(--concreto-400);
+  --input-border-error: var(--carmim-200);
+  background: var(--surface);
+  color: var(--ink);
+  overflow: hidden;
+}
+.rp-hero-band__grid {
+  display: grid;
+  gap: var(--space-8);
+  align-items: center;
+  padding-block: var(--space-12);
+}
+@media (min-width: 64em) {
+  .rp-hero-band__grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); padding-block: var(--space-20); }
+}
+.rp-hero-band__copy { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+.rp-hero-band .rp-display { font-size: clamp(2.25rem, 1.4rem + 3vw, 3.75rem); line-height: 1.05; margin: 0; overflow-wrap: anywhere; }
+.rp-hero-band .rp-lead { color: var(--azulejo-100); font-size: 1.1875rem; margin: 0; }
+.rp-hero-band .rp-url__input { color: var(--concreto-900); }
+
+.rp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: var(--border-1) solid var(--azulejo-500);
+  color: var(--azulejo-100);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.rp-trust {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  color: var(--azulejo-100);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.rp-trust li { display: inline-flex; align-items: center; gap: var(--space-2); }
+.rp-trust .rp-icon { color: var(--mata-200); }
+
+.rp-mosaic { display: block; width: 100%; max-width: calc(var(--space-20) * 6); height: auto; justify-self: end; }
+@media (max-width: 47.99em) {
+  .rp-mosaic { max-width: calc(var(--space-16) * 4); justify-self: start; }
+}
+.rp-mosaic__bg { fill: var(--azulejo-950); }
+.rp-mosaic__tile--a5 { fill: var(--azulejo-500); }
+.rp-mosaic__tile--a3 { fill: var(--azulejo-300); }
+.rp-mosaic__tile--a7 { fill: var(--azulejo-700); }
+.rp-mosaic__tile--c5 { fill: var(--cerrado-500); }
+.rp-mosaic__tile--c3 { fill: var(--cerrado-300); }
+.rp-mosaic__tile--k { fill: var(--concreto-50); }
+
+@keyframes rp-tile-in {
+  from { opacity: 0; transform: rotate(-12deg) scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rp-mosaic__tile {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: rp-tile-in calc(var(--duration-slow) * 2) var(--ease-enter) both;
+    animation-delay: calc(var(--i, 0) * var(--duration-fast) / 2 + var(--duration-fast));
+  }
+}
+
+.rp-home .rp-section { max-width: var(--container); }
+.rp-howto {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--space-20) * 3)), 1fr));
+  counter-reset: passo;
+}
+.rp-howto li {
+  counter-increment: passo;
+  padding: var(--space-5) var(--space-6);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--elevation-1);
+}
+/* Numeração "01", "02", "03" (TelaInicial): a ordem já vem da lista numerada. Em cerrado só
+   como texto grande (24px): `brand-accent` dá 4,43:1 no claro, acima dos 3:1 de texto grande. */
+.rp-howto li::before {
+  content: counter(passo, decimal-leading-zero);
+  display: block;
+  margin-block-end: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--brand-accent);
+}
+.rp-howto .rp-h3 { font-size: 1.0625rem; }
+.rp-howto p { margin: 0; color: var(--ink-muted); }
+.rp-disclaimer { margin-block-start: var(--space-10); }
+
+/* --- Tela de progresso ------------------------------------------------------------------- */
+.rp-audit__live { margin-block-start: var(--space-6); }
+
+@media (forced-colors: active) {
+  /* As cores fixas da faixa dão lugar às do sistema (o navegador pinta o fundo de Canvas). */
+  .rp-hero-band { --ink: CanvasText; --ink-muted: CanvasText; --critico: CanvasText; --brand-accent: CanvasText; border-block-end: var(--border-1) solid CanvasText; }
+  .rp-hero-band, .rp-hero-band .rp-lead, .rp-hero-band .rp-url__input, .rp-trust, .rp-pill { color: CanvasText; }
+  .rp-pill { border-color: CanvasText; }
+  .rp-howto li::before { color: CanvasText; }
+}

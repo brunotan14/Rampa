@@ -3,13 +3,23 @@
 // vai para o h1 da nova tela, que o leitor de tela anuncia (03-padroes-de-tela.md).
 // Só o que o MVP tem: sem Entrar, Planos, Histórico nem conta (pós-MVP, PRD §5).
 import { useEffect, useRef } from "react";
-import { NavLink, Link as RouterLink, Outlet, useLocation } from "react-router";
+import { NavLink, Link as RouterLink, Outlet, useLocation, useMatches } from "react-router";
 import { Logo } from "../components/Logo";
 import { SkipLink } from "../components/SkipLink";
 import { t } from "../i18n";
 
+/** `handle` de rota: `fullBleed` deixa a tela de ponta a ponta (a faixa da tela inicial). */
+export interface RouteHandle {
+  fullBleed?: boolean;
+}
+
+function isFullBleed(handle: unknown): boolean {
+  return typeof handle === "object" && handle !== null && (handle as RouteHandle).fullBleed === true;
+}
+
 export function AppShell() {
   const { pathname } = useLocation();
+  const fullBleed = useMatches().some((match) => isFullBleed(match.handle));
   const mainRef = useRef<HTMLElement>(null);
   // Caminho da última tela que já recebeu o foco (ou da primeira carga). Guardado na
   // renderização inicial, não no efeito: a dupla execução do efeito no StrictMode vê o mesmo
@@ -43,7 +53,13 @@ export function AppShell() {
           </nav>
         </div>
       </header>
-      <main id="conteudo" tabIndex={-1} ref={mainRef} className="rp-container rp-main">
+      {/* De ponta a ponta, a própria tela põe o contêiner em cada faixa. */}
+      <main
+        id="conteudo"
+        tabIndex={-1}
+        ref={mainRef}
+        className={fullBleed ? "rp-main rp-main--bleed" : "rp-container rp-main"}
+      >
         <Outlet />
       </main>
       <footer className="rp-footer">

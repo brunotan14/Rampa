@@ -144,7 +144,8 @@ export function mergePages(feed: readonly PageActivity[], list: readonly PageSum
   return added.length === 0 ? (feed as PageActivity[]) : [...feed, ...added];
 }
 
-function announcementFor(progress: ChannelProgress): string {
+/** Texto da região viva para uma auditoria encerrada (conclusão, falha ou cancelamento). */
+export function announcementFor(progress: ChannelProgress): string {
   switch (progress.status) {
     case "completed":
       return t.channel.completed(totalProblems(progress.totals_by_severity), progress.pages_scanned, progress.pages_failed);
@@ -208,13 +209,14 @@ function toIncoming(event: AuditChannelEvent | "join", payload: unknown): Incomi
   return incoming;
 }
 
-function fromSummary(summary: AuditSummary): Incoming {
+/** O `progress` contido no resumo de `GET /api/audits/:id` (mesmos nomes, PRD §9). */
+export function progressFromSummary(summary: AuditSummary): ChannelProgress {
   const { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error } = summary;
-  return {
-    revision: summary.revision,
-    progress: { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error },
-    source: "get",
-  };
+  return { status, pages_found, pages_scanned, pages_failed, totals_by_severity, needs_review_count, error };
+}
+
+function fromSummary(summary: AuditSummary): Incoming {
+  return { revision: summary.revision, progress: progressFromSummary(summary), source: "get" };
 }
 
 function joinError(response: unknown): ApiError {

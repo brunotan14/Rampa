@@ -23,6 +23,8 @@ export const env = {
   scannerUrl: required("RAMPA_SCANNER_URL"),
   /** Site de fixtures como o app e o scanner o enxergam (liberado pela `SSRF_ALLOWLIST`). */
   fixturesUrl: required("RAMPA_FIXTURES_URL"),
+  /** Frontend (nginx com o build do React), com `/api` e `/socket` repassados ao app. */
+  webUrl: required("RAMPA_WEB_URL"),
   /** Faixa confiável configurada no app, para conferência. */
   trustedProxies: required("RAMPA_TRUSTED_PROXIES"),
 };

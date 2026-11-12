@@ -13,6 +13,7 @@ import "@fontsource/atkinson-hyperlegible-mono/500.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
+import "./styles/screens.css";
 
 import { createQueryClient } from "./api/queryClient";
 import { routes } from "./routes";

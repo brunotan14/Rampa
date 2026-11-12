@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { apiError, createAudit, fixtureUrl, getAudit, newClientIp, postAudit } from "./support/api.js";
-import { limits } from "./support/env.js";
+import { env, limits } from "./support/env.js";
 import { attachObserved, requireObserved, requirement } from "./support/evidence.js";
 import { messages } from "./support/messages.js";
 
-// RF-RA001: iniciar auditoria por URL. No M1 não há tela de início: os critérios são
-// verificados pela API, que devolve a mensagem pronta para exibir (PRD §9). A tela de
-// progresso e a mensagem no formulário entram no M2.
+// RF-RA001: iniciar auditoria por URL. Os critérios são verificados pela API, que devolve a
+// mensagem pronta para exibir (PRD §9), e o CA1 também pela tela: o formulário da tela inicial
+// leva à tela de progresso (M2), no frontend do serviço `web` do Compose de teste.
 
 const CA1 =
   "RF-RA001 CA1: Dado uma URL pública válida, quando inicio a auditoria, então recebo o identificador e sou levado à tela de progresso.";
@@ -40,11 +40,45 @@ test.describe("RF-RA001: iniciar auditoria por URL", () => {
     },
   );
 
-  // A tela de progresso é do M2 (RF-RA004); no M1 o frontend não tem o formulário de início.
-  test.fixme(
+  test(
     "RF-RA001 CA1: depois de iniciar, a pessoa é levada à tela de progresso",
     { annotation: requirement(CA1) },
-    async () => {},
+    async ({ browser, request }, testInfo) => {
+      // O navegador abre o frontend (`web`), que repassa `/api` e `/socket` ao app pela faixa
+      // confiável; o IP simulado vai no `X-Forwarded-For`, como nos outros casos.
+      const context = await browser.newContext({
+        baseURL: env.webUrl,
+        locale: "pt-BR",
+        extraHTTPHeaders: { "X-Forwarded-For": newClientIp() },
+      });
+      const page = await context.newPage();
+      const url = fixtureUrl("img-sem-alt.html");
+
+      await page.goto("/");
+      await page.getByRole("textbox", { name: "Endereço do site" }).fill(url);
+      await page.getByRole("button", { name: "Auditar" }).click();
+      await page.waitForURL(/\/auditorias\/[0-9a-f-]{36}$/);
+
+      const id = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+      const h1 = page.getByRole("heading", { level: 1 });
+      await expect(h1).toHaveText(/^(Auditando fixtures|Auditoria de fixtures concluída)$/);
+      const audit = await getAudit(request, id);
+      await attachObserved(testInfo, {
+        path: new URL(page.url()).pathname,
+        h1: await h1.textContent(),
+        h1Focused: await h1.evaluate((el) => el === document.activeElement),
+        title: await page.title(),
+        progressbar: await page.getByRole("progressbar").getAttribute("aria-valuetext"),
+        audit,
+      });
+
+      expect(id).toMatch(UUID);
+      expect(audit).toMatchObject({ id, start_url: url });
+      await expect(h1).toBeFocused();
+      await expect(page).toHaveTitle(/^(Auditando fixtures|Auditoria de fixtures concluída) – Rampa$/);
+      await expect(page.getByRole("progressbar")).toBeVisible();
+      await context.close();
+    },
   );
 
   for (const url of NON_WEB_URLS) {

@@ -61,6 +61,11 @@ export function severityIcon(severity: Severity): IconName {
   return severity;
 }
 
+/** Rótulo no plural, para cabeçalho de contagem: "Críticos", "Menores". */
+export function severityPluralLabel(severity: FindingSeverity): string {
+  return t.severity.plural[severity];
+}
+
 /** Definição curta, para legenda e dica. */
 export function severityDescription(severity: Severity): string {
   return t.severity.description[severity];

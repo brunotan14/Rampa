@@ -1,6 +1,6 @@
-// Rotas da auditoria (RF-RA014) enquanto as telas não chegam: a tela de progresso entra na
-// `feat/tela-inicial-progresso` e o relatório na `feat/tela-relatorio`. Id que não é um UUID
-// canônico cai no 404, como na API.
+// Rotas do relatório (RF-RA014) enquanto as telas não chegam (`feat/tela-relatorio`): páginas,
+// uma página e um problema. A própria auditoria (`/auditorias/:id`) é a `AuditPage`. Id que
+// não é um UUID canônico cai no 404, como na API.
 import { useParams } from "react-router";
 import { Link } from "../components/Link";
 import { PageTitle } from "../components/PageTitle";

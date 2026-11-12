@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
-import { AppShell } from "./layout/AppShell";
+import { AppShell, type RouteHandle } from "./layout/AppShell";
+import { AuditPage } from "./pages/AuditPage";
 import { AuditPlaceholderPage } from "./pages/AuditPlaceholderPage";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -14,8 +15,10 @@ export const routes: RouteObject[] = [
       {
         errorElement: <RouteErrorPage />,
         children: [
-          { index: true, element: <HomePage /> },
-          { path: "auditorias/:id", element: <AuditPlaceholderPage view="audit" /> },
+          // A faixa da tela inicial vai de ponta a ponta (TelaInicial).
+          { index: true, element: <HomePage />, handle: { fullBleed: true } satisfies RouteHandle },
+          // Progresso enquanto a auditoria anda; relatório (ainda em construção) depois.
+          { path: "auditorias/:id", element: <AuditPage /> },
           { path: "auditorias/:id/paginas", element: <AuditPlaceholderPage view="pages" /> },
           { path: "auditorias/:id/paginas/:pageId", element: <AuditPlaceholderPage view="page" /> },
           { path: "auditorias/:id/problemas/:findingId", element: <AuditPlaceholderPage view="finding" /> },
