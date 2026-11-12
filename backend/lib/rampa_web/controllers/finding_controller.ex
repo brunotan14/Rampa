@@ -25,7 +25,8 @@ defmodule RampaWeb.FindingController do
       "Achados em páginas, na ordem em que foram gravados (`sort=recorded`) ou do mais " <>
         "grave para o menos grave, com os da mesma regra juntos (`sort=severity`). Para a " <>
         "próxima página, envie o `next_cursor` recebido no parâmetro `cursor`, com a mesma " <>
-        "ordem; `null` indica a última. `total` é quantos achados passam nos filtros. " <>
+        "ordem; `null` indica a última. `total` é quantos achados passam nos filtros, só na " <>
+        "primeira página (do instante dela); com `cursor`, `null`. " <>
         "Achado com `needs_review = true` é sugestão a confirmar manualmente.",
     parameters: [
       audit_id: [

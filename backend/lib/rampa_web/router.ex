@@ -4,7 +4,6 @@ defmodule RampaWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug OpenApiSpex.Plug.PutApiSpec, module: RampaWeb.ApiSpec
-    plug RampaWeb.Plugs.ApiHeaders
   end
 
   scope "/api", RampaWeb do

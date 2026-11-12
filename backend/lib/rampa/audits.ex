@@ -58,6 +58,7 @@ defmodule Rampa.Audits do
     AxeMapper,
     Events,
     Finding,
+    FindingCounts,
     Limits,
     Page,
     PageData,
@@ -67,7 +68,7 @@ defmodule Rampa.Audits do
     ScanPageJob
   }
 
-  alias Rampa.Repo
+  alias Rampa.{CanonicalUUID, Repo}
   alias Rampa.Security.URLGuard
 
   # Limite de parâmetros do PostgreSQL (65 535) dividido pelas colunas de `findings`, com folga.
@@ -329,7 +330,7 @@ defmodule Rampa.Audits do
   # COMMITTED`, uma instrução enxerga um único instante, então a `revision` nunca vem de um
   # commit e os totais de outro. Dentro de uma transação, enxerga as próprias escritas.
   defp read_snapshot(id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(id),
+    with {:ok, uuid} <- CanonicalUUID.cast(id),
          {%Audit{} = audit, counts} <- Repo.one(snapshot_query(uuid)) do
       {totals, needs_review} = split_counts(counts)
       {:ok, audit, totals, needs_review}
@@ -347,23 +348,13 @@ defmodule Rampa.Audits do
       select: {a, c}
   end
 
-  # A única contagem de achados do andamento, por auditoria (`:audit_id`) ou por página
-  # (`:page_id`): confirmados (`needs_review = false`) por severidade e os que pedem
-  # revisão. Usada pelo snapshot e pelo `page_scanned`, para os dois nunca divergirem.
-  defp finding_counts(scope, id) when scope in [:audit_id, :page_id] do
-    from f in Finding,
-      where: field(f, ^scope) == ^id,
-      select: %{
-        critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
-        serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
-        moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
-        minor: filter(count(f.id), f.severity == :minor and not f.needs_review),
-        needs_review: filter(count(f.id), f.needs_review)
-      }
-  end
+  # Contagem única (`Rampa.Audits.FindingCounts`), a mesma do resumo e das páginas da API.
+  defp finding_counts(scope, id), do: FindingCounts.query(scope, id)
 
-  defp split_counts(%{needs_review: needs_review} = counts),
-    do: {Map.delete(counts, :needs_review), needs_review}
+  defp split_counts(counts) do
+    {confirmed, _review, needs_review} = FindingCounts.split(counts)
+    {confirmed, needs_review}
+  end
 
   defp progress(%Audit{} = audit, totals, needs_review) do
     %{
@@ -380,7 +371,7 @@ defmodule Rampa.Audits do
   @type findings_page :: %{
           data: [Finding.t()],
           next_cursor: String.t() | nil,
-          total: non_neg_integer()
+          total: non_neg_integer() | nil
         }
 
   @doc """
@@ -412,8 +403,8 @@ defmodule Rampa.Audits do
       existe (apagada por uma nova varredura durante a auditoria) ou de outra auditoria:
       `{:error, :invalid_cursor}`.
 
-  `next_cursor` é `nil` na última página; `total` é quantos achados passam nos filtros (sem
-  o cursor). Auditoria inexistente: `{:error, :audit_not_found}`.
+  `next_cursor` é `nil` na última página. `total` é quantos achados passam nos filtros, só na
+  primeira página (sem cursor), do instante dela; com cursor, `nil`. Auditoria inexistente: `{:error, :audit_not_found}`.
   """
   @spec list_findings(String.t(), map()) ::
           {:ok, findings_page()}
@@ -435,9 +426,14 @@ defmodule Rampa.Audits do
       {data, rest} = Enum.split(rows, limit)
       next_cursor = if rest == [], do: nil, else: encode_cursor(sort, List.last(data))
 
-      {:ok, %{data: data, next_cursor: next_cursor, total: Repo.aggregate(filtered, :count)}}
+      {:ok, %{data: data, next_cursor: next_cursor, total: total(filtered, after_key)}}
     end
   end
+
+  # `total` só na primeira página: contar de novo a cada página custaria uma varredura dos
+  # achados filtrados por requisição, e o número é o do instante da primeira página.
+  defp total(filtered, nil), do: Repo.aggregate(filtered, :count)
+  defp total(_filtered, _after_key), do: nil
 
   defp fetch_findings_page(filtered, sort, limit, after_key, audit_id) do
     filtered
@@ -448,7 +444,7 @@ defmodule Rampa.Audits do
   end
 
   defp fetch_audit(id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(id),
+    with {:ok, uuid} <- CanonicalUUID.cast(id),
          %Audit{} = audit <- Repo.get(Audit, uuid) do
       {:ok, audit}
     else
@@ -478,7 +474,7 @@ defmodule Rampa.Audits do
   defp severity_values, do: Map.new(Finding.severities(), &{Atom.to_string(&1), &1})
   defp source_values, do: Map.new(Finding.sources(), &{Atom.to_string(&1), &1})
 
-  defp cast_page_id(raw) when is_binary(raw), do: Ecto.UUID.cast(raw)
+  defp cast_page_id(raw) when is_binary(raw), do: CanonicalUUID.cast(raw)
   defp cast_page_id(_invalid), do: :error
 
   defp cast_wcag(raw) when is_binary(raw),
@@ -562,7 +558,7 @@ defmodule Rampa.Audits do
   defp decode_cursor(_sort, _invalid), do: {:error, :invalid_cursor}
 
   defp decode_cursor_key(:severity, @severity_cursor_prefix <> id) do
-    case Ecto.UUID.cast(id) do
+    case CanonicalUUID.cast(id) do
       {:ok, id} -> {:ok, {:anchor, id}}
       :error -> {:error, :invalid_cursor}
     end
@@ -576,7 +572,7 @@ defmodule Rampa.Audits do
          # Nenhum achado é anterior a 1970; antes do mínimo do `timestamptz` a consulta levantaria exceção.
          true <- unix >= 0,
          {:ok, inserted_at} <- DateTime.from_unix(unix, :microsecond),
-         {:ok, id} <- Ecto.UUID.cast(id) do
+         {:ok, id} <- CanonicalUUID.cast(id) do
       {:ok, {inserted_at, id}}
     else
       _invalid -> {:error, :invalid_cursor}
@@ -1019,12 +1015,35 @@ defmodule Rampa.Audits do
       title: PageData.truncate_bytes(result["title"], @title_max_bytes),
       axe_version: axe["version"],
       scanned_at: now,
-      passed_rules: AxeMapper.passed_rules(axe)
+      passed_rules: fit_passed_rules(axe)
     }
   end
 
-  # A lista de regras aprovadas vem do scanner: recusada pelo banco (acima de 64 KB), é
-  # recusa causada pelos dados do scanner, como um achado inválido.
+  # A lista de regras aprovadas é secundária: passar do limite do banco corta a lista (ou a
+  # deixa `nil`, "não coletado"), nunca derruba a varredura e os achados reais da página. O
+  # aviso no log não leva conteúdo da página.
+  @passed_rules_max_bytes 65_536
+
+  defp fit_passed_rules(axe) do
+    case AxeMapper.fit_passed_rules(AxeMapper.passed_rules(axe), @passed_rules_max_bytes) do
+      {rules, :ok} ->
+        rules
+
+      {rules, {:cut, kept, total}} ->
+        Logger.warning("regras aprovadas acima de 64 KB: gravadas #{kept} de #{total}")
+        rules
+
+      {nil, {:dropped, total}} ->
+        Logger.warning(
+          "regras aprovadas acima de 64 KB: nenhuma das #{total} coube, gravado nulo"
+        )
+
+        nil
+    end
+  end
+
+  # Última defesa: a lista já foi cortada para caber (`fit_passed_rules/1`). Se o banco ainda
+  # a recusar, é recusa causada pelos dados do scanner, como um achado inválido.
   defp refresh_scanned(page, tasks, attrs) do
     case refresh_page(page, tasks, attrs) do
       {:error, %Ecto.Changeset{errors: errors} = changeset} ->

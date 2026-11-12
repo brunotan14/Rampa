@@ -251,4 +251,32 @@ defmodule Rampa.Audits.AxeMapperTest do
       assert [_] = AxeMapper.passed_rules(%{"passes" => [pass("a"), pass("a")]})
     end
   end
+
+  describe "fit_passed_rules/2" do
+    defp passed(i, help),
+      do: %{
+        "rule_id" => "r#{i}",
+        "wcag_criteria" => ["1.1.1"],
+        "help" => help,
+        "nodes_total" => i
+      }
+
+    test "cabe: devolve a lista inteira" do
+      rules = for i <- 1..3, do: passed(i, "x")
+      assert AxeMapper.fit_passed_rules(rules, 65_536) == {rules, :ok}
+      assert AxeMapper.fit_passed_rules(nil, 10) == {nil, :ok}
+      assert AxeMapper.fit_passed_rules([], 10) == {[], :ok}
+    end
+
+    test "não cabe: corta do fim, mantendo a ordem" do
+      rules = for i <- 1..10, do: passed(i, String.duplicate("a", 100))
+      assert {kept, {:cut, n, 10}} = AxeMapper.fit_passed_rules(rules, 700)
+      assert kept == Enum.take(rules, n) and n in 1..9
+    end
+
+    test "nem o primeiro item cabe: nil" do
+      assert AxeMapper.fit_passed_rules([passed(1, String.duplicate("a", 100))], 50) ==
+               {nil, {:dropped, 1}}
+    end
+  end
 end

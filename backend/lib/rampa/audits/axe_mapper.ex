@@ -126,6 +126,49 @@ defmodule Rampa.Audits.AxeMapper do
 
   def passed_rules(_axe), do: nil
 
+  @doc """
+  Corta a lista de regras aprovadas para caber em `max_bytes` na coluna `pages.passed_rules`
+  (o check do banco mede `octet_length(passed_rules::text)`). Ordem estável: remove do fim
+  até caber. Se nem o primeiro item couber sozinho, devolve `nil` ("não coletado"). O tamanho é estimado por cima da representação em texto do
+  `jsonb` (que põe um espaço depois de cada `,` e `:`), então o que passa aqui passa no banco.
+
+  Devolve a lista (ou `nil`) e o que aconteceu: `:ok`, `{:cut, mantidas, total}` ou
+  `{:dropped, total}`, para o aviso no log, sem conteúdo.
+  """
+  @spec fit_passed_rules([map()] | nil, pos_integer()) ::
+          {[map()] | nil,
+           :ok | {:cut, non_neg_integer(), pos_integer()} | {:dropped, pos_integer()}}
+  def fit_passed_rules(nil, _max_bytes), do: {nil, :ok}
+
+  def fit_passed_rules(rules, max_bytes) when is_list(rules) do
+    sizes = Enum.map(rules, &item_bytes/1)
+    total = length(rules)
+
+    # `[` e `]`, mais `, ` entre os itens.
+    kept =
+      sizes
+      |> Enum.scan(fn size, acc -> acc + size + 2 end)
+      |> Enum.take_while(&(&1 + 2 <= max_bytes))
+      |> length()
+
+    cond do
+      kept == total -> {rules, :ok}
+      kept == 0 -> {nil, {:dropped, total}}
+      true -> {Enum.take(rules, kept), {:cut, kept, total}}
+    end
+  end
+
+  # Por cima do texto do `jsonb`: o JSON compacto mais um espaço por `:` e por `,` (no
+  # máximo dois por chave, e um por item de lista dentro do item).
+  defp item_bytes(item) do
+    extra =
+      Enum.reduce(item, 0, fn {_key, value}, acc ->
+        acc + 2 + if(is_list(value), do: length(value), else: 0)
+      end)
+
+    byte_size(Jason.encode!(item)) + extra
+  end
+
   # A regra conta como falha só por estar na lista, mesmo sem nenhum nó enviado.
   defp rule_ids(rules) do
     for rule <- List.wrap(rules), is_map(rule), is_binary(rule["id"]), do: rule["id"]

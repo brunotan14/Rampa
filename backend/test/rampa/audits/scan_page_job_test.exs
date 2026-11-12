@@ -149,8 +149,8 @@ defmodule Rampa.Audits.ScanPageJobTest do
   end
 
   # RF-RA017: `axe.passes` no limite do contrato (100 regras, `help` de 512 caracteres de 4
-  # bytes, 32 tags) passa no schema, mas passa de 64 KB no banco: recusa causada pelos dados
-  # do scanner, definitiva, sem nova tentativa. Abaixo do teto, grava.
+  # bytes, 32 tags) passa no schema, mas passa de 64 KB no banco. A lista é secundária: é
+  # cortada do fim até caber, e a varredura grava a página e os achados reais.
   describe "axe.passes hostil" do
     defp hostile_passes(count, help) do
       tags = for i <- 1..32, do: "wcag#{rem(i, 4) + 1}#{rem(i, 9) + 1}#{i}"
@@ -165,17 +165,37 @@ defmodule Rampa.Audits.ScanPageJobTest do
       expect(ClientMock, :scan, &HTTP.scan/1)
     end
 
-    test "no limite do schema: invalid_scan_result definitivo, nada gravado" do
-      page = page_fixture(%{url: "https://exemplo.com/limpa.html"})
-      scan_with_passes(hostile_passes(100, String.duplicate("😀", 512)))
+    test "no limite do schema: grava a página e os achados, com a lista cortada no fim" do
+      page = page_fixture(%{url: "https://exemplo.com/img-sem-alt.html"})
 
-      capture_log(fn -> assert {:cancel, :invalid_scan_result} = perform(page, attempt: 1) end)
+      body =
+        scanner_response("img-sem-alt")
+        |> put_in(["axe", "passes"], hostile_passes(100, String.duplicate("😀", 512)))
 
-      assert %Page{status: :failed, error: "invalid_scan_result", passed_rules: nil} =
-               reload(page)
+      Req.Test.stub(HTTP, &Req.Test.json(&1, body))
+      expect(ClientMock, :scan, &HTTP.scan/1)
 
-      assert %PageTask{status: :failed, error: "invalid_scan_result"} = scan_task(page)
-      assert %Audit{status: :failed} = audit_of(page)
+      log = capture_log([level: :warning], fn -> assert :ok = perform(page) end)
+      assert log =~ ~r/regras aprovadas acima de 64 KB: gravadas \d+ de 100/
+      # Nada da página no aviso.
+      refute log =~ "😀"
+
+      assert %Page{status: :done, error: nil, passed_rules: rules} = reload(page)
+      assert length(rules) in 1..99
+      # Ordem estável: as primeiras regras ficaram.
+      assert Enum.map(rules, & &1["rule_id"]) ==
+               Enum.map(1..length(rules), &"regra-#{&1}")
+
+      assert [%Finding{rule_id: "image-alt"}] = findings(page)
+      assert %Audit{status: :completed} = audit_of(page)
+
+      # A estimativa do corte fica por cima do que o banco mede.
+      assert %{rows: [[bytes]]} =
+               Repo.query!("SELECT octet_length(passed_rules::text) FROM pages WHERE id = $1", [
+                 Ecto.UUID.dump!(page.id)
+               ])
+
+      assert bytes <= 65_536
     end
 
     test "grande, mas abaixo de 64 KB: grava a lista inteira" do

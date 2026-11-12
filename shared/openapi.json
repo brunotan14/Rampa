@@ -673,8 +673,9 @@
             "type": "string"
           },
           "total": {
-            "description": "Quantos achados passam nos filtros, em todas as páginas da lista.",
+            "description": "Quantos achados passam nos filtros, em todas as páginas da lista. Só na primeira página (sem `cursor`), do instante dela; com `cursor`, `null`.",
             "minimum": 0,
+            "nullable": true,
             "type": "integer"
           }
         },
@@ -1370,7 +1371,7 @@
     "/api/audits/{audit_id}/findings": {
       "get": {
         "callbacks": {},
-        "description": "Achados em páginas, na ordem em que foram gravados (`sort=recorded`) ou do mais grave para o menos grave, com os da mesma regra juntos (`sort=severity`). Para a próxima página, envie o `next_cursor` recebido no parâmetro `cursor`, com a mesma ordem; `null` indica a última. `total` é quantos achados passam nos filtros. Achado com `needs_review = true` é sugestão a confirmar manualmente.",
+        "description": "Achados em páginas, na ordem em que foram gravados (`sort=recorded`) ou do mais grave para o menos grave, com os da mesma regra juntos (`sort=severity`). Para a próxima página, envie o `next_cursor` recebido no parâmetro `cursor`, com a mesma ordem; `null` indica a última. `total` é quantos achados passam nos filtros, só na primeira página (do instante dela); com `cursor`, `null`. Achado com `needs_review = true` é sugestão a confirmar manualmente.",
         "operationId": "listFindings",
         "parameters": [
           {

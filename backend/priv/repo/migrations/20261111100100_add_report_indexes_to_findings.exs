@@ -9,7 +9,11 @@ defmodule Rampa.Repo.Migrations.AddReportIndexesToFindings do
   #   * índice da ordem `sort=severity` com a paginação por âncora:
   #     `(audit_id, severity_rank, rule_id, inserted_at, id)`;
   #   * índice das ocorrências por regra (`Rampa.Audits.rule_occurrences/2`: top 5, detalhe e
-  #     "onde mais aparece"): `(audit_id, rule_id, needs_review, page_id)`.
+  #     "onde mais aparece"): `(audit_id, rule_id, source, needs_review, page_id)`.
+  #
+  # A coluna gerada `STORED` reescreve a tabela `findings` (trava exclusiva durante a
+  # migration). Aceito porque ainda não há dados em produção; depois do primeiro deploy,
+  # migration em tabela grande cria índice com `concurrently` e evita reescrita.
   def up do
     execute """
     ALTER TABLE findings ADD COLUMN severity_rank smallint GENERATED ALWAYS AS (
@@ -26,13 +30,13 @@ defmodule Rampa.Repo.Migrations.AddReportIndexesToFindings do
              name: :findings_audit_severity_order_index
            )
 
-    create index(:findings, [:audit_id, :rule_id, :needs_review, :page_id],
+    create index(:findings, [:audit_id, :rule_id, :source, :needs_review, :page_id],
              name: :findings_audit_rule_occurrences_index
            )
   end
 
   def down do
-    drop index(:findings, [:audit_id, :rule_id, :needs_review, :page_id],
+    drop index(:findings, [:audit_id, :rule_id, :source, :needs_review, :page_id],
            name: :findings_audit_rule_occurrences_index
          )
 

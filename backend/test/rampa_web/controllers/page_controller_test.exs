@@ -137,6 +137,68 @@ defmodule RampaWeb.PageControllerTest do
     end
   end
 
+  # As respostas de erro fora de controller (rota inexistente, JSON malformado) saem pelo
+  # `render_errors` do Phoenix: os cabeçalhos vêm do endpoint, não do pipeline do router.
+  test "RF-RA014: cabeçalhos também nos erros fora de controller, e só em /api" do
+    missing = build_conn() |> get("/api/nao-existe")
+    assert json_response(missing, 404)["error"]["code"] == "not_found"
+
+    # Exceção do `Plug.Parsers`: no teste, o Phoenix responde e relança.
+    {400, malformed_headers, body} =
+      assert_error_sent(400, fn ->
+        build_conn()
+        |> put_req_header("content-type", "application/json")
+        |> post("/api/audits", "{nao e json")
+      end)
+
+    assert Jason.decode!(body)["error"]["code"] == "invalid_body"
+
+    for headers <- [missing.resp_headers, malformed_headers] do
+      assert {"cache-control", "no-store"} in headers
+      assert {"x-robots-tag", "noindex, nofollow"} in headers
+      assert {"referrer-policy", "no-referrer"} in headers
+    end
+
+    outside = build_conn() |> get("/robots.txt")
+    assert get_resp_header(outside, "x-robots-tag") == []
+  end
+
+  test "UUID fora da forma canônica: page_id inválido e página 404", ctx do
+    body =
+      build_conn()
+      |> get(~p"/api/audits/#{ctx.audit.id}/findings?page_id=aaaaaaaaaaaaaaaa")
+      |> json_response(422)
+
+    assert body["error"]["code"] == "invalid_filter"
+
+    body =
+      build_conn()
+      |> get(~p"/api/audits/#{ctx.audit.id}/pages/abcdefghijklmnop")
+      |> json_response(404)
+
+    assert body["error"]["code"] == "page_not_found"
+
+    body = build_conn() |> get(~p"/api/audits/abcdefghijklmnop/pages") |> json_response(404)
+    assert body["error"]["code"] == "audit_not_found"
+  end
+
+  test "nodes_total que não é número: resumo e detalhe respondem 200", ctx do
+    findings =
+      for value <- ["12", true, %{"x" => 1}],
+          do: finding_fixture(ctx.done, %{rule_id: "r", raw: %{"nodes_total" => value}})
+
+    build_conn() |> get(~p"/api/audits/#{ctx.audit.id}") |> json_response(200)
+
+    for finding <- findings do
+      body =
+        build_conn()
+        |> get(~p"/api/audits/#{ctx.audit.id}/findings/#{finding.id}")
+        |> json_response(200)
+
+      assert body["nodes_total"] == nil
+    end
+  end
+
   test "RF-RA014: o id da auditoria é UUID v4 (aleatório, não sequencial)", ctx do
     <<_::48, version::4, _::12, variant::2, _::62>> = Ecto.UUID.dump!(ctx.audit.id)
     assert {version, variant} == {4, 2}

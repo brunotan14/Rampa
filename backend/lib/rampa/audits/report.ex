@@ -12,23 +12,30 @@ defmodule Rampa.Audits.Report do
   ## Ocorrências
 
   `rule_occurrences/2` é a única contagem de ocorrências por regra: agrupa por
-  `(page_id, rule_id, needs_review)` e, em cada grupo, vale o maior entre o número de
-  achados gravados e o `nodes_total` do axe (o scanner manda no máximo 20 nós por regra, e a
-  página pode ter mais). `needs_review` separa as listas do axe: `color-contrast` em
-  `violations` e em `incomplete` na mesma página são dois grupos, e cada um conta só os
-  próprios achados. O top 5 do resumo, o detalhe de um achado e o "onde mais aparece" saem
-  dela.
+  `(rule_id, source, needs_review, page_id)` e, em cada grupo, vale o maior entre o número
+  de achados gravados e o `nodes_total` do axe (o scanner manda no máximo 20 nós por regra,
+  e a página pode ter mais). `nodes_total` só conta se for número no `jsonb` (texto,
+  booleano ou objeto valem como ausente) e tem teto. `needs_review` separa as listas do axe
+  (`color-contrast` em `violations` e em `incomplete` na mesma página são dois grupos) e
+  `source` separa o axe da IA e da heurística: cada grupo conta só os próprios achados. O
+  top 5 do resumo, o detalhe de um achado e o "onde mais aparece" saem dela.
 
   ## Resumo numa instrução
 
   `summary/1` lê a auditoria (com a `revision`), os totais por severidade (confirmados e a
-  revisar) e o top 5 numa instrução SQL só, como o snapshot do canal: no `READ COMMITTED`, uma
-  instrução enxerga um único instante, então nada do resumo vem de um commit diferente.
+  revisar, da contagem única `Rampa.Audits.FindingCounts`, a mesma do canal) e o top 5 numa
+  instrução SQL só, como o snapshot do canal: no `READ COMMITTED`, uma instrução enxerga um
+  único instante, então nada do resumo vem de um commit diferente.
+
+  O top 5 é calculado a cada `GET`, sem cache (p95 abaixo de 40 ms com 100 mil achados,
+  `make test-load`): o cliente não refaz o `GET` a cada evento, porque o canal já leva o
+  `progress`.
   """
 
   import Ecto.Query
 
-  alias Rampa.Audits.{Audit, Finding, Page}
+  alias Rampa.Audits.{Audit, Finding, FindingCounts, Page}
+  alias Rampa.CanonicalUUID
   alias Rampa.Repo
 
   @top_issues_limit 5
@@ -110,21 +117,21 @@ defmodule Rampa.Audits.Report do
   """
   @spec summary(String.t()) :: {:ok, summary()} | {:error, :audit_not_found}
   def summary(id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(id),
+    with {:ok, uuid} <- CanonicalUUID.cast(id),
          [{%Audit{} = audit, counts, _top} | _] = rows <- Repo.all(summary_query(uuid)) do
       top =
         for {_audit, _counts, %{issue: %{rule_id: rule_id}} = row} <- rows,
             rule_id != nil,
             do: top_issue(row)
 
-      {confirmed, review} = split_review(counts)
+      {confirmed, review, needs_review} = FindingCounts.split(counts)
 
       {:ok,
        %{
          audit: audit,
          totals_by_severity: confirmed,
          needs_review_by_severity: review,
-         needs_review_count: review |> Map.values() |> Enum.sum(),
+         needs_review_count: needs_review,
          top_issues: top
        }}
     else
@@ -138,7 +145,7 @@ defmodule Rampa.Audits.Report do
   # regras, e não para todos os grupos (página, regra, lista).
   defp summary_query(audit_id) do
     from a in Audit,
-      cross_join: c in subquery(severity_counts(audit_id)),
+      cross_join: c in subquery(FindingCounts.query(:audit_id, audit_id)),
       left_join: t in subquery(top_issues_query(audit_id)),
       as: :top,
       on: true,
@@ -155,7 +162,7 @@ defmodule Rampa.Audits.Report do
   end
 
   # O achado confirmado mais grave da regra (o primeiro gravado no empate). Lê pelo índice
-  # `(audit_id, rule_id, needs_review, page_id)`.
+  # `(audit_id, rule_id, source, needs_review, page_id)`.
   defp top_sample_query(audit_id) do
     from f in Finding,
       where: f.audit_id == ^audit_id and not f.needs_review,
@@ -164,37 +171,16 @@ defmodule Rampa.Audits.Report do
       limit: 1,
       select: %{
         id: f.id,
-        help: fragment("coalesce(?->>'help', ?)", f.raw, f.message),
+        help: fragment("?->>'help'", f.raw),
         wcag_criteria: f.wcag_criteria
       }
-  end
-
-  defp severity_counts(audit_id) do
-    from f in Finding,
-      where: f.audit_id == ^audit_id,
-      select: %{
-        critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
-        serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
-        moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
-        minor: filter(count(f.id), f.severity == :minor and not f.needs_review),
-        review_critical: filter(count(f.id), f.severity == :critical and f.needs_review),
-        review_serious: filter(count(f.id), f.severity == :serious and f.needs_review),
-        review_moderate: filter(count(f.id), f.severity == :moderate and f.needs_review),
-        review_minor: filter(count(f.id), f.severity == :minor and f.needs_review)
-      }
-  end
-
-  defp split_review(counts) do
-    confirmed = Map.new(@severities, &{&1, Map.fetch!(counts, &1)})
-    review = Map.new(@severities, &{&1, Map.fetch!(counts, :"review_#{&1}")})
-    {confirmed, review}
   end
 
   defp top_issues_query(audit_id) do
     from o in subquery(rule_occurrences(audit_id, needs_review: false)),
       group_by: o.rule_id,
       order_by: [
-        desc: count(o.page_id),
+        desc: count(o.page_id, :distinct),
         asc: min(o.severity_rank),
         desc: sum(o.occurrences),
         asc: o.rule_id
@@ -202,7 +188,7 @@ defmodule Rampa.Audits.Report do
       limit: @top_issues_limit,
       select: %{
         rule_id: o.rule_id,
-        pages_affected: count(o.page_id),
+        pages_affected: count(o.page_id, :distinct),
         occurrences: type(sum(o.occurrences), :integer),
         severity_rank: min(o.severity_rank)
       }
@@ -224,8 +210,8 @@ defmodule Rampa.Audits.Report do
 
   @doc """
   Ocorrências por regra em cada página da auditoria, agrupadas por
-  `(page_id, rule_id, needs_review)` (ver o moduledoc). Filtros opcionais: `:needs_review`
-  (booleano) e `:rule_id`. Cada linha traz `occurrences` (o maior entre os achados e o
+  `(rule_id, source, needs_review, page_id)` (ver o moduledoc). Filtros opcionais:
+  `:needs_review` (booleano), `:source` e `:rule_id`. Cada linha traz `occurrences` (o maior entre os achados e o
   `nodes_total`), `findings` e a severidade mais grave (`severity_rank`).
 
   Devolve uma consulta, para ser usada como subconsulta.
@@ -234,18 +220,20 @@ defmodule Rampa.Audits.Report do
   def rule_occurrences(audit_id, filters \\ []) do
     from(f in Finding,
       where: f.audit_id == ^audit_id,
-      # Na ordem do índice `(audit_id, rule_id, needs_review, page_id)`.
-      group_by: [f.rule_id, f.needs_review, f.page_id],
+      # Na ordem do índice `(audit_id, rule_id, source, needs_review, page_id)`.
+      group_by: [f.rule_id, f.source, f.needs_review, f.page_id],
       select: %{
         page_id: f.page_id,
         rule_id: f.rule_id,
+        source: f.source,
         needs_review: f.needs_review,
         findings: count(f.id),
         occurrences:
           type(
             fragment(
-              "GREATEST(count(?), LEAST(coalesce(max((?->>'nodes_total')::numeric), 0), ?)::bigint)",
+              "GREATEST(count(?), LEAST(coalesce(max(CASE WHEN jsonb_typeof(?->'nodes_total') = 'number' THEN (?->>'nodes_total')::numeric END), 0), ?)::bigint)",
               f.id,
+              f.raw,
               f.raw,
               @nodes_total_cap
             ),
@@ -262,6 +250,9 @@ defmodule Rampa.Audits.Report do
       {:needs_review, value}, query when is_boolean(value) ->
         where(query, [f], f.needs_review == ^value)
 
+      {:source, source}, query when is_atom(source) ->
+        where(query, [f], f.source == ^source)
+
       {:rule_id, rule_id}, query when is_binary(rule_id) ->
         where(query, [f], f.rule_id == ^rule_id)
     end)
@@ -277,7 +268,7 @@ defmodule Rampa.Audits.Report do
   """
   @spec list_pages(String.t()) :: {:ok, [page_summary()]} | {:error, :audit_not_found}
   def list_pages(audit_id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(audit_id),
+    with {:ok, uuid} <- CanonicalUUID.cast(audit_id),
          [_ | _] = rows <- Repo.all(pages_query(uuid)) do
       {:ok, for({%Page{} = page, counts, passed} <- rows, do: page_summary(page, counts, passed))}
     else
@@ -291,7 +282,7 @@ defmodule Rampa.Audits.Report do
     from a in Audit,
       left_join: p in Page,
       on: p.audit_id == a.id,
-      left_join: c in subquery(page_counts(audit_id)),
+      left_join: c in subquery(FindingCounts.by_page(audit_id)),
       on: c.page_id == p.id,
       where: a.id == ^audit_id,
       order_by: [asc: p.inserted_at, asc: p.id],
@@ -311,7 +302,7 @@ defmodule Rampa.Audits.Report do
          {:ok, page_uuid} <- cast_or(page_id, :page_not_found, audit_uuid) do
       query =
         from p in Page,
-          left_join: c in subquery(page_counts(audit_uuid)),
+          left_join: c in subquery(FindingCounts.by_page(audit_uuid)),
           on: c.page_id == p.id,
           where: p.id == ^page_uuid and p.audit_id == ^audit_uuid,
           select: {p, c, fragment("jsonb_array_length(?)", p.passed_rules)}
@@ -323,27 +314,13 @@ defmodule Rampa.Audits.Report do
     end
   end
 
-  defp page_counts(audit_id) do
-    from f in Finding,
-      where: f.audit_id == ^audit_id,
-      group_by: f.page_id,
-      select: %{
-        page_id: f.page_id,
-        critical: filter(count(f.id), f.severity == :critical and not f.needs_review),
-        serious: filter(count(f.id), f.severity == :serious and not f.needs_review),
-        moderate: filter(count(f.id), f.severity == :moderate and not f.needs_review),
-        minor: filter(count(f.id), f.severity == :minor and not f.needs_review),
-        needs_review: filter(count(f.id), f.needs_review)
-      }
-  end
-
   defp page_summary(%Page{} = page, counts, passed) do
-    counts = counts || %{}
+    {confirmed, _review, needs_review} = FindingCounts.split(counts)
 
     %{
       page: page,
-      counts_by_severity: Map.new(@severities, &{&1, Map.get(counts, &1) || 0}),
-      needs_review_count: Map.get(counts, :needs_review) || 0,
+      counts_by_severity: confirmed,
+      needs_review_count: needs_review,
       passed_count: passed
     }
   end
@@ -385,6 +362,7 @@ defmodule Rampa.Audits.Report do
         from o in subquery(
                rule_occurrences(finding.audit_id,
                  rule_id: finding.rule_id,
+                 source: finding.source,
                  needs_review: finding.needs_review
                )
              ),
@@ -412,14 +390,14 @@ defmodule Rampa.Audits.Report do
   # UUID inválido da auditoria: `audit_not_found`. UUID inválido do item, numa auditoria
   # válida: decide como o item inexistente (a auditoria pode não existir).
   defp cast_or(id, code) do
-    case Ecto.UUID.cast(id) do
+    case CanonicalUUID.cast(id) do
       {:ok, uuid} -> {:ok, uuid}
       :error -> {:error, code}
     end
   end
 
   defp cast_or(id, code, audit_uuid) do
-    case Ecto.UUID.cast(id) do
+    case CanonicalUUID.cast(id) do
       {:ok, uuid} -> {:ok, uuid}
       :error -> missing(audit_uuid, code)
     end

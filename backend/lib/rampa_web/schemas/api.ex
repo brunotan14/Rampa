@@ -290,7 +290,10 @@ defmodule RampaWeb.Schemas.FindingsPage do
         total: %Schema{
           type: :integer,
           minimum: 0,
-          description: "Quantos achados passam nos filtros, em todas as páginas da lista."
+          nullable: true,
+          description:
+            "Quantos achados passam nos filtros, em todas as páginas da lista. Só na " <>
+              "primeira página (sem `cursor`), do instante dela; com `cursor`, `null`."
         },
         next_cursor: %Schema{
           type: :string,

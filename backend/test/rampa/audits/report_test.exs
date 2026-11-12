@@ -10,7 +10,7 @@ defmodule Rampa.Audits.ReportTest do
   import Rampa.AuditsFixtures
 
   alias Rampa.Audits
-  alias Rampa.Audits.{Page, PageTask, Report}
+  alias Rampa.Audits.{Events, Page, PageTask, Report}
 
   @base ~U[2026-11-10 12:00:00.000000Z]
 
@@ -127,6 +127,141 @@ defmodule Rampa.Audits.ReportTest do
       assert {:ok, progress} = Audits.get_progress(audit.id)
       assert progress.revision == later.audit.revision
       assert progress.progress.totals_by_severity == later.totals_by_severity
+    end
+  end
+
+  describe "revisão do code review" do
+    test "total só na primeira página; com cursor é nil" do
+      page = page_fixture(%{status: :done})
+      for i <- 0..2, do: finding_fixture(page, %{inserted_at: DateTime.add(@base, i)})
+
+      assert {:ok, %{total: 3, next_cursor: cursor}} =
+               Audits.list_findings(page.audit_id, %{"limit" => "1"})
+
+      assert {:ok, %{total: nil}} =
+               Audits.list_findings(page.audit_id, %{"limit" => "1", "cursor" => cursor})
+    end
+
+    # O canal (snapshot e `page_scanned`) e a API (resumo e páginas) contam pela mesma função
+    # (`Rampa.Audits.FindingCounts`): na mesma `revision`, os números batem.
+    test "paridade entre o canal e o REST na mesma revision" do
+      audit = audit_fixture(%{status: :running})
+
+      [p1, p2] =
+        for name <- ["img-sem-alt", "contraste-incerto"],
+            do:
+              page_fixture(%{
+                audit: audit,
+                url: "https://exemplo.com/#{name}.html",
+                status: :scanning
+              })
+
+      :ok = Events.subscribe(audit.id)
+
+      {:ok, _} = Audits.record_scan_result(p1, scanner_response("img-sem-alt"))
+      {:ok, _} = Audits.record_scan_result(p2, scanner_response("contraste-incerto"))
+      finding_fixture(p1, %{rule_id: "ia", source: :ai, needs_review: true, severity: :minor})
+
+      assert {:ok, %{revision: revision, progress: progress}} = Audits.get_progress(audit.id)
+      assert {:ok, summary} = Audits.get_audit_summary(audit.id)
+      assert summary.audit.revision == revision
+      assert summary.totals_by_severity == progress.totals_by_severity
+      assert summary.needs_review_count == progress.needs_review_count
+
+      assert summary.needs_review_count ==
+               summary.needs_review_by_severity |> Map.values() |> Enum.sum()
+
+      {:ok, pages} = Audits.list_pages(audit.id)
+
+      for page <- [p1, p2] do
+        assert_received {:audit_event, %{name: :page_scanned, data: %{page_id: id} = data}}
+                        when id == page.id
+
+        listed = Enum.find(pages, &(&1.page.id == page.id))
+        assert listed.counts_by_severity == data.counts_by_severity
+
+        # O achado de IA entrou depois do evento da p1.
+        extra = if page.id == p1.id, do: 1, else: 0
+        assert listed.needs_review_count == data.needs_review_count + extra
+      end
+    end
+
+    test "nodes_total que não é número vale como ausente: resumo e detalhe respondem" do
+      page = page_fixture(%{status: :done})
+
+      findings =
+        for value <- ["12", true, %{"x" => 1}, [1], "abc"] do
+          finding_fixture(page, %{rule_id: "r", raw: %{"help" => "Ajuda", "nodes_total" => value}})
+        end
+
+      assert {:ok, %{top_issues: [%{occurrences: 5}]}} = Audits.get_audit_summary(page.audit_id)
+
+      for finding <- findings do
+        assert {:ok, %{occurrences: %{page: 5}}} = Audits.get_finding(page.audit_id, finding.id)
+      end
+    end
+
+    test "help do top 5 vem só do raw, sem cair para a mensagem" do
+      page = page_fixture(%{status: :done})
+
+      finding_fixture(page, %{
+        rule_id: "sem-help",
+        raw: %{"nodes_total" => 1},
+        message: "Mensagem do nó"
+      })
+
+      assert {:ok, %{top_issues: [%{rule_id: "sem-help", help: nil}]}} =
+               Audits.get_audit_summary(page.audit_id)
+    end
+
+    test "achado de IA e incomplete do axe da mesma regra na mesma página contam separados" do
+      page = page_fixture(%{status: :done})
+
+      axe =
+        finding_fixture(page, %{rule_id: "image-alt", needs_review: true, raw: axe_raw(4)})
+
+      ai =
+        finding_fixture(page, %{rule_id: "image-alt", source: :ai, needs_review: true, raw: nil})
+
+      rows = page.audit_id |> Report.rule_occurrences() |> Repo.all()
+      assert %{occurrences: 4} = Enum.find(rows, &(&1.source == :axe))
+      assert %{occurrences: 1} = Enum.find(rows, &(&1.source == :ai))
+
+      assert {:ok, %{occurrences: %{page: 4, audit: 4}}} =
+               Audits.get_finding(page.audit_id, axe.id)
+
+      assert {:ok, %{occurrences: %{page: 1, audit: 1}}} =
+               Audits.get_finding(page.audit_id, ai.id)
+    end
+
+    test "só UUID canônico em ids de caminho, page_id e âncora" do
+      page = page_fixture(%{status: :done})
+      finding = finding_fixture(page)
+      sixteen = "aaaaaaaaaaaaaaaa"
+      upper = String.upcase(page.audit_id)
+
+      assert Audits.list_findings(page.audit_id, %{"page_id" => sixteen}) ==
+               {:error, :invalid_filter}
+
+      assert Audits.list_findings(page.audit_id, %{"page_id" => String.upcase(page.id)}) ==
+               {:error, :invalid_filter}
+
+      cursor = Base.url_encode64("severity:" <> sixteen, padding: false)
+
+      assert Audits.list_findings(page.audit_id, %{"sort" => "severity", "cursor" => cursor}) ==
+               {:error, :invalid_cursor}
+
+      for id <- [sixteen, upper] do
+        assert {:error, :audit_not_found} = Audits.get_audit_summary(id)
+        assert {:error, :audit_not_found} = Audits.list_pages(id)
+        assert {:error, :audit_not_found} = Audits.list_findings(id, %{})
+      end
+
+      assert {:error, :page_not_found} = Audits.get_page(page.audit_id, "abcdefghijklmnop")
+      assert {:error, :finding_not_found} = Audits.get_finding(page.audit_id, sixteen)
+
+      assert {:error, :finding_not_found} =
+               Audits.get_finding(page.audit_id, String.upcase(finding.id))
     end
   end
 

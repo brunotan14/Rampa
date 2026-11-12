@@ -81,9 +81,9 @@ defmodule RampaWeb.AuditChannel do
   # Só o UUID canônico (minúsculo, com hífens): outro formato entraria num tópico em que
   # nenhum evento sai. Recusado sem consultar o banco.
   defp canonical_id(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, ^id} -> {:ok, id}
-      _invalid -> {:error, :audit_not_found}
+    case Rampa.CanonicalUUID.cast(id) do
+      {:ok, id} -> {:ok, id}
+      :error -> {:error, :audit_not_found}
     end
   end
 
