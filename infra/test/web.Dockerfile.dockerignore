@@ -1,8 +1,0 @@
-# Contexto do `infra/test/web.Dockerfile` (a raiz do repositório): só o frontend, sem as
-# dependências e o build locais.
-*
-!infra/test/web-nginx.conf
-!frontend/
-frontend/node_modules/
-frontend/dist/
-**/.DS_Store

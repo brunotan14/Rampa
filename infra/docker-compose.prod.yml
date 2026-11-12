@@ -1,0 +1,189 @@
+# Compose de produção (PRD §7, Hospedagem e deploy): app, scanner e PostgreSQL na VPS, atrás
+# do Traefik que já roda nela. Viaja dentro da imagem do app (`/app/deploy/`, ver
+# `backend/Dockerfile`): o `infra/deploy.sh` o extrai para `/opt/rampa/releases/<sha>/` e
+# sempre chama
+#
+#   docker compose -p rampa --env-file /opt/rampa/.env -f /opt/rampa/releases/<sha>/docker-compose.prod.yml
+#
+# com `RAMPA_TAG=<sha>` e `RAMPA_REGISTRY` no ambiente. Nada da VPS fica aqui (o repositório é
+# público): host, segredos e a senha do basic auth vêm do `/opt/rampa/.env`, que fica fora do
+# Git e fora das imagens. Nunca há `SSRF_ALLOWLIST` aqui (o app e o scanner se recusam a subir).
+#
+# Redes (PRD §7, RF-RA002):
+#   edge    só o app: o Traefik (rede do host) entra por aqui, e é por ela que o app sai para a
+#           internet (DNS da proteção contra SSRF e, no M4, a API de IA). Faixa fixa: o
+#           gateway é o único proxy confiável para o X-Forwarded-For (TRUSTED_PROXIES).
+#   db      postgres e app, interna. O scanner NÃO está nela: não tem rota para o banco.
+#   scan    app e scanner, interna.
+#   egress  só o scanner: a saída para os sites auditados.
+#
+# Memória (RNF-RA003, até 2,5 GB no total): scanner 1,5 GB (com o /dev/shm do Chromium) e
+# 1,5 CPU, app 512 MB, PostgreSQL 512 MB, sem swap além do limite. Se faltar memória na VPS, o
+# kernel mata primeiro o scanner (oom_score_adj +500) e por último o banco (-500).
+#
+# `infra/test/check-compose-prod.sh` confere estas regras no CI.
+name: rampa
+
+# Versão do contrato com o `infra/deploy.sh` instalado na VPS (variáveis, serviços e passos que
+# ele usa). Mudou o contrato: suba os dois juntos e reinstale o `deploy.sh` à mão.
+x-bootstrap-version: 1
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  logging: *logging
+
+services:
+  postgres:
+    # A mesma imagem do CI e dos Composes de dev e de teste, fixada por digest. A major (17)
+    # nunca muda num deploy: atualizar de major pede dump e restauração (M6).
+    image: postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+    <<: *hardening
+    # O entrypoint ajusta o dono do volume e troca para o usuário `postgres`.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    environment:
+      POSTGRES_USER: rampa
+      POSTGRES_DB: rampa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no /opt/rampa/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /var/run/postgresql:size=1m
+      - /tmp:size=64m
+    shm_size: 128m
+    networks: [db]
+    mem_limit: 512m
+    memswap_limit: 512m
+    oom_score_adj: -500
+    pids_limit: 256
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "rampa", "-d", "rampa"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  scanner:
+    image: ${RAMPA_REGISTRY:?defina RAMPA_REGISTRY}/rampa-scanner:${RAMPA_TAG:?defina RAMPA_TAG}
+    <<: *hardening
+    # Sem DATABASE_URL, SECRET_KEY_BASE nem IP_HASH_SECRET: o scanner não precisa de segredo.
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "4100"
+    tmpfs:
+      - /tmp:size=256m
+      - /home/pwuser:size=64m,uid=1001,gid=1001
+    init: true
+    # O /dev/shm do Chromium conta no limite de memória do container.
+    shm_size: 512m
+    networks: [scan, egress]
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 1.5
+    oom_score_adj: 500
+    pids_limit: 1024
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  app:
+    image: ${RAMPA_REGISTRY:?defina RAMPA_REGISTRY}/rampa-app:${RAMPA_TAG:?defina RAMPA_TAG}
+    <<: *hardening
+    # Só o app recebe segredos, cada um pelo nome (nada de `env_file` compartilhado).
+    environment:
+      PHX_HOST: ${PHX_HOST:?defina PHX_HOST no /opt/rampa/.env}
+      PHX_ALLOWED_ORIGINS: ${PHX_ALLOWED_ORIGINS:-}
+      PORT: "4000"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?defina SECRET_KEY_BASE no /opt/rampa/.env}
+      IP_HASH_SECRET: ${IP_HASH_SECRET:?defina IP_HASH_SECRET no /opt/rampa/.env}
+      DATABASE_URL: ecto://rampa:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no /opt/rampa/.env}@postgres/rampa
+      POOL_SIZE: ${POOL_SIZE:-10}
+      SCANNER_URL: http://scanner:4100
+      SCAN_CONCURRENCY: ${SCAN_CONCURRENCY:-2}
+      AUDITS_PER_IP_PER_HOUR: ${AUDITS_PER_IP_PER_HOUR:-5}
+      AUDITS_DAILY_LIMIT: ${AUDITS_DAILY_LIMIT:-50}
+      # Só o gateway da rede `edge` (o Traefik, na rede do host) é proxy confiável.
+      TRUSTED_PROXIES: ${RAMPA_EDGE_GATEWAY:-172.30.240.1}/32
+    volumes:
+      - crops:/app/crops
+    tmpfs:
+      - /app/tmp:size=64m,uid=65534,gid=65534
+    # Sem `ports:`: só o Traefik alcança o app, pela rede `edge`.
+    networks: [edge, db, scan]
+    mem_limit: 512m
+    memswap_limit: 512m
+    oom_score_adj: -200
+    pids_limit: 512
+    # Maior que o `shutdown_grace_period` do Oban (30 s, `backend/config/prod.exs`).
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scanner:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/bin/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 18
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=rampa_edge
+      - traefik.http.services.rampa.loadbalancer.server.port=4000
+      # Staging privado (PRD §7): tudo atrás do basic auth do Traefik. RAMPA_BASIC_AUTH é a
+      # linha do htpasswd (`usuario:$2y$...`), entre aspas simples no .env. O HSTS vem do
+      # app (`force_ssl` de `config/prod.exs`); o Traefik não duplica.
+      - traefik.http.middlewares.rampa-auth.basicauth.users=${RAMPA_BASIC_AUTH:?defina RAMPA_BASIC_AUTH no /opt/rampa/.env}
+      - traefik.http.middlewares.rampa-auth.basicauth.removeheader=true
+      - traefik.http.routers.rampa.rule=Host(`${PHX_HOST}`)
+      - traefik.http.routers.rampa.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.rampa.tls=true
+      - traefik.http.routers.rampa.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.routers.rampa.middlewares=rampa-auth
+      - traefik.http.routers.rampa.service=rampa
+      # Tempo real (RF-RA004): websockets abertos ao mesmo tempo por IP, além do basic auth.
+      - traefik.http.middlewares.rampa-socket-limit.inflightreq.amount=20
+      - traefik.http.middlewares.rampa-socket-limit.inflightreq.sourcecriterion.ipstrategy.depth=0
+      - traefik.http.routers.rampa-socket.rule=Host(`${PHX_HOST}`) && PathPrefix(`/socket`)
+      - traefik.http.routers.rampa-socket.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.rampa-socket.tls=true
+      - traefik.http.routers.rampa-socket.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.routers.rampa-socket.middlewares=rampa-auth,rampa-socket-limit
+      - traefik.http.routers.rampa-socket.service=rampa
+
+networks:
+  edge:
+    name: rampa_edge
+    ipam:
+      config:
+        - subnet: ${RAMPA_EDGE_SUBNET:-172.30.240.0/24}
+          gateway: ${RAMPA_EDGE_GATEWAY:-172.30.240.1}
+  db:
+    name: rampa_db
+    internal: true
+  scan:
+    name: rampa_scan
+    internal: true
+  egress:
+    name: rampa_egress
+
+volumes:
+  pgdata:
+    name: rampa_pgdata
+  crops:
+    name: rampa_crops

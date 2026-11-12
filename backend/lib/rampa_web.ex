@@ -17,7 +17,9 @@ defmodule RampaWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  # Saídas do build do Vite em `priv/static` (`RampaWeb.Static`): `assets/` com os arquivos
+  # com hash e o `favicon.svg` de `frontend/public/`. O `index.html` sai pelo fallback da SPA.
+  def static_paths, do: ~w(assets favicon.svg)
 
   def router do
     quote do

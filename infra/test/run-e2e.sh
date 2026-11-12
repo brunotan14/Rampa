@@ -32,13 +32,13 @@ timed() {
 }
 
 build() {
-  step "Construindo as imagens (app e2e, app prod, scanner, fixtures, web, runner)"
+  step "Construindo as imagens (app e2e, app prod, scanner, fixtures, runner)"
   "${COMPOSE[@]}" --profile e2e --profile check build
 }
 
 up() {
   step "Subindo o Compose de teste"
-  "${COMPOSE[@]}" up -d --wait --wait-timeout 300 app app-daily fixtures web
+  "${COMPOSE[@]}" up -d --wait --wait-timeout 300 app app-daily fixtures
 }
 
 # Roda o runner (com nome, sem `--rm`) e copia a saída dele para o host mesmo em falha.

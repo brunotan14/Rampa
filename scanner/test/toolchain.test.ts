@@ -15,6 +15,7 @@ const pkg = JSON.parse(read("../package.json")) as {
 
 const ci = read("../../.github/workflows/ci.yml");
 const e2eDockerfile = read("../../e2e/Dockerfile");
+const backendDockerfile = read("../../backend/Dockerfile");
 const e2ePkg = JSON.parse(read("../../e2e/package.json")) as { devDependencies?: Record<string, string> };
 
 const IMAGE_FROM = /^FROM\s+mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-\S+/m;
@@ -73,5 +74,14 @@ describe("versões da imagem do scanner", () => {
       runnerImage,
       `o e2e/Dockerfile usa ${runnerImage ?? "?"}, e o scanner/Dockerfile usa ${scannerImage ?? "?"}: atualize os dois juntos.`,
     ).toBe(scannerImage);
+  });
+
+  it("o build do frontend na imagem do app (backend/Dockerfile) usa o Node do .nvmrc, fixado por digest", () => {
+    const image = /^ARG NODE_IMAGE=node:(\d+\.\d+\.\d+)-\S+@sha256:[0-9a-f]{64}$/m.exec(backendDockerfile);
+    expect(image, "backend/Dockerfile precisa de ARG NODE_IMAGE=node:<x.y.z>-<distro>@sha256:<digest>").not.toBeNull();
+    expect(
+      image?.[1],
+      `o backend/Dockerfile compila o frontend com o Node ${image?.[1] ?? "?"}, e o .nvmrc pede ${nvmrc}: atualize os dois juntos.`,
+    ).toBe(nvmrc);
   });
 });

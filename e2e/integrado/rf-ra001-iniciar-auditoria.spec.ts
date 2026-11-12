@@ -7,7 +7,7 @@ import { messages } from "./support/messages.js";
 
 // RF-RA001: iniciar auditoria por URL. Os critérios são verificados pela API, que devolve a
 // mensagem pronta para exibir (PRD §9), e o CA1 também pela tela: o formulário da tela inicial
-// leva à tela de progresso (M2), no frontend do serviço `web` do Compose de teste.
+// leva à tela de progresso (M2), no frontend servido pelo app do Compose de teste.
 
 const CA1 =
   "RF-RA001 CA1: Dado uma URL pública válida, quando inicio a auditoria, então recebo o identificador e sou levado à tela de progresso.";
@@ -44,8 +44,8 @@ test.describe("RF-RA001: iniciar auditoria por URL", () => {
     "RF-RA001 CA1: depois de iniciar, a pessoa é levada à tela de progresso",
     { annotation: requirement(CA1) },
     async ({ browser, request }, testInfo) => {
-      // O navegador abre o frontend (`web`), que repassa `/api` e `/socket` ao app pela faixa
-      // confiável; o IP simulado vai no `X-Forwarded-For`, como nos outros casos.
+      // O navegador abre o frontend servido pelo app, pela faixa confiável; o IP simulado vai
+      // no `X-Forwarded-For`, como nos outros casos.
       const context = await browser.newContext({
         baseURL: env.webUrl,
         locale: "pt-BR",

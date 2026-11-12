@@ -8,7 +8,11 @@
 !backend/priv/
 !backend/rel/
 !shared/scanner-contract.schema.json
+!frontend/
+!infra/docker-compose.prod.yml
 
-# O build do frontend entra em `priv/static` no M6, dentro da própria imagem.
+# O build do frontend é feito dentro da imagem (etapa `frontend`): nada do build local.
 backend/priv/static/
+frontend/node_modules/
+frontend/dist/
 **/.DS_Store

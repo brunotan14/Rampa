@@ -6,6 +6,15 @@ defmodule RampaWeb.Router do
     plug OpenApiSpex.Plug.PutApiSpec, module: RampaWeb.ApiSpec
   end
 
+  # HTML da interface (o `index.html` do build do frontend), com a CSP e os cabeçalhos de
+  # segurança (`RampaWeb.Plugs.BrowserHeaders`).
+  # Os prefixos reservados (`/api`, `/socket`, `assets/`) saem como rota inexistente antes
+  # dos cabeçalhos do HTML: o 404 em JSON leva só os cabeçalhos da API.
+  pipeline :browser do
+    plug :reject_reserved
+    plug RampaWeb.Plugs.BrowserHeaders
+  end
+
   scope "/api", RampaWeb do
     pipe_through :api
 
@@ -44,5 +53,21 @@ defmodule RampaWeb.Router do
       # axe e buscaria arquivos de terceiros na interface pública).
       get "/swagger", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi.json"
     end
+  end
+
+  # Fallback da SPA (PRD §7): por último, depois de todas as rotas. `/api/*` e `/socket/*`
+  # sem rota continuam 404 em JSON (`RampaWeb.SpaController`).
+  scope "/", RampaWeb do
+    pipe_through :browser
+
+    get "/*path", SpaController, :index
+  end
+
+  defp reject_reserved(conn, _opts) do
+    if RampaWeb.Static.reserved?(conn.path_info) do
+      raise Phoenix.Router.NoRouteError, conn: conn, router: __MODULE__
+    end
+
+    conn
   end
 end
