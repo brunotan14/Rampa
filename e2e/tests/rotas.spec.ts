@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { axeViolations } from "./a11y.js";
+import { A11Y_MEDIA, axeViolations, emulateOnly, expectNoHorizontalScroll, reflowOverflow } from "./a11y.js";
 
 // Rotas da base do frontend (M2, feat/frontend-base): o 404, com axe, teclado, reflow e
 // espaçamento de texto. As telas da auditoria têm specs próprios (`tela-progresso.spec.ts` e
@@ -11,19 +11,11 @@ const SCREENS = [
   { path: "/nao-existe", h1: "Página não encontrada" },
 ];
 
-async function horizontalOverflow(page: Page) {
-  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-}
-
-// Espaçamento de texto do critério 1.4.12 (o mesmo do bookmarklet).
-const TEXT_SPACING = `* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
-p { margin-bottom: 2em !important; }`;
-
 for (const { path, h1 } of SCREENS) {
   test.describe(`${path}`, () => {
-    for (const media of [{ colorScheme: "light" }, { colorScheme: "dark" }, { contrast: "more" }] as const) {
+    for (const media of A11Y_MEDIA) {
       test(`não tem violações do axe (${JSON.stringify(media)})`, async ({ page }) => {
-        await page.emulateMedia(media);
+        await emulateOnly(page, media);
         await page.goto(path);
         await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
         expect(await axeViolations(page)).toEqual([]);
@@ -41,16 +33,11 @@ for (const { path, h1 } of SCREENS) {
     });
 
     test("320px, zoom de 200% e espaçamento de texto não criam rolagem horizontal", async ({ page }) => {
-      await page.setViewportSize({ width: 320, height: 640 });
-      await page.goto(path);
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-      await page.setViewportSize({ width: 640, height: 480 });
-      await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-      await page.addStyleTag({ content: TEXT_SPACING });
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      const reflow = await reflowOverflow(page, async () => {
+        await page.goto(path);
+        await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
+      });
+      expectNoHorizontalScroll(reflow);
       await expect(page.getByRole("heading", { level: 1, name: h1 })).toBeVisible();
       await expect(page.getByRole("link", { name: "Voltar para a página inicial" })).toBeVisible();
     });

@@ -18,6 +18,9 @@ export const messages = {
   /** RF-RA029: `http_error` com 500, 502, 503 ou 504 (site instável). */
   unstable: (status: number) =>
     `O site respondeu com um erro (HTTP ${status}) e pode estar instável. Tente de novo em alguns minutos.`,
+  /** RF-RA029: `http_error` com 403 (pode ser login ou bloqueio de robô; não marca barreira de login). */
+  forbidden: (status: number) =>
+    `O site recusou o acesso (HTTP ${status}). Ele pode exigir login ou bloquear acessos automáticos.`,
   /** RF-RA028 e RF-RA029: `http_error` com 401 (início do aviso de barreira de login; o 403 tem mensagem própria). */
   loginWallStart: (status: number) => `Esta página pede login (HTTP ${status}).`,
 };
@@ -29,6 +32,10 @@ export const screenTexts = {
   /** RF-RA005: aviso fixo do relatório. */
   disclaimer:
     "A verificação automática não garante conformidade e não substitui a avaliação com pessoas e tecnologias assistivas.",
+  /** RF-RA005, RF-RA006 e RF-RA007: rótulo do selo de severidade, pelo nome da API. */
+  severity: { critical: "Crítico", serious: "Sério", moderate: "Moderado", minor: "Menor" },
+  /** RF-RA017: selo de cada regra da aba "Aprovados". */
+  passed: "Aprovado",
   /** RF-RA029: botão da tela de falha e do relatório concluído. */
   auditAgain: "Auditar de novo",
   /** RF-RA002/RF-RA029: limite por hora, com o horário no fuso do navegador. */

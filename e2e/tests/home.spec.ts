@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { axeViolations } from "./a11y.js";
+import { axeViolations, horizontalOverflow } from "./a11y.js";
 
 test.describe("Página inicial (M0)", () => {
   for (const colorScheme of ["light", "dark"] as const) {
@@ -41,8 +41,7 @@ test.describe("Página inicial (M0)", () => {
   test("em 320px de largura não há rolagem horizontal (1.4.10)", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await page.goto("/");
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(0);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 
   test("não carrega nada de terceiros (fontes servidas pelo app)", async ({ page, baseURL }) => {

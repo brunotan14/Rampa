@@ -137,11 +137,3 @@ export async function recordLiveRegion(page: Page) {
 export function liveRegionTexts(page: Page) {
   return page.evaluate(() => (window as unknown as { __said: string[] }).__said);
 }
-
-// Espaçamento de texto do critério 1.4.12 (o mesmo do bookmarklet).
-export const TEXT_SPACING = `* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
-p { margin-bottom: 2em !important; }`;
-
-export async function horizontalOverflow(page: Page) {
-  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-}

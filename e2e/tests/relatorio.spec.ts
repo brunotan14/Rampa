@@ -1,6 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
-import { axeViolations } from "./a11y.js";
-import { AUDIT_ID, PAGE_ID, PhoenixMock, TEXT_SPACING, ZERO, horizontalOverflow, progress, summary } from "./simulado.js";
+import {
+  A11Y_MEDIA,
+  axeViolations,
+  emulateOnly,
+  expectNoHorizontalScroll,
+  horizontalOverflow,
+  reflowOverflow,
+  revealAll,
+} from "./a11y.js";
+import { AUDIT_ID, PAGE_ID, PhoenixMock, ZERO, progress, summary } from "./simulado.js";
 
 // Telas do relatório (M2, feat/tela-relatorio) com a API e o canal simulados: resumo
 // (RF-RA005), páginas (RF-RA006), uma página com as abas Problemas e Aprovados (RF-RA006,
@@ -168,16 +176,6 @@ async function mockReport(page: Page, options: Options = {}) {
   return { posts };
 }
 
-// O conteúdo que aparece ao rolar só entra quando chega à tela: rola até o fim antes do axe.
-async function revealAll(page: Page) {
-  await page.evaluate(async () => {
-    for (let y = 0; y <= document.documentElement.scrollHeight; y += window.innerHeight / 2) {
-      window.scrollTo(0, y);
-      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
-    }
-  });
-}
-
 const SCREENS = [
   { name: "resumo", path: REPORT, h1: "Relatório de exemplo.com.br", ready: "Problemas confirmados" },
   { name: "páginas", path: PAGES, h1: "Páginas auditadas em exemplo.com.br", ready: "1 de 1 página" },
@@ -188,15 +186,9 @@ const SCREENS = [
 
 for (const screen of SCREENS) {
   test.describe(`Relatório: ${screen.name}`, () => {
-    for (const media of [
-      { colorScheme: "light" },
-      { colorScheme: "dark" },
-      { contrast: "more" },
-      { forcedColors: "active" },
-      { reducedMotion: "reduce" },
-    ] as const) {
+    for (const media of A11Y_MEDIA) {
       test(`sem violações do axe (${JSON.stringify(media)})`, async ({ page }) => {
-        await page.emulateMedia(media);
+        await emulateOnly(page, media);
         await mockReport(page, { loginWall: true });
         await page.goto(screen.path);
         await expect(page.getByRole("heading", { level: 1, name: screen.h1 })).toBeVisible();
@@ -218,19 +210,12 @@ for (const screen of SCREENS) {
     });
 
     test("320px, zoom de 200% e espaçamento de texto não criam rolagem horizontal", async ({ page }) => {
-      await page.emulateMedia({ reducedMotion: "reduce" });
       await mockReport(page, { loginWall: true });
-      await page.setViewportSize({ width: 320, height: 640 });
-      await page.goto(screen.path);
-      await expect(page.getByText(screen.ready, { exact: true }).first()).toBeVisible();
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-      await page.setViewportSize({ width: 640, height: 480 });
-      await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-      await page.addStyleTag({ content: TEXT_SPACING });
-      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      const reflow = await reflowOverflow(page, async () => {
+        await page.goto(screen.path);
+        await expect(page.getByText(screen.ready, { exact: true }).first()).toBeVisible();
+      });
+      expectNoHorizontalScroll(reflow);
       await expect(page.getByRole("heading", { level: 1, name: screen.h1 })).toBeVisible();
     });
   });

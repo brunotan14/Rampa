@@ -1,12 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { axeViolations } from "./a11y.js";
+import { A11Y_MEDIA, axeViolations, emulateOnly, expectNoHorizontalScroll, reflowOverflow } from "./a11y.js";
 import {
   AUDIT_ID,
   PAGE_ID,
   PhoenixMock,
-  TEXT_SPACING,
   ZERO,
-  horizontalOverflow,
   liveRegionTexts,
   mockAuditApi,
   progress,
@@ -111,9 +109,9 @@ test.describe("Tela de progresso (RF-RA004)", () => {
     expect(await axeViolations(page)).toEqual([]);
   });
 
-  for (const media of [{ colorScheme: "light" }, { colorScheme: "dark" }, { contrast: "more" }, { forcedColors: "active" }] as const) {
+  for (const media of A11Y_MEDIA) {
     test(`não tem violações do axe em andamento (${JSON.stringify(media)})`, async ({ page }) => {
-      await page.emulateMedia(media);
+      await emulateOnly(page, media);
       await openRunning(page);
       expect(await axeViolations(page)).toEqual([]);
     });
@@ -129,16 +127,10 @@ test.describe("Tela de progresso (RF-RA004)", () => {
   });
 
   test("320px, zoom de 200% e espaçamento de texto não criam rolagem horizontal", async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 640 });
-    await openRunning(page);
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-    await page.setViewportSize({ width: 640, height: 480 });
-    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-    await page.addStyleTag({ content: TEXT_SPACING });
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const reflow = await reflowOverflow(page, async () => {
+      await openRunning(page);
+    });
+    expectNoHorizontalScroll(reflow);
     await expect(page.getByRole("progressbar")).toBeVisible();
   });
 
