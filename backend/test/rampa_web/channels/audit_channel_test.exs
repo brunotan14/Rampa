@@ -15,10 +15,12 @@ defmodule RampaWeb.AuditChannelTest do
   defp join_audit(id, socket \\ socket(AuditSocket)),
     do: subscribe_and_join(socket, AuditChannel, "audit:" <> id)
 
-  # Recebe o próximo push do evento e confere o payload contra o contrato.
+  # Recebe o próximo push do evento e confere o payload contra o contrato. O evento sai depois
+  # do commit e passa pelo PubSub e pelo processo do canal: os 100 ms padrão do `assert_push`
+  # não bastaram no CI (main, run 43427258279).
   defmacrop assert_event(event) do
     quote do
-      assert_push(unquote(event), payload)
+      assert_push(unquote(event), payload, 1_000)
       assert_contract(unquote(event), payload)
     end
   end
@@ -234,7 +236,7 @@ defmodule RampaWeb.AuditChannelTest do
       assert {:ok, _page} = Audits.record_scan_result(page, scanner_response("img-sem-alt"))
 
       for event <- ~w(status_changed page_scanned audit_completed) do
-        assert_push ^event, payload
+        assert_push ^event, payload, 1_000
         encoded = Jason.encode!(payload)
 
         refute encoded =~ "exemplo.com"
