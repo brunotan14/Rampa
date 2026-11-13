@@ -1,13 +1,44 @@
 import { expect, test } from "@playwright/test";
-import { A11Y_MEDIA, axeViolations, emulateOnly, horizontalOverflow } from "./a11y.js";
+import {
+  A11Y_MEDIA,
+  LOGO_MIN_PARTS,
+  axeViolations,
+  belowContrast,
+  emulateOnly,
+  headerLogoContrast,
+  horizontalOverflow,
+  paintContrast,
+  waitFiniteAnimations,
+} from "./a11y.js";
 
 test.describe("Página inicial (M0)", () => {
   for (const media of A11Y_MEDIA) {
-    test(`não tem violações do axe (${JSON.stringify(media)})`, async ({ page }) => {
+    // O axe não mede SVG: o logotipo do cabeçalho e o anel da pontuação do exemplo são medidos
+    // à parte (1.4.11, 3:1 com as cores pintadas). O traço e o preenchimento do SVG não são
+    // forçados pelo navegador: sem as cores do sistema, no alto contraste escuro do Windows
+    // (dark + more + forced) a palavra "Rampa" e o contorno do anel sumiam no Canvas preto.
+    test(`sem violações do axe, logo e anel com 3:1 (${JSON.stringify(media)})`, async ({ page }) => {
       await emulateOnly(page, media);
       await page.goto("/");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       expect(await axeViolations(page)).toEqual([]);
+
+      await waitFiniteAnimations(page);
+      const logo = await headerLogoContrast(page);
+      expect(logo.length).toBeGreaterThan(LOGO_MIN_PARTS);
+      expect(belowContrast(logo, 3), "logo").toEqual([]);
+
+      // Contorno contra a página; o arco contra a trilha, que fica atrás dele.
+      const ring = await paintContrast(
+        page,
+        [
+          { selector: ".rp-score__border", paint: "stroke" },
+          { selector: ".rp-score__value", paint: "stroke", over: { selector: ".rp-score__track", paint: "stroke" } },
+        ],
+        { scope: ".rp-score__ring" },
+      );
+      expect(ring).toHaveLength(2);
+      expect(belowContrast(ring, 3), "anel").toEqual([]);
     });
   }
 

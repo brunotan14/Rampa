@@ -4,7 +4,6 @@ import {
   axeViolations,
   emulateOnly,
   expectNoHorizontalScroll,
-  headerLogoContrast,
   reflowOverflow,
 } from "./a11y.js";
 
@@ -106,19 +105,6 @@ test.describe("logo no alto contraste do sistema", () => {
     const { ramp, fg } = await fills(page);
     expect(ramp).not.toBe(fg);
   });
-
-  // 1.4.11: cada parte do logotipo com 3:1 contra o que está atrás, em todas as mídias. Pega o
-  // alto contraste escuro do Windows (dark + more + forced), em que a palavra sumia no Canvas.
-  for (const media of A11Y_MEDIA) {
-    test(`cada parte do logo tem 3:1 contra o fundo (${JSON.stringify(media)})`, async ({ page }) => {
-      await emulateOnly(page, media);
-      await page.goto("/");
-      await expect(page.getByRole("img", { name: "Rampa, página inicial" })).toBeVisible();
-      const parts = await headerLogoContrast(page);
-      expect(parts.length).toBeGreaterThan(10);
-      expect(parts.filter((p) => p.ratio < 3)).toEqual([]);
-    });
-  }
 
   test("com forced-colors, o logo continua com nome e o axe não aponta nada", async ({ page }) => {
     await page.emulateMedia({ forcedColors: "active" });
