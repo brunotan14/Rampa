@@ -2,8 +2,11 @@
 // com a trilha e o h1, e os estados de carregando, não encontrado e erro. O h1 fica sempre na
 // mesma posição da árvore: ao trocar de "carregando" para o conteúdo, é o mesmo elemento (o foco
 // que o `AppShell` pôs nele não se perde).
-import type { ReactNode, Ref } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { isApiError } from "../api/client";
+import { useAudit } from "../api/hooks";
+import { queryKeys } from "../api/queryKeys";
 import { Breadcrumb, type Crumb } from "../components/Breadcrumb";
 import { Button } from "../components/Button";
 import { Link } from "../components/Link";
@@ -11,7 +14,7 @@ import { Notice } from "../components/Notice";
 import { PageTitle } from "../components/PageTitle";
 import { StateMessage } from "../components/StateMessage";
 import { t } from "../i18n";
-import { reportPath } from "../report";
+import { LIVE_REFRESH_MS, isRunning, reportPath } from "../report";
 
 export function ReportHead({
   crumbs,
@@ -118,5 +121,87 @@ export function LoginWallNotice({ pages = 1 }: { pages?: number }) {
     <Notice icon="bloqueio" tone="atencao">
       <p>{pages === 1 ? t.report.loginWall.one : t.report.loginWall.many(pages)}</p>
     </Notice>
+  );
+}
+
+/**
+ * Resumo da auditoria nas telas internas (que não têm o canal): enquanto ela anda, o resumo e os
+ * dados da tela (`refetchInterval`) são buscados de novo a cada `LIVE_REFRESH_MS`; quando ela
+ * termina, tudo da auditoria é buscado uma vez, para a tela mostrar o resultado final.
+ */
+export function useLiveAudit(auditId: string) {
+  const summary = useAudit(auditId, { liveMs: LIVE_REFRESH_MS });
+  const running = isRunning(summary.data);
+  const queryClient = useQueryClient();
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running) void queryClient.invalidateQueries({ queryKey: queryKeys.audit(auditId) });
+    wasRunning.current = running;
+  }, [running, auditId, queryClient]);
+  return { summary, running, refetchInterval: running ? LIVE_REFRESH_MS : (false as const) };
+}
+
+interface ScreenQuery<T> {
+  data: T | undefined;
+  error: unknown;
+  isError: boolean;
+  refetch: () => unknown;
+}
+
+/**
+ * Cabeçalho e corpo de uma tela do relatório pela mesma cascata: não encontrado (404), dados,
+ * erro ao carregar e carregando. O h1 fica sempre na mesma posição (ver `ReportHead`).
+ */
+export function ReportScreen<T>({
+  query,
+  title,
+  loadingTitle,
+  loadingText,
+  notFound,
+  lang,
+  crumbs,
+  head,
+  children,
+}: {
+  query: ScreenQuery<T>;
+  /** Título com os dados. */
+  title: (data: T) => string;
+  loadingTitle: string;
+  loadingText: string;
+  /** Título e estado do item não encontrado (a auditoria inteira tem os seus) e o caminho de volta. */
+  notFound: { title: string; state: string; back: { href: string; label: string } };
+  lang?: (data: T) => string | undefined;
+  crumbs?: (data: T) => readonly Crumb[];
+  head?: (data: T) => ReactNode;
+  children: (data: T) => ReactNode;
+}) {
+  const { data, error, isError } = query;
+  const missing = isNotFound(error);
+  const screenTitle = missing
+    ? notFoundTitle(error, notFound.title)
+    : data !== undefined
+      ? title(data)
+      : isError
+        ? t.audit.loadErrorTitle
+        : loadingTitle;
+  return (
+    <>
+      <ReportHead
+        title={screenTitle}
+        lang={!missing && data !== undefined ? lang?.(data) : undefined}
+        crumbs={!missing && data !== undefined && crumbs ? crumbs(data) : null}
+      >
+        {!missing && data !== undefined && head ? head(data) : null}
+      </ReportHead>
+      {missing ? (
+        <NotFoundState error={error} itemState={notFound.state} back={notFound.back} />
+      ) : data !== undefined ? (
+        children(data)
+      ) : isError ? (
+        <LoadErrorState error={error} title={t.audit.loadErrorTitle} onRetry={() => void query.refetch()} />
+      ) : (
+        <StateMessage kind="carregando" title={loadingText} />
+      )}
+    </>
   );
 }

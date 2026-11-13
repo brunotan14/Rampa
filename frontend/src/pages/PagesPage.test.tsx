@@ -1,8 +1,9 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { apiError, stubApi } from "../../test/api";
 import { AUDIT_ID, auditSummary, pageSummary } from "../../test/fixtures";
-import { axeViolations, renderRoute } from "../../test/render";
+import { axeViolations, jsonResponse, renderRoute } from "../../test/render";
+import { LIVE_REFRESH_MS } from "../report";
 
 const PATH = `/auditorias/${AUDIT_ID}/paginas`;
 const zero = { critical: 0, serious: 0, moderate: 0, minor: 0 };
@@ -33,10 +34,21 @@ const pages = [
   }),
 ];
 
+// Severidade dos achados para confirmar de cada página (os totais da página não dizem).
+let reviewSeverities: Record<string, string[]> = { [B]: ["minor", "minor"] };
+
+/** `GET /findings` com `limit` 1: o `total` de achados para confirmar daquela severidade. */
+function findingsTotal(url: URL) {
+  const list = reviewSeverities[url.searchParams.get("page_id") ?? ""] ?? [];
+  const total = list.filter((s) => s === url.searchParams.get("severity")).length;
+  return jsonResponse({ data: [], next_cursor: null, total });
+}
+
 function stub(extra: Record<string, unknown> = {}) {
   return stubApi({
     [`/api/audits/${AUDIT_ID}`]: auditSummary({ status: "completed", pages_found: 3, pages_scanned: 2, pages_failed: 1 }),
     [`/api/audits/${AUDIT_ID}/pages`]: { data: pages },
+    [`/api/audits/${AUDIT_ID}/findings`]: findingsTotal,
     ...extra,
   });
 }
@@ -45,7 +57,11 @@ const list = () => screen.getByRole("list", { name: "Páginas da auditoria" });
 const items = () => within(list()).getAllByRole("listitem");
 const names = () => items().map((li) => within(li).getAllByRole("link")[0]!.textContent);
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  reviewSeverities = { [B]: ["minor", "minor"] };
+});
 
 describe("Páginas da auditoria (RF-RA006)", () => {
   it("lista URL, título, status e totais por severidade, com trilha e h1 igual ao título", async () => {
@@ -158,5 +174,71 @@ describe("Páginas da auditoria (RF-RA006)", () => {
     renderRoute(PATH);
     expect(screen.getByRole("heading", { level: 1, name: "Carregando as páginas" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Carregando as páginas…");
+  });
+
+  it("review: página com 2 críticos só para confirmar entra no filtro de críticos, como o filtro da API na página", async () => {
+    const R = "dddddddd-0000-4000-8000-000000000004";
+    reviewSeverities = { [R]: ["critical", "critical"] };
+    const api = stub({
+      [`/api/audits/${AUDIT_ID}/pages`]: {
+        data: [pageSummary({ id: R, title: "Revisão", url: "https://exemplo.com.br/r", counts_by_severity: zero, needs_review_count: 2 })],
+      },
+    });
+    renderRoute(`${PATH}?severidade=critico`);
+    expect(await screen.findByRole("link", { name: "Revisão" })).toHaveAttribute(
+      "href",
+      `/auditorias/${AUDIT_ID}/paginas/${R}?severidade=critico`,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1 de 1 página");
+    expect(Object.fromEntries(api.calls(`/api/audits/${AUDIT_ID}/findings`)[0]!.searchParams)).toEqual({
+      page_id: R,
+      severity: "critical",
+      needs_review: "true",
+      limit: "1",
+    });
+  });
+
+  it("review: 1 crítico confirmado + 1 moderado para confirmar, com severidade=critico&revisao=sim, não aparece", async () => {
+    const M = "eeeeeeee-0000-4000-8000-000000000005";
+    reviewSeverities = { [M]: ["moderate"] };
+    stub({
+      [`/api/audits/${AUDIT_ID}/pages`]: {
+        data: [pageSummary({ id: M, title: "Mista", counts_by_severity: { ...zero, critical: 1 }, needs_review_count: 1 })],
+      },
+    });
+    renderRoute(`${PATH}?severidade=critico&revisao=sim`);
+    expect(await screen.findByRole("region", { name: "Nenhuma página com esses filtros" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Mista" })).not.toBeInTheDocument();
+  });
+
+  it("auditoria em andamento: a lista é buscada de novo a cada 5 s e para quando ela termina", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let status: "running" | "completed" = "running";
+    let current = [pageSummary({ id: A, title: "Agenda", status: "scanning", counts_by_severity: zero })];
+    const api = stubApi({
+      [`/api/audits/${AUDIT_ID}`]: () => jsonResponse(auditSummary({ status })),
+      [`/api/audits/${AUDIT_ID}/pages`]: () => jsonResponse({ data: current }),
+    });
+    renderRoute(PATH);
+    expect(await screen.findByText("Em análise")).toBeInTheDocument();
+
+    current = [pageSummary({ id: A, title: "Agenda", counts_by_severity: { ...zero, serious: 3 } })];
+    status = "completed";
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS));
+    await vi.waitFor(() => expect(items()[0]).toHaveTextContent("3 sérios"));
+    expect(screen.queryByText(/A auditoria ainda está em andamento/)).not.toBeInTheDocument();
+
+    const gets = api.calls(`/api/audits/${AUDIT_ID}/pages`).length;
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS * 3));
+    expect(api.calls(`/api/audits/${AUDIT_ID}/pages`).length).toBe(gets);
+  });
+
+  it("auditoria concluída: nada é buscado de novo sozinho", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = stub();
+    renderRoute(PATH);
+    await screen.findByRole("list", { name: "Páginas da auditoria" });
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS * 3));
+    expect(api.calls(`/api/audits/${AUDIT_ID}/pages`)).toHaveLength(1);
   });
 });

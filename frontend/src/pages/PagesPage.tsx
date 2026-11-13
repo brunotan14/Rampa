@@ -1,14 +1,16 @@
 // Páginas da auditoria (RF-RA006, design/components/PageList e TelaRelatorioDetalhado), em
 // `/auditorias/:id/paginas`: URL, título, status e totais por severidade de cada página, com
-// filtros (severidade e "revisão necessária", pelos totais da página) e ordem na URL. O link de
-// cada página leva junto os filtros que valem também para os problemas dela. Origem e critério
-// WCAG filtram os problemas, na tela da página (a lista da API só tem os totais).
+// filtros (severidade e "revisão necessária") e ordem na URL. A severidade tem o significado do
+// filtro da API na tela da página (confirmados e os que pedem revisão): quando os totais não
+// decidem, a tela pergunta à API (`pageMatch`), e o link nunca leva a uma página vazia. O link de
+// cada página leva junto esses filtros. Origem e critério WCAG filtram os problemas, na tela da
+// página. Com a auditoria em andamento, a lista é buscada de novo a cada 5 s.
 //
 // Leitor de tela: a contagem ("1 de 3 páginas") fica numa região `status`, montada com a tela e
 // falada a cada troca de filtro, sem mover o foco. Fora no M2: busca por texto, Exportar CSV.
 import { useId } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { useAudit, usePages } from "../api/hooks";
+import { useFindingsTotals, usePages } from "../api/hooks";
 import type { PageSummary } from "../api/types";
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
@@ -22,6 +24,8 @@ import {
   PAGE_ORDERS,
   filterAndSortPages,
   hostOf,
+  pageMatch,
+  reviewFindingsFilters,
   isAuditId,
   pageLinkSearch,
   pageName,
@@ -33,15 +37,7 @@ import {
 } from "../report";
 import { API_SEVERITIES, FINDING_SEVERITIES, fromApiSeverity } from "../severity";
 import { NotFoundPage } from "./NotFoundPage";
-import {
-  LoadErrorState,
-  NotFoundState,
-  ReportHead,
-  RunningNotice,
-  isNotFound,
-  notFoundTitle,
-  reportCrumb,
-} from "./reportParts";
+import { ReportScreen, RunningNotice, isNotFound, reportCrumb, useLiveAudit } from "./reportParts";
 
 export function PagesPage() {
   const { id } = useParams();
@@ -50,49 +46,54 @@ export function PagesPage() {
 }
 
 function PagesView({ auditId }: { auditId: string }) {
-  const summary = useAudit(auditId);
-  const pages = usePages(auditId);
+  const { summary, running, refetchInterval } = useLiveAudit(auditId);
+  const pages = usePages(auditId, { refetchInterval });
   const host = hostOf(summary.data?.start_url);
+  // A auditoria inexistente pode aparecer primeiro no resumo.
   const error = pages.error ?? (isNotFound(summary.error) ? summary.error : null);
 
-  const title = isNotFound(error)
-    ? notFoundTitle(error, t.audit.notFoundTitle)
-    : pages.data
-      ? host
-        ? t.report.pages.title(host)
-        : t.report.pages.titleNoHost
-      : pages.isError
-        ? t.audit.loadErrorTitle
-        : t.report.pages.loadingTitle;
-
-  const running = summary.data !== undefined && (summary.data.status === "queued" || summary.data.status === "running");
-
   return (
-    <>
-      <ReportHead
-        title={title}
-        crumbs={pages.data ? [reportCrumb(auditId, host), { label: t.report.crumbs.pages }] : null}
-      />
-      {isNotFound(error) ? (
-        <NotFoundState error={error} itemState={t.audit.notFoundState} back={{ href: "/", label: t.audit.newAudit }} />
-      ) : pages.data ? (
+    <ReportScreen
+      query={{ data: pages.data, error, isError: pages.isError || error !== null, refetch: pages.refetch }}
+      title={() => (host ? t.report.pages.title(host) : t.report.pages.titleNoHost)}
+      loadingTitle={t.report.pages.loadingTitle}
+      loadingText={t.report.pages.loading}
+      notFound={{ title: t.audit.notFoundTitle, state: t.audit.notFoundState, back: { href: "/", label: t.audit.newAudit } }}
+      crumbs={() => [reportCrumb(auditId, host), { label: t.report.crumbs.pages }]}
+    >
+      {(data) => (
         <>
           {running && <RunningNotice auditId={auditId} />}
-          <PageList auditId={auditId} pages={pages.data.data} />
+          <PageList auditId={auditId} pages={data.data} refetchInterval={refetchInterval} />
         </>
-      ) : pages.isError ? (
-        <LoadErrorState error={pages.error} title={t.audit.loadErrorTitle} onRetry={() => void pages.refetch()} />
-      ) : (
-        <StateMessage kind="carregando" title={t.report.pages.loading} />
       )}
-    </>
+    </ReportScreen>
   );
 }
 
-function PageList({ auditId, pages }: { auditId: string; pages: readonly PageSummary[] }) {
+function PageList({
+  auditId,
+  pages,
+  refetchInterval,
+}: {
+  auditId: string;
+  pages: readonly PageSummary[];
+  refetchInterval: number | false;
+}) {
   const [params, setParams] = useSearchParams();
   const state = readPageListState(params);
-  const shown = filterAndSortPages(pages, state);
+  // Páginas que os totais não decidem: a API diz quantos achados para confirmar daquela
+  // severidade cada uma tem. Se a pergunta falhar, a página entra (a tela dela explica o filtro).
+  const asked = state.severidade ? pages.filter((page) => pageMatch(page, state) === "ask") : [];
+  const severity = state.severidade;
+  const totals = useFindingsTotals(
+    auditId,
+    severity ? asked.map((page) => reviewFindingsFilters(page.id, severity)) : [],
+    { refetchInterval },
+  );
+  const reviewTotals = new Map(asked.map((page, i) => [page.id, totals[i]?.isError ? 1 : (totals[i]?.data ?? 0)]));
+  const applying = totals.some((q) => q.isPending);
+  const shown = filterAndSortPages(pages, state, reviewTotals);
   const motion = useMotionAllowed();
   const ids = { severity: useId(), review: useId(), order: useId(), list: useId() };
 
@@ -179,10 +180,10 @@ function PageList({ auditId, pages }: { auditId: string; pages: readonly PageSum
 
       {/* A única região viva da tela: muda só quando o filtro muda o resultado. */}
       <p className="rp-pages__count" role="status">
-        {t.report.pages.count(shown.length, pages.length)}
+        {applying ? t.report.pages.applying : t.report.pages.count(shown.length, pages.length)}
       </p>
 
-      {shown.length === 0 ? (
+      {applying ? null : shown.length === 0 ? (
         <StateMessage
           kind="vazio"
           headingLevel={3}

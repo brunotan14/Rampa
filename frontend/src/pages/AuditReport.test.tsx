@@ -5,6 +5,7 @@ import { FakeSocket } from "../../test/fakeSocket";
 import { AUDIT_ID, FINDING_ID, auditSummary, progress } from "../../test/fixtures";
 import { axeViolations, renderRoute } from "../../test/render";
 import type { AuditSummary } from "../api/types";
+import { SUMMARY_RETRIES, SUMMARY_RETRY_MS } from "./AuditReport";
 
 const PATH = `/auditorias/${AUDIT_ID}`;
 const zero = { critical: 0, serious: 0, moderate: 0, minor: 0 };
@@ -51,7 +52,25 @@ async function open(summary: AuditSummary, extra: Record<string, unknown> = {}) 
   return { ...view, api };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+/** O canal diz "concluída" enquanto o `GET` do resumo ainda diz "em andamento". */
+async function endBeforeSummary(responses: () => AuditSummary) {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const api = stubApi({
+    [`/api/audits/${AUDIT_ID}`]: () => new Response(JSON.stringify(responses()), { headers: { "Content-Type": "application/json" } }),
+    [`/api/audits/${AUDIT_ID}/pages`]: { data: [] },
+  });
+  const socket = new FakeSocket();
+  renderRoute(PATH, { socket });
+  await screen.findByRole("heading", { level: 1, name: "Auditando exemplo.com.br" });
+  act(() => socket.last.reply({ revision: 5, progress: progress({ status: "completed", pages_scanned: 1 }) }));
+  await screen.findByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" });
+  return api;
+}
 
 describe("Relatório resumido (RF-RA005)", () => {
   it("h1 igual ao título, aviso fixo, totais, tabela separando confirmados e para confirmar, top problemas, sem pontuação inventada", async () => {
@@ -183,5 +202,30 @@ describe("Relatório resumido (RF-RA005)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeInTheDocument();
     expect(await screen.findByText("Problemas confirmados")).toBeInTheDocument();
     expect(api.calls(`/api/audits/${AUDIT_ID}`).length).toBeLessThanOrEqual(3);
+  });
+
+  it("resumo que demora a chegar ao estado final: tenta de novo com espera e mostra o relatório quando vier", async () => {
+    let gets = 0;
+    await endBeforeSummary(() => (++gets >= 4 ? completed() : auditSummary({ status: "running" })));
+    for (let i = 0; i < SUMMARY_RETRIES && !screen.queryByText("Problemas confirmados", { selector: "dt" }); i++) {
+      await act(() => vi.advanceTimersByTimeAsync(SUMMARY_RETRY_MS));
+    }
+    expect(await screen.findByText("Problemas confirmados", { selector: "dt" })).toBeInTheDocument();
+  });
+
+  it("resumo que nunca chega ao estado final: depois das tentativas, erro com 'Tentar de novo', que recomeça", async () => {
+    let done = false;
+    const api = await endBeforeSummary(() => (done ? completed() : auditSummary({ status: "running" })));
+    await act(() => vi.advanceTimersByTimeAsync(SUMMARY_RETRY_MS * (SUMMARY_RETRIES + 2)));
+    const error = await screen.findByRole("alert");
+    expect(error).toHaveTextContent("O relatório ainda não ficou pronto");
+    expect(error).toHaveTextContent("A auditoria terminou, mas o resumo ainda não chegou.");
+    const asked = api.calls(`/api/audits/${AUDIT_ID}`).length;
+    await act(() => vi.advanceTimersByTimeAsync(SUMMARY_RETRY_MS * 3));
+    expect(api.calls(`/api/audits/${AUDIT_ID}`).length).toBe(asked);
+
+    done = true;
+    await userEvent.click(within(error).getByRole("button", { name: "Tentar de novo" }));
+    expect(await screen.findByText("Problemas confirmados", { selector: "dt" })).toBeInTheDocument();
   });
 });

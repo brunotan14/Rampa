@@ -5,8 +5,10 @@ import {
   hostOf,
   isAuditId,
   pageLinkSearch,
+  pageMatch,
   pageName,
   readFindingFilters,
+  reviewFindingsFilters,
   readPageListState,
   toApiFilters,
   writeFindingFilters,
@@ -63,9 +65,9 @@ describe("report: filtros dos problemas na URL (RF-RA006)", () => {
 });
 
 describe("report: lista de páginas", () => {
-  const a = pageSummary({ id: "a", url: "https://e.com/0", counts_by_severity: { ...zero, serious: 3 } });
-  const b = pageSummary({ id: "b", url: "https://e.com/a", counts_by_severity: { ...zero, critical: 1 }, needs_review_count: 2 });
-  const c = pageSummary({ id: "c", url: "https://e.com/c", status: "failed" });
+  const a = pageSummary({ id: "a", url: "https://e.com/0", final_url: null, counts_by_severity: { ...zero, serious: 3 } });
+  const b = pageSummary({ id: "b", url: "https://e.com/a", final_url: null, counts_by_severity: { ...zero, critical: 1 }, needs_review_count: 2 });
+  const c = pageSummary({ id: "c", url: "https://e.com/c", final_url: null, status: "failed" });
 
   it("ordena pela gravidade (críticos primeiro), pelo endereço ou com as falhas primeiro", () => {
     expect(filterAndSortPages([a, b, c], readPageListState(new URLSearchParams())).map((p) => p.id)).toEqual(["b", "a", "c"]);
@@ -73,9 +75,38 @@ describe("report: lista de páginas", () => {
     expect(filterAndSortPages([a, b, c], readPageListState(new URLSearchParams("ordem=status"))).map((p) => p.id)[0]).toBe("c");
   });
 
-  it("filtra pela severidade e pela revisão, a partir dos totais", () => {
-    expect(filterAndSortPages([a, b, c], readPageListState(new URLSearchParams("severidade=serio"))).map((p) => p.id)).toEqual(["a"]);
+  it("ordena pelo endereço exibido (o final, depois de redirecionamentos)", () => {
+    const x = pageSummary({ id: "x", url: "https://e.com/a", final_url: "https://e.com/z" });
+    const y = pageSummary({ id: "y", url: "https://e.com/b", final_url: null });
+    expect(filterAndSortPages([x, y], readPageListState(new URLSearchParams("ordem=endereco"))).map((p) => p.id)).toEqual(["y", "x"]);
+  });
+
+  it("filtra pela severidade e pela revisão; quando os totais não decidem, usa o total da API", () => {
+    // `b` tem 2 achados para confirmar, de severidade desconhecida pelos totais: pergunta.
+    const sev = readPageListState(new URLSearchParams("severidade=serio"));
+    expect(pageMatch(a, sev)).toBe(true);
+    expect(pageMatch(b, sev)).toBe("ask");
+    expect(pageMatch(c, sev)).toBe(false);
+    expect(filterAndSortPages([a, b, c], sev).map((p) => p.id)).toEqual(["a"]);
+    expect(filterAndSortPages([a, b, c], sev, new Map([["b", 2]])).map((p) => p.id)).toEqual(["b", "a"]);
     expect(filterAndSortPages([a, b, c], readPageListState(new URLSearchParams("revisao=sim"))).map((p) => p.id)).toEqual(["b"]);
+  });
+
+  it("review: 2 críticos só em revisão entram no filtro de críticos, como na API", () => {
+    const onlyReview = pageSummary({ id: "r", counts_by_severity: zero, needs_review_count: 2 });
+    const state = readPageListState(new URLSearchParams("severidade=critico"));
+    expect(pageMatch(onlyReview, state)).toBe("ask");
+    expect(reviewFindingsFilters("r", "critico")).toEqual({ page_id: "r", severity: "critical", needs_review: "true", limit: 1 });
+    expect(filterAndSortPages([onlyReview], state, new Map([["r", 2]])).map((p) => p.id)).toEqual(["r"]);
+  });
+
+  it("review: 1 crítico confirmado + 1 moderado em revisão, com severidade=critico&revisao=sim, fica de fora", () => {
+    const mixed = pageSummary({ id: "m", counts_by_severity: { ...zero, critical: 1 }, needs_review_count: 1 });
+    const state = readPageListState(new URLSearchParams("severidade=critico&revisao=sim"));
+    // O crítico confirmado não basta: a página precisa de um crítico para confirmar.
+    expect(pageMatch(mixed, state)).toBe("ask");
+    expect(filterAndSortPages([mixed], state, new Map([["m", 0]]))).toEqual([]);
+    expect(pageLinkSearch(state)).toBe("?severidade=critico&revisao=sim");
   });
 
   it("guarda o estado na URL e leva para a página só os filtros que valem para os problemas", () => {

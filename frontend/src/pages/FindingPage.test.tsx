@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { apiError, stubApi } from "../../test/api";
-import { AUDIT_ID, FINDING_ID, PAGE_ID, auditSummary, findingDetail } from "../../test/fixtures";
+import { AUDIT_ID, FINDING_ID, PAGE_ID, auditSummary, findingDetail, pageSummary } from "../../test/fixtures";
 import { axeViolations, renderRoute } from "../../test/render";
 import type { FindingDetail } from "../api/types";
 
@@ -11,6 +11,12 @@ function stub(detail: FindingDetail | (() => Response)) {
   return stubApi({
     [`/api/audits/${AUDIT_ID}`]: auditSummary({ status: "completed" }),
     [`/api/audits/${AUDIT_ID}/findings/${FINDING_ID}`]: detail,
+    [`/api/audits/${AUDIT_ID}/pages`]: {
+      data: [
+        pageSummary(),
+        pageSummary({ id: OTHER, url: "https://exemplo.com.br/contato", final_url: "https://exemplo.com.br/fale-conosco" }),
+      ],
+    },
   });
 }
 
@@ -48,7 +54,8 @@ describe("Detalhe do problema (RF-RA007, parte do M2)", () => {
     expect(within(aside).getByRole("link", { name: "Início" })).toHaveAttribute("href", `/auditorias/${AUDIT_ID}/paginas/${PAGE_ID}`);
     const elsewhere = within(aside).getByRole("region", { name: "Onde mais aparece" });
     expect(within(elsewhere).getByRole("link", { name: "Contato" })).toHaveAttribute("href", `/auditorias/${AUDIT_ID}/paginas/${OTHER}`);
-    expect(elsewhere).toHaveTextContent("3 vezes");
+    // O endereço exibido é o final, como no resto do relatório.
+    await vi.waitFor(() => expect(elsewhere).toHaveTextContent("https://exemplo.com.br/fale-conosco · 3 vezes"));
 
     const fix = screen.getByRole("region", { name: "Como corrigir" });
     expect(fix.querySelector('[lang="en"]')).toHaveTextContent("Element does not have an alt attribute");

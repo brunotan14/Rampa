@@ -6,12 +6,13 @@
 //
 // Leitor de tela: a contagem de problemas é a única região viva (`status`), falada quando os
 // filtros mudam o resultado; aplicar o filtro não move o foco. "Mostrar mais problemas" leva o
-// foco ao primeiro elemento novo da lista.
+// foco ao primeiro elemento novo da lista. Com a auditoria em andamento, a página e os problemas
+// são buscados de novo a cada 5 s, e uma vez no fim.
 // Fora no M2: Reauditar só a página, Exportar CSV, recorte de tela do elemento.
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Tab, TabList, TabPanel, Tabs, type Key } from "react-aria-components";
 import { useParams, useSearchParams } from "react-router";
-import { useAudit, useFindings, usePage } from "../api/hooks";
+import { useFindings, usePage } from "../api/hooks";
 import type { PageDetail } from "../api/types";
 import { AxeText } from "../components/AxeText";
 import { Button } from "../components/Button";
@@ -37,16 +38,7 @@ import {
 } from "../report";
 import { FINDING_SEVERITIES, severityLabel, severityTotals, totalProblems } from "../severity";
 import { NotFoundPage } from "./NotFoundPage";
-import {
-  LoadErrorState,
-  LoginWallNotice,
-  NotFoundState,
-  ReportHead,
-  RunningNotice,
-  isNotFound,
-  notFoundTitle,
-  reportCrumb,
-} from "./reportParts";
+import { LoadErrorState, LoginWallNotice, ReportScreen, RunningNotice, reportCrumb, useLiveAudit } from "./reportParts";
 
 export function PageReportPage() {
   const { id, pageId } = useParams();
@@ -57,71 +49,64 @@ export function PageReportPage() {
 type TabKey = "problemas" | "aprovados";
 
 function PageReportView({ auditId, pageId }: { auditId: string; pageId: string }) {
-  const summary = useAudit(auditId);
-  const page = usePage(auditId, pageId);
+  const { summary, running, refetchInterval } = useLiveAudit(auditId);
+  const page = usePage(auditId, pageId, { refetchInterval });
   const host = hostOf(summary.data?.start_url);
-  const data = page.data;
-
-  const title = isNotFound(page.error)
-    ? notFoundTitle(page.error, t.report.page.notFoundTitle)
-    : data
-      ? pageName(data)
-      : page.isError
-        ? t.audit.loadErrorTitle
-        : t.report.page.loadingTitle;
-  const running = summary.data !== undefined && (summary.data.status === "queued" || summary.data.status === "running");
-  const scannedAt = data?.scanned_at ? new Date(data.scanned_at) : null;
 
   return (
-    <>
-      <ReportHead
-        title={title}
-        crumbs={
-          data
-            ? [
-                reportCrumb(auditId, host),
-                { label: t.report.crumbs.pages, href: pagesPath(auditId) },
-                { label: pageName(data) },
-              ]
-            : null
-        }
-      >
-        {data ? (
-          <div className="rp-pagehead">
-            <span className="rp-pages__path">{data.url}</span>
-            {data.final_url && data.final_url !== data.url ? (
-              <span className="rp-caption">
-                {t.report.page.redirected} <span className="rp-pages__path rp-inline">{data.final_url}</span>
-              </span>
-            ) : null}
-            <span className="rp-pages__status">
-              <PageStatus status={data.status} />
-              {scannedAt && !Number.isNaN(scannedAt.getTime()) ? (
-                <span className="rp-caption">{t.report.page.scannedAt(formatAt(scannedAt))}</span>
-              ) : null}
-            </span>
-          </div>
-        ) : null}
-      </ReportHead>
-
-      {isNotFound(page.error) ? (
-        <NotFoundState
-          error={page.error}
-          itemState={t.report.page.notFoundState}
-          back={{ href: pagesPath(auditId), label: t.report.page.backToPages }}
-        />
-      ) : data ? (
-        <PageBody auditId={auditId} page={data} running={running} />
-      ) : page.isError ? (
-        <LoadErrorState error={page.error} title={t.audit.loadErrorTitle} onRetry={() => void page.refetch()} />
-      ) : (
-        <StateMessage kind="carregando" title={t.report.page.loading} />
-      )}
-    </>
+    <ReportScreen
+      query={page}
+      title={pageName}
+      loadingTitle={t.report.page.loadingTitle}
+      loadingText={t.report.page.loading}
+      notFound={{
+        title: t.report.page.notFoundTitle,
+        state: t.report.page.notFoundState,
+        back: { href: pagesPath(auditId), label: t.report.page.backToPages },
+      }}
+      crumbs={(data) => [
+        reportCrumb(auditId, host),
+        { label: t.report.crumbs.pages, href: pagesPath(auditId) },
+        { label: pageName(data) },
+      ]}
+      head={(data) => <PageHead page={data} />}
+    >
+      {(data) => <PageBody auditId={auditId} page={data} running={running} refetchInterval={refetchInterval} />}
+    </ReportScreen>
   );
 }
 
-function PageBody({ auditId, page, running }: { auditId: string; page: PageDetail; running: boolean }) {
+function PageHead({ page }: { page: PageDetail }) {
+  const scannedAt = page.scanned_at ? new Date(page.scanned_at) : null;
+  return (
+    <div className="rp-pagehead">
+      <span className="rp-pages__path">{page.url}</span>
+      {page.final_url && page.final_url !== page.url ? (
+        <span className="rp-caption">
+          {t.report.page.redirected} <span className="rp-pages__path rp-inline">{page.final_url}</span>
+        </span>
+      ) : null}
+      <span className="rp-pages__status">
+        <PageStatus status={page.status} />
+        {scannedAt && !Number.isNaN(scannedAt.getTime()) ? (
+          <span className="rp-caption">{t.report.page.scannedAt(formatAt(scannedAt))}</span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function PageBody({
+  auditId,
+  page,
+  running,
+  refetchInterval,
+}: {
+  auditId: string;
+  page: PageDetail;
+  running: boolean;
+  refetchInterval: number | false;
+}) {
   const [params, setParams] = useSearchParams();
   const tab: TabKey = params.get("aba") === "aprovados" ? "aprovados" : "problemas";
   const problems = totalProblems(page.counts_by_severity) + page.needs_review_count;
@@ -185,7 +170,7 @@ function PageBody({ auditId, page, running }: { auditId: string; page: PageDetai
               </Tab>
             </TabList>
             <TabPanel id="problemas" className="rp-tabs__panel">
-              <FindingsPanel auditId={auditId} pageId={page.id} />
+              <FindingsPanel auditId={auditId} pageId={page.id} refetchInterval={refetchInterval} />
             </TabPanel>
             <TabPanel id="aprovados" className="rp-tabs__panel">
               <PassedPanel page={page} />
@@ -201,23 +186,33 @@ function PageBody({ auditId, page, running }: { auditId: string; page: PageDetai
 
 const filterKey = (f: FindingFilterState) => [f.severidade, f.origem, f.wcag, f.revisao].join("|");
 
-function FindingsPanel({ auditId, pageId }: { auditId: string; pageId: string }) {
+function FindingsPanel({
+  auditId,
+  pageId,
+  refetchInterval,
+}: {
+  auditId: string;
+  pageId: string;
+  refetchInterval: number | false;
+}) {
   const [params, setParams] = useSearchParams();
   const filters = readFindingFilters(params);
   const filtered = hasFindingFilters(filters);
-  const findings = useFindings(auditId, toApiFilters(pageId, filters));
+  const findings = useFindings(auditId, toApiFilters(pageId, filters), { refetchInterval });
   const all = findings.data?.pages.flatMap((p) => p.data) ?? [];
   const total = findings.data?.pages[0]?.total ?? null;
-  // Depois de "Mostrar mais", o foco vai para o primeiro elemento novo da lista (o lote novo já
-  // está na tela quando os dados mudam).
-  const focusNext = useRef<string | null>(null);
+  // Depois de "Mostrar mais", o foco vai para o primeiro elemento novo da lista. A posição dele
+  // é marcada antes da busca e só o efeito foca, quando o lote novo já está na tela; o pedido é
+  // desfeito ao focar ou se a busca não trouxer nada, então uma busca posterior (a de 5 s com a
+  // auditoria em andamento) nunca rouba o foco de outro controle.
+  const focusFrom = useRef<number | null>(null);
   useEffect(() => {
-    if (focusNext.current === null) return;
-    const link = document.getElementById(findingLinkId(focusNext.current));
-    if (link) {
-      link.focus();
-      focusNext.current = null;
-    }
+    const at = focusFrom.current;
+    if (at === null) return;
+    const next = findings.data?.pages.flatMap((p) => p.data)[at];
+    if (!next) return;
+    focusFrom.current = null;
+    document.getElementById(findingLinkId(next.id))?.focus();
   }, [findings.data]);
 
   const apply = (next: FindingFilterState) =>
@@ -225,12 +220,10 @@ function FindingsPanel({ auditId, pageId }: { auditId: string; pageId: string })
 
   const showMore = () => {
     const before = all.length;
+    focusFrom.current = before;
     void findings.fetchNextPage().then((result) => {
-      const next = result.data?.pages.flatMap((p) => p.data)[before];
-      if (next) {
-        focusNext.current = next.id;
-        document.getElementById(findingLinkId(next.id))?.focus();
-      }
+      const arrived = (result.data?.pages.flatMap((p) => p.data).length ?? 0) > before;
+      if (!arrived || result.isError) focusFrom.current = null;
     });
   };
 
@@ -460,9 +453,9 @@ function PassedPanel({ page }: { page: PageDetail }) {
               <AxeText className="rp-passed__help">{rule.help}</AxeText>
               <span className="rp-caption">
                 <code>{rule.rule_id}</code>
-                {" · "}
+                {t.report.separator}
                 {rule.wcag_criteria.length > 0 ? rule.wcag_criteria.map(t.report.criterion).join(", ") : t.report.noCriteria}
-                {" · "}
+                {t.report.separator}
                 {t.report.passed.nodes(rule.nodes_total)}
               </span>
             </span>

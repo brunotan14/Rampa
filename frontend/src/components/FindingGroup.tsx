@@ -2,7 +2,7 @@
 // elementos afetados. O título é um h3 (a tecla H do leitor de tela lista os problemas como um
 // índice); o card não é clicável por inteiro: cada elemento é um link para o detalhe.
 import type { Finding } from "../api/types";
-import { formatNumber, t } from "../i18n";
+import { t } from "../i18n";
 import { confidenceBand, findingPath } from "../report";
 import { fromApiSeverity } from "../severity";
 import { FindingTitle } from "./FindingTitle";
@@ -76,7 +76,11 @@ export function FindingGroup({ auditId, group }: { auditId: string; group: Findi
               </Link>
               {finding.needs_review && finding.source !== "axe" && finding.confidence !== null && (
                 <span className="rp-caption">
-                  {` ${t.report.ai.confidence[confidenceBand(finding.confidence)]} (${formatNumber(Math.round(finding.confidence * 100))}%)`}
+                  {" "}
+                  {t.report.ai.confidenceValue(
+                    t.report.ai.confidence[confidenceBand(finding.confidence)],
+                    Math.round(finding.confidence * 100),
+                  )}
                 </span>
               )}
             </li>

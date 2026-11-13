@@ -1,7 +1,7 @@
 // design/components/AiReviewBadge: achado da IA (ou de heurística) é sugestão, não veredito.
 // Borda tracejada, ícone de olho e o texto "Avaliado por IA, confirme manualmente", com a
 // confiança em palavra e número ("Confiança alta (86%)"). As barras são decorativas.
-import { formatNumber, t } from "../i18n";
+import { t } from "../i18n";
 import { confidenceBand } from "../report";
 import { Icon } from "./Icon";
 
@@ -20,7 +20,7 @@ export function AiReviewBadge({ confidence }: { confidence: number | null }) {
               <i key={n} className={n <= BARS[band] ? "on" : undefined} />
             ))}
           </span>
-          {`${t.report.ai.confidence[band]} (${formatNumber(Math.round(confidence * 100))}%)`}
+          {t.report.ai.confidenceValue(t.report.ai.confidence[band], Math.round(confidence * 100))}
         </span>
       )}
     </span>

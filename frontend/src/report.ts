@@ -2,7 +2,7 @@
 // (RF-RA006: o link compartilhado mantém o filtro) e ordenação das páginas. Os nomes na URL são
 // em português, como a interface (`?severidade=critico&origem=ia`); a conversão para os nomes da
 // API (`severity=critical&source=ai`) fica aqui e em `severity.ts`.
-import type { FindingSource, FindingsFilters, PageSummary } from "./api/types";
+import type { AuditStatus, FindingSource, FindingsFilters, PageSummary } from "./api/types";
 import { API_SEVERITIES, fromApiSeverity, toApiSeverity, type FindingSeverity } from "./severity";
 
 // --- Ids e endereços -------------------------------------------------------------------------
@@ -46,6 +46,16 @@ export const pagesPath = (auditId: string, search = "") => `/auditorias/${auditI
 export const pagePath = (auditId: string, pageId: string, search = "") =>
   `/auditorias/${auditId}/paginas/${pageId}${search}`;
 export const findingPath = (auditId: string, findingId: string) => `/auditorias/${auditId}/problemas/${findingId}`;
+
+// --- Andamento -------------------------------------------------------------------------------
+
+/** A auditoria ainda anda (na fila ou em varredura): o que as telas do relatório mostram pode mudar. */
+export function isRunning(audit: { status: AuditStatus } | null | undefined): boolean {
+  return audit?.status === "queued" || audit?.status === "running";
+}
+
+/** Intervalo das novas buscas das telas do relatório enquanto a auditoria anda. */
+export const LIVE_REFRESH_MS = 5_000;
 
 // --- Origem do achado ------------------------------------------------------------------------
 
@@ -191,16 +201,44 @@ function compareSeverity(a: PageSummary, b: PageSummary): number {
   return b.needs_review_count - a.needs_review_count;
 }
 
-const byUrl = (a: PageSummary, b: PageSummary) => a.url.localeCompare(b.url, "pt-BR");
+/** O endereço exibido (o final, depois de redirecionamentos) é o que ordena. */
+const shownUrl = (page: PageSummary) => page.final_url ?? page.url;
+const byUrl = (a: PageSummary, b: PageSummary) => shownUrl(a).localeCompare(shownUrl(b), "pt-BR");
 
-/** Filtra pelos totais da página e ordena (a API manda na ordem de entrada; a ordem é do cliente). */
-export function filterAndSortPages(pages: readonly PageSummary[], state: PageListState): PageSummary[] {
-  const severity = state.severidade ? toApiSeverity(state.severidade) : null;
-  const filtered = pages.filter(
-    (page) =>
-      (severity === null || page.counts_by_severity[severity] > 0) &&
-      (state.revisao !== "sim" || page.needs_review_count > 0),
-  );
+/**
+ * Se a página entra no filtro da lista, com o mesmo significado do filtro `severity` da API na
+ * tela da página (confirmados e os que pedem revisão). Os totais da página têm a severidade só
+ * dos confirmados e um total único dos que pedem revisão: quando eles não decidem, a resposta é
+ * `"ask"` e a tela pergunta à API quantos achados para confirmar daquela severidade a página tem
+ * (`reviewFindingsFilters`). Assim o link nunca leva a uma página vazia por diferença de regra.
+ */
+export function pageMatch(page: PageSummary, state: PageListState): boolean | "ask" {
+  const reviewOnly = state.revisao === "sim";
+  if (!state.severidade) return !reviewOnly || page.needs_review_count > 0;
+  const severity = toApiSeverity(state.severidade);
+  if (!reviewOnly && page.counts_by_severity[severity] > 0) return true;
+  return page.needs_review_count > 0 ? "ask" : false;
+}
+
+/** Filtros da pergunta de `pageMatch`: só o total (`limit` 1) de achados para confirmar. */
+export function reviewFindingsFilters(pageId: string, severity: FindingSeverity): FindingsFilters {
+  return { page_id: pageId, severity: toApiSeverity(severity), needs_review: "true", limit: 1 };
+}
+
+/**
+ * Filtra e ordena (a API manda na ordem de entrada; a ordem é do cliente). `reviewTotals` traz,
+ * por página, o total de achados para confirmar da severidade filtrada; página que dependia
+ * dele e ainda não tem a resposta fica de fora (a tela diz que está aplicando o filtro).
+ */
+export function filterAndSortPages(
+  pages: readonly PageSummary[],
+  state: PageListState,
+  reviewTotals: ReadonlyMap<string, number> = new Map(),
+): PageSummary[] {
+  const filtered = pages.filter((page) => {
+    const match = pageMatch(page, state);
+    return match === "ask" ? (reviewTotals.get(page.id) ?? 0) > 0 : match;
+  });
   const compare =
     state.ordem === "endereco"
       ? byUrl

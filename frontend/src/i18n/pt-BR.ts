@@ -278,7 +278,11 @@ export const ptBR = {
     ai: {
       label: "Avaliado por IA, confirme manualmente",
       confidence: { alta: "Confiança alta", media: "Confiança média", baixa: "Confiança baixa" },
+      /** "Confiança alta (86%)". */
+      confidenceValue: (label: string, percent: number) => `${label} (${formatNumber(percent)}%)`,
     },
+    /** Separador de metadados numa linha ("Em 1 página · 2 ocorrências"). */
+    separator: " · ",
     axeUndecided: "O axe não conseguiu decidir: confirme manualmente",
     pageStatus: {
       queued: "Na fila",
@@ -290,8 +294,11 @@ export const ptBR = {
     summary: {
       title: (host: string) => `Relatório de ${host}`,
       titleNoHost: "Relatório da auditoria",
-      meta: (when: string, pages: string) => `Auditado ${when} · ${pages} · WCAG 2.2 nível AA`,
+      meta: (when: string, pages: number) =>
+        `Auditado ${when} · ${plural(pages, "página analisada", "páginas analisadas")} · WCAG 2.2 nível AA`,
       loading: "Carregando o relatório…",
+      notReadyTitle: "O relatório ainda não ficou pronto",
+      notReadyText: "A auditoria terminou, mas o resumo ainda não chegou. Tente de novo em alguns instantes.",
       viewPages: "Ver páginas e problemas",
       stats: {
         problems: "Problemas confirmados",
@@ -357,6 +364,7 @@ export const ptBR = {
         status: "Status, com falha primeiro",
       },
       count: (shown: number, total: number) => `${formatNumber(shown)} de ${plural(total, "página", "páginas")}`,
+      applying: "Aplicando o filtro…",
       listLabel: "Páginas da auditoria",
       noProblems: "Sem problemas confirmados",
       emptyTitle: "Nenhuma página nesta auditoria ainda",

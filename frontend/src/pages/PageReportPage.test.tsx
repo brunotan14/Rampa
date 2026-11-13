@@ -1,9 +1,10 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { apiError, stubApi } from "../../test/api";
 import { AUDIT_ID, PAGE_ID, auditSummary, finding, pageDetail } from "../../test/fixtures";
 import { axeViolations, jsonResponse, renderRoute } from "../../test/render";
 import type { Finding, PageDetail } from "../api/types";
+import { LIVE_REFRESH_MS } from "../report";
 
 const PATH = `/auditorias/${AUDIT_ID}/paginas/${PAGE_ID}`;
 const FINDINGS = `/api/audits/${AUDIT_ID}/findings`;
@@ -47,7 +48,10 @@ async function open(path = PATH) {
   return view;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("Relatório de uma página (RF-RA006, RF-RA017, RF-RA028)", () => {
   it("cabeçalho, totais, aba Problemas com os achados agrupados por regra, do mais grave ao menos grave", async () => {
@@ -247,5 +251,49 @@ describe("Relatório de uma página (RF-RA006, RF-RA017, RF-RA028)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Página não encontrada na auditoria" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Esta página não faz parte da auditoria.");
     expect(screen.getByRole("link", { name: "Voltar para as páginas" })).toHaveAttribute("href", `/auditorias/${AUDIT_ID}/paginas`);
+  });
+
+  it("depois de 'Mostrar mais', uma nova busca não rouba o foco de outro controle", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let round = 0;
+    stubApi({
+      // Auditoria em andamento: a lista é buscada de novo a cada 5 s.
+      [`/api/audits/${AUDIT_ID}`]: auditSummary({ status: "running" }),
+      [`/api/audits/${AUDIT_ID}/pages/${PAGE_ID}`]: page,
+      [FINDINGS]: (url: URL) => {
+        round += 1;
+        return url.searchParams.get("cursor") === "c1"
+          ? jsonResponse({ data: [finding({ id: fid(9), selector: `aside img ${round}` })], next_cursor: null, total: null })
+          : jsonResponse({ data: items.slice(0, 2), next_cursor: "c1", total: 3 });
+      },
+    });
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Mostrar mais problemas" }));
+    await vi.waitFor(() => expect(document.activeElement?.textContent).toMatch(/aside img/));
+
+    const apply = screen.getByRole("button", { name: "Filtrar" });
+    apply.focus();
+    const before = round;
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS + 100));
+    await vi.waitFor(() => expect(round).toBeGreaterThan(before));
+    expect(apply).toHaveFocus();
+  });
+
+  it("auditoria em andamento: a página é buscada de novo e mostra o resultado novo", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let detail: PageDetail = { ...page, status: "scanning", counts_by_severity: zero, needs_review_count: 0 };
+    let status: "running" | "completed" = "running";
+    stubApi({
+      [`/api/audits/${AUDIT_ID}`]: () => jsonResponse(auditSummary({ status })),
+      [`/api/audits/${AUDIT_ID}/pages/${PAGE_ID}`]: () => jsonResponse(detail),
+      [FINDINGS]: () => jsonResponse({ data: items, next_cursor: null, total: items.length }),
+    });
+    await open();
+    expect(screen.getByRole("region", { name: "Esta página ainda está em análise" })).toBeInTheDocument();
+    detail = page;
+    status = "completed";
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS));
+    expect(await screen.findByRole("tab", { name: "Problemas 4" })).toBeInTheDocument();
+    expect(screen.queryByText(/A auditoria ainda está em andamento/)).not.toBeInTheDocument();
   });
 });

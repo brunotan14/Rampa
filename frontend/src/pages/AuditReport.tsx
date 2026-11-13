@@ -5,9 +5,10 @@
 // A pontuação (§10.6) é do M3: enquanto a API manda `score: null`, nada de número.
 // Fora no M2: Exportar PDF, Compartilhar, variação desde a última auditoria, "Quem é impactado" e
 // "Conformidade" (dependem do M3 e de contas).
-import { useEffect, useId, useRef, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
 import type { AuditSummary } from "../api/types";
 import { AuditAgainButton } from "../components/AuditAgainButton";
+import { Button } from "../components/Button";
 import { FindingTitle } from "../components/FindingTitle";
 import { Link } from "../components/Link";
 import { Notice } from "../components/Notice";
@@ -17,10 +18,14 @@ import { SeverityBadge } from "../components/SeverityBadge";
 import { SeverityBar } from "../components/SeverityBar";
 import { StatCard, StatGrid } from "../components/StatCard";
 import { StateMessage } from "../components/StateMessage";
-import { formatAt, formatNumber, plural, t } from "../i18n";
+import { formatAt, formatNumber, t } from "../i18n";
 import { findingPath, pagesPath } from "../report";
 import { API_SEVERITIES, fromApiSeverity, severityTotals, totalProblems } from "../severity";
 import { LoadErrorState, LoginWallNotice, ReportHead } from "./reportParts";
+
+/** Novas buscas do resumo quando o canal viu o fim antes dele (resumo ainda "em andamento"). */
+export const SUMMARY_RETRIES = 5;
+export const SUMMARY_RETRY_MS = 1_500;
 
 export interface AuditReportProps {
   auditId: string;
@@ -35,15 +40,30 @@ export interface AuditReportProps {
 
 export function AuditReport({ auditId, host, summary, error, fetching, refetch, titleRef }: AuditReportProps) {
   const title = host ? t.report.summary.title(host) : t.report.summary.titleNoHost;
-  // O canal pode ter visto o fim antes do resumo em cache (que ainda diz "na fila"): o resumo
-  // concluído é buscado uma vez; até ele chegar, a tela diz que está carregando.
+  // O canal pode ter visto o fim antes do resumo em cache (que ainda diz "na fila" ou "em
+  // andamento"): o resumo é buscado de novo, até `SUMMARY_RETRIES` vezes, com `SUMMARY_RETRY_MS`
+  // entre elas (a primeira na hora). Até ele chegar, a tela diz que está carregando; se não
+  // chegar, mostra o erro com "Tentar de novo", que recomeça as tentativas.
   const ready = summary !== undefined && summary.status === "completed";
-  const asked = useRef(false);
+  const [tries, setTries] = useState(0);
+  const waiting = !ready && summary !== undefined && !error;
+  const gaveUp = waiting && !fetching && tries >= SUMMARY_RETRIES;
+  // A função muda a cada render da tela; o temporizador usa sempre a última.
+  const refetchRef = useRef(refetch);
   useEffect(() => {
-    if (ready || fetching || asked.current || summary === undefined) return;
-    asked.current = true;
-    refetch();
-  }, [ready, fetching, summary, refetch]);
+    refetchRef.current = refetch;
+  });
+  useEffect(() => {
+    if (!waiting || fetching || tries >= SUMMARY_RETRIES) return;
+    const timer = setTimeout(
+      () => {
+        setTries((n) => n + 1);
+        refetchRef.current();
+      },
+      tries === 0 ? 0 : SUMMARY_RETRY_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [waiting, fetching, tries]);
 
   const finished = summary ? new Date(summary.finished_at ?? summary.inserted_at) : null;
   return (
@@ -51,10 +71,7 @@ export function AuditReport({ auditId, host, summary, error, fetching, refetch, 
       <ReportHead title={title} titleRef={titleRef}>
         {ready && finished && !Number.isNaN(finished.getTime()) ? (
           <p className="rp-caption">
-            {t.report.summary.meta(
-              formatAt(finished),
-              plural(summary.pages_scanned, "página analisada", "páginas analisadas"),
-            )}
+            {t.report.summary.meta(formatAt(finished), summary.pages_scanned)}
           </p>
         ) : null}
         {ready ? (
@@ -70,6 +87,17 @@ export function AuditReport({ auditId, host, summary, error, fetching, refetch, 
         <ReportBody auditId={auditId} summary={summary} />
       ) : error && !fetching ? (
         <LoadErrorState error={error} title={t.audit.loadErrorTitle} onRetry={refetch} />
+      ) : gaveUp ? (
+        <StateMessage
+          kind="erro"
+          title={t.report.summary.notReadyTitle}
+          text={t.report.summary.notReadyText}
+          actions={
+            <Button variant="secondary" onClick={() => setTries(0)}>
+              {t.audit.retry}
+            </Button>
+          }
+        />
       ) : (
         <StateMessage kind="carregando" title={t.report.summary.loading} />
       )}
@@ -219,7 +247,7 @@ function TopIssues({ auditId, summary }: { auditId: string; summary: AuditSummar
                     t.report.summary.top.pages(issue.pages_affected),
                     t.report.summary.top.occurrences(issue.occurrences),
                     issue.wcag_criteria.map(t.report.criterion).join(", ") || t.report.noCriteria,
-                  ].join(" · ")}
+                  ].join(t.report.separator)}
                 </p>
                 <Link href={findingPath(auditId, issue.sample_finding_id)} standalone>
                   {t.report.summary.top.details}{" "}

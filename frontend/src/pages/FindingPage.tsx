@@ -7,7 +7,7 @@
 // Fora no M2: eMAG, recorte de tela (M4), CodeDiff, Confirmar / Não é um problema / Marcar como
 // corrigido (pós-MVP).
 import { useParams } from "react-router";
-import { useAudit, useFinding } from "../api/hooks";
+import { useFinding, usePages } from "../api/hooks";
 import type { FindingDetail } from "../api/types";
 import { AxeText } from "../components/AxeText";
 import { CodeBlock } from "../components/CodeBlock";
@@ -17,12 +17,11 @@ import { Reveal } from "../components/Reveal";
 import { ReviewBadge } from "../components/ReviewBadge";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { StatCard, StatGrid } from "../components/StatCard";
-import { StateMessage } from "../components/StateMessage";
 import { t } from "../i18n";
 import { hostOf, isAuditId, pageName, pagePath, pagesPath } from "../report";
 import { fromApiSeverity } from "../severity";
 import { NotFoundPage } from "./NotFoundPage";
-import { LoadErrorState, NotFoundState, ReportHead, isNotFound, notFoundTitle, reportCrumb } from "./reportParts";
+import { ReportScreen, reportCrumb, useLiveAudit } from "./reportParts";
 
 export function FindingPage() {
   const { id, findingId } = useParams();
@@ -31,57 +30,37 @@ export function FindingPage() {
 }
 
 function FindingView({ auditId, findingId }: { auditId: string; findingId: string }) {
-  const summary = useAudit(auditId);
-  const finding = useFinding(auditId, findingId);
+  const { summary, refetchInterval } = useLiveAudit(auditId);
+  const finding = useFinding(auditId, findingId, { refetchInterval });
   const host = hostOf(summary.data?.start_url);
-  const data = finding.data;
-
-  const title = isNotFound(finding.error)
-    ? notFoundTitle(finding.error, t.report.finding.notFoundTitle)
-    : data
-      ? findingTitleText(data)
-      : finding.isError
-        ? t.audit.loadErrorTitle
-        : t.report.finding.loadingTitle;
 
   return (
-    <>
-      <ReportHead
-        title={title}
-        lang={data?.help ? "en" : undefined}
-        crumbs={
-          data
-            ? [
-                reportCrumb(auditId, host),
-                { label: t.report.crumbs.pages, href: pagesPath(auditId) },
-                { label: pageName(data.page), href: pagePath(auditId, data.page.id) },
-                { label: t.report.crumbs.finding },
-              ]
-            : null
-        }
-      >
-        {data ? (
-          <div className="rp-card__meta">
-            <SeverityBadge level={fromApiSeverity(data.severity)} />
-            <ReviewBadge finding={data} />
-          </div>
-        ) : null}
-      </ReportHead>
-
-      {isNotFound(finding.error) ? (
-        <NotFoundState
-          error={finding.error}
-          itemState={t.report.finding.notFoundState}
-          back={{ href: pagesPath(auditId), label: t.report.page.backToPages }}
-        />
-      ) : data ? (
-        <FindingBody auditId={auditId} finding={data} />
-      ) : finding.isError ? (
-        <LoadErrorState error={finding.error} title={t.audit.loadErrorTitle} onRetry={() => void finding.refetch()} />
-      ) : (
-        <StateMessage kind="carregando" title={t.report.finding.loading} />
+    <ReportScreen
+      query={finding}
+      title={findingTitleText}
+      lang={(data) => (data.help ? "en" : undefined)}
+      loadingTitle={t.report.finding.loadingTitle}
+      loadingText={t.report.finding.loading}
+      notFound={{
+        title: t.report.finding.notFoundTitle,
+        state: t.report.finding.notFoundState,
+        back: { href: pagesPath(auditId), label: t.report.page.backToPages },
+      }}
+      crumbs={(data) => [
+        reportCrumb(auditId, host),
+        { label: t.report.crumbs.pages, href: pagesPath(auditId) },
+        { label: pageName(data.page), href: pagePath(auditId, data.page.id) },
+        { label: t.report.crumbs.finding },
+      ]}
+      head={(data) => (
+        <div className="rp-card__meta">
+          <SeverityBadge level={fromApiSeverity(data.severity)} />
+          <ReviewBadge finding={data} />
+        </div>
       )}
-    </>
+    >
+      {(data) => <FindingBody auditId={auditId} finding={data} />}
+    </ReportScreen>
   );
 }
 
@@ -97,6 +76,10 @@ function sourceText(finding: FindingDetail): string {
 }
 
 function FindingBody({ auditId, finding }: { auditId: string; finding: FindingDetail }) {
+  // "Onde mais aparece" traz só a `url` pedida; o endereço exibido é o final, como no resto do
+  // relatório, e vem da lista de páginas (a mesma do cache das outras telas).
+  const pages = usePages(auditId);
+  const finalUrl = new Map(pages.data?.data.map((p) => [p.id, p.final_url ?? p.url]));
   const ai = finding.source !== "axe";
   const times = t.report.finding.stats.times;
   return (
@@ -204,7 +187,7 @@ function FindingBody({ auditId, finding }: { auditId: string; finding: FindingDe
                 <li key={other.page_id}>
                   <Link href={pagePath(auditId, other.page_id)}>{pageName(other)}</Link>
                   <span className="rp-caption rp-block">
-                    {other.url} · {t.report.finding.elsewhereTimes(other.occurrences)}
+                    {finalUrl.get(other.page_id) ?? other.url} · {t.report.finding.elsewhereTimes(other.occurrences)}
                   </span>
                 </li>
               ))}
