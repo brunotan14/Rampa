@@ -218,9 +218,10 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     expect(screen.getByRole("link", { name: "Fazer uma nova auditoria" })).toHaveAttribute("href", "/");
   });
 
-  it("'Ver relatório' leva ao relatório (ainda em construção) com o foco no h1", async () => {
+  it("'Ver relatório' leva ao relatório com o foco no h1", async () => {
     const { channel } = await open();
     act(() => channel().reply(at(1, { pages_scanned: 4 })));
+    summary = auditSummary({ status: "completed", pages_found: 5, pages_scanned: 5, revision: 2 });
     act(() => channel().push("audit_completed", { ...at(2, { status: "completed", pages_scanned: 5 }), score: null }));
     await advance(BATCH_MS);
     vi.useRealTimers();
@@ -228,17 +229,16 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     const h1 = screen.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" });
     expect(h1).toHaveFocus();
     expect(document.title).toBe("Relatório de exemplo.com.br – Rampa");
-    expect(screen.getByRole("link", { name: "Fazer uma nova auditoria" })).toHaveAttribute("href", "/");
+    expect(await screen.findByRole("button", { name: "Auditar de novo" })).toBeInTheDocument();
   });
 
-  it("auditoria já concluída ao abrir: mostra o relatório em construção, sem anunciar nada", async () => {
+  it("auditoria já concluída ao abrir: mostra o relatório resumido, sem anunciar nada", async () => {
     summary = auditSummary({ status: "completed", pages_found: 1, pages_scanned: 1, totals_by_severity: { ...zero, critical: 1 } });
     const { channel, container } = await open();
     act(() => channel().reply(at(1, { status: "completed", pages_found: 1, pages_scanned: 1, totals_by_severity: { ...zero, critical: 1 } })));
     await advance(BATCH_MS);
     expect(screen.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeInTheDocument();
-    expect(screen.getByText("A auditoria terminou: 1 problema em 1 página.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Fazer uma nova auditoria" })).toBeInTheDocument();
+    expect(screen.getByText("Problemas confirmados", { selector: "dt" }).nextElementSibling).toHaveTextContent("1");
     expect(live()).toBeEmptyDOMElement();
     vi.useRealTimers();
     expect(await axeViolations(container)).toEqual([]);
@@ -249,6 +249,60 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
     await open();
     expect(screen.getByRole("heading", { level: 1, name: "A auditoria de exemplo.com.br parou" })).toBeInTheDocument();
     expect(screen.getByText("Este endereço não pode ser auditado.", { exact: false, selector: "p" })).toBeInTheDocument();
+  });
+
+  it("RF-RA029 CA1: falha com 404 mostra a mensagem da API e 'Auditar de novo'; o clique cria outra auditoria da mesma URL", async () => {
+    const message = "A página não foi encontrada (HTTP 404). Confira o endereço.";
+    summary = auditSummary({
+      status: "failed",
+      page_limit: 1,
+      start_url: "https://exemplo.com.br/sumiu",
+      pages_failed: 1,
+      error: { code: "http_error", http_status: 404, message },
+    });
+    const newId = "11111111-2222-4333-8444-555555555555";
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/audits") return jsonResponse({ id: newId }, { status: 202 });
+      if (url === `/api/audits/${newId}`) return jsonResponse(auditSummary({ id: newId, status: "queued" }));
+      return base(input, init);
+    });
+    const { container, router } = await open();
+    expect(screen.getByText(message, { selector: "p" })).toBeInTheDocument();
+    const again = screen.getByRole("button", { name: "Auditar de novo" });
+    expect(screen.getByRole("link", { name: "Fazer uma nova auditoria" })).toHaveAttribute("href", "/");
+    vi.useRealTimers();
+    expect(await axeViolations(container)).toEqual([]);
+
+    await userEvent.click(again);
+    expect(await screen.findByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(`/auditorias/${newId}`);
+    const post = fetchMock.mock.calls.find(([url]) => String(url) === "/api/audits")!;
+    expect(JSON.parse(String(post[1]?.body))).toEqual({ url: "https://exemplo.com.br/sumiu", page_limit: 1 });
+  });
+
+  it("RF-RA029 CA5: no limite de uso, 'Auditar de novo' mostra o horário de liberação e não sai da tela", async () => {
+    summary = auditSummary({ status: "failed", pages_failed: 1, error: { code: "timeout", message: "Demorou." } });
+    let retryAfter = new Date();
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input) === "/api/audits"
+        ? jsonResponse(
+            { error: { code: "rate_limited", message: "Limite.", retry_after: retryAfter.toISOString() } },
+            { status: 429 },
+          )
+        : base(input, init),
+    );
+    const { router } = await open();
+    vi.useRealTimers();
+    retryAfter = new Date(Date.now() + 30 * 60_000);
+    await userEvent.click(screen.getByRole("button", { name: "Auditar de novo" }));
+    const hhmm = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(retryAfter);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Você atingiu o limite de auditorias por hora\. Tente de novo a partir (das|de .*, às) /);
+    expect(alert).toHaveTextContent(`${hhmm}.`);
+    expect(router.state.location.pathname).toBe(PATH);
   });
 
   it("na fila: etapa 'Na fila' e título da varredura", async () => {

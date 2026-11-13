@@ -1,12 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { createAudit, fixtureHits, fixtureUrl, getAudit, listFindings, listPages, waitForAuditEnd } from "./support/api.js";
+import { axeViolations } from "../tests/a11y.js";
+import {
+  createAudit,
+  fixtureHits,
+  fixtureUrl,
+  getAudit,
+  listFindings,
+  listPages,
+  newClientIp,
+  waitForAuditEnd,
+} from "./support/api.js";
+import { openBrowserPage } from "./support/browser.js";
+import { limits } from "./support/env.js";
 import { attachObserved, requireObserved, requirement } from "./support/evidence.js";
-import { messages } from "./support/messages.js";
+import { messages, screenTexts } from "./support/messages.js";
 
-// RF-RA029: falha de acesso à página, pela API. O botão "Auditar de novo" e a mensagem na tela
-// vêm na `feat/tela-relatorio`; aqui ficam a mensagem por status (pronta na API), o
-// `http_status` e as novas tentativas. As rotas `/instavel/<uuid>` e `/sempre-503/<uuid>` do
+// RF-RA029: falha de acesso à página, pela API (a mensagem por status, pronta na API, o
+// `http_status` e as novas tentativas) e pela tela (`feat/tela-relatorio`): a mensagem e o
+// botão "Auditar de novo" na tela de falha, a nova auditoria que ele cria e o limite de uso. As rotas `/instavel/<uuid>` e `/sempre-503/<uuid>` do
 // site de fixtures contam os pedidos (`fixtureHits`); o UUID separa os testes. No Compose de
 // teste a espera entre as tentativas é de 1 s (`config/e2e.exs`).
 
@@ -18,6 +30,9 @@ const CA3 =
   "RF-RA029 CA3: Dado uma URL que responde 503 e depois 200, quando a auditoria termina, então ela é concluída com os achados.";
 const CA4 =
   "RF-RA029 CA4: Dado uma auditoria com falha, quando clico em \"Auditar de novo\", então uma nova auditoria da mesma URL começa e a antiga continua acessível pelo link dela.";
+
+const CA5 =
+  "RF-RA029 CA5: Dado que atingi o limite de uso, quando clico em \"Auditar de novo\", então vejo a mensagem com o horário de liberação.";
 
 // Duas tentativas com a espera curta: cabem com folga em 90 s.
 const RETRY_TIMEOUT_MS = 90_000;
@@ -108,6 +123,101 @@ test.describe("RF-RA029: falha de acesso à página", () => {
       expect(again.id).not.toBe(first.id);
       expect(retried).toMatchObject({ start_url: url, status: "failed" });
       expect(old).toEqual(failed);
+    },
+  );
+
+  test(
+    "RF-RA029 CA1 (tela): 404 mostra \"A página não foi encontrada (HTTP 404)\" e o botão \"Auditar de novo\"",
+    { annotation: requirement(CA1) },
+    async ({ browser, request }, testInfo) => {
+      const clientIp = newClientIp();
+      const { id } = await createAudit(request, fixtureUrl("nao-existe.html"), { clientIp });
+      const audit = await waitForAuditEnd(request, id);
+      const { context, page } = await openBrowserPage(browser, clientIp);
+
+      await page.goto(`/auditorias/${id}`);
+      await expect(page.getByRole("heading", { level: 1, name: "A auditoria de fixtures parou" })).toBeVisible();
+      const message = page.getByText(messages.notFound(404), { exact: false }).first();
+      const button = page.getByRole("button", { name: screenTexts.auditAgain });
+      const observed = { visible: await message.isVisible(), button: await button.isVisible(), axe: await axeViolations(page) };
+      await attachObserved(testInfo, { audit, ...observed });
+
+      expect(observed.visible).toBe(true);
+      expect(observed.button).toBe(true);
+      expect(observed.axe).toEqual([]);
+      await context.close();
+    },
+  );
+
+  test(
+    "RF-RA029 CA4 (tela): \"Auditar de novo\" começa outra auditoria da mesma URL e a antiga continua no link dela",
+    { annotation: requirement(CA4) },
+    async ({ browser, request }, testInfo) => {
+      const clientIp = newClientIp();
+      const url = fixtureUrl("nao-existe.html");
+      const { id } = await createAudit(request, url, { clientIp });
+      const failed = await waitForAuditEnd(request, id);
+      const { context, page } = await openBrowserPage(browser, clientIp);
+
+      await page.goto(`/auditorias/${id}`);
+      await page.getByRole("button", { name: screenTexts.auditAgain }).click();
+      await page.waitForURL((current) => /\/auditorias\/[0-9a-f-]{36}$/.test(current.pathname) && !current.pathname.endsWith(id));
+      const newId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+      const h1 = page.getByRole("heading", { level: 1 });
+      await expect(h1).toHaveText(/^(Auditando fixtures|A auditoria de fixtures parou)$/);
+      const retried = await waitForAuditEnd(request, newId);
+      const old = await getAudit(request, id);
+
+      // O link antigo continua mostrando a falha antiga.
+      await page.goto(`/auditorias/${id}`);
+      await expect(page.getByRole("heading", { level: 1, name: "A auditoria de fixtures parou" })).toBeVisible();
+      const oldMessage = await page.getByText(messages.notFound(404), { exact: false }).first().isVisible();
+      await attachObserved(testInfo, { id, newId, failed, retried, old, oldMessage, h1Focused: await h1.evaluate((el) => el === document.activeElement) });
+
+      expect(newId).not.toBe(id);
+      expect(retried).toMatchObject({ start_url: url, page_limit: failed.page_limit });
+      expect(old).toEqual(failed);
+      expect(oldMessage).toBe(true);
+      await context.close();
+    },
+  );
+
+  test(
+    "RF-RA029 CA5 (tela): no limite de uso, \"Auditar de novo\" mostra o horário de liberação e não cria auditoria",
+    { annotation: requirement(CA5) },
+    async ({ browser, request }, testInfo) => {
+      // O mesmo IP cria a auditoria com falha e mais quatro: é o limite por hora.
+      const clientIp = newClientIp();
+      const { id } = await createAudit(request, fixtureUrl("nao-existe.html"), { clientIp });
+      await waitForAuditEnd(request, id);
+      for (let created = 1; created < limits.perIpPerHour; created++) {
+        await createAudit(request, fixtureUrl("limpa.html"), { clientIp });
+      }
+      const { context, page } = await openBrowserPage(browser, clientIp);
+      await page.goto(`/auditorias/${id}`);
+      const button = page.getByRole("button", { name: screenTexts.auditAgain });
+      const answer = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/audits" && r.request().method() === "POST");
+      await button.click();
+      const response = await answer;
+      const body = (await response.json()) as { error: { code: string; retry_after: string } };
+      const alert = page.getByRole("alert");
+      await expect(alert).toBeVisible();
+      const text = ((await alert.textContent()) ?? "").trim();
+      // O horário da tela é o `retry_after` no fuso do navegador.
+      const expectedTime = await page.evaluate(
+        (iso) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso)),
+        body.error.retry_after,
+      );
+      await attachObserved(testInfo, { status: response.status(), body, text, expectedTime, url: page.url() });
+
+      expect(response.status()).toBe(429);
+      expect(body.error.code).toBe("rate_limited");
+      expect(text).toMatch(screenTexts.rateLimited);
+      expect(text.match(screenTexts.rateLimited)?.[2]).toBe(expectedTime);
+      expect(new URL(page.url()).pathname).toBe(`/auditorias/${id}`);
+      await expect(button).toBeFocused();
+      expect(await axeViolations(page)).toEqual([]);
+      await context.close();
     },
   );
 });

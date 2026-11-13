@@ -1,5 +1,5 @@
 # Runner dos E2E integrados (`infra/docker-compose.test.yml`, serviço `e2e`): dependências,
-# `playwright.integrado.config.ts` e os specs de `integrado/`. A saída fica em `/e2e/out` e
+# `playwright.integrado.config.ts`, os specs de `integrado/` e o `tests/a11y.ts`. A saída fica em `/e2e/out` e
 # é copiada para `e2e/test-results/integrado/` pelo `infra/test/run-e2e.sh` (`docker cp`).
 #
 # Mesma imagem do Playwright do CI e do scanner, fixada por digest (a tag acompanha o
@@ -10,6 +10,8 @@ WORKDIR /e2e
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts && mkdir out && chown pwuser:pwuser out
 COPY playwright.integrado.config.ts ./
+# O axe das telas (mesmas regras WCAG do `make e2e`), usado pelos casos que olham a tela.
+COPY tests/a11y.ts ./tests/a11y.ts
 COPY integrado ./integrado
 
 USER pwuser

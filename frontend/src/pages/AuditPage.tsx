@@ -1,19 +1,21 @@
 // `/auditorias/:id` (RF-RA004, RF-RA014). Enquanto a auditoria anda, é a tela de progresso
 // (design/components/TelaVarredura), alimentada pelo canal `audit:<id>` (`useAuditChannel`).
-// Auditoria que já estava encerrada ao abrir mostra o relatório; no M2 ele ainda é o aviso de
-// tela em construção (`feat/tela-relatorio`). Quem acompanhou o fim ao vivo continua na tela de
-// progresso, ouve a conclusão uma vez e chega ao relatório pelo botão "Ver relatório".
+// Auditoria que já estava concluída ao abrir mostra o relatório resumido (`AuditReport`). Quem
+// acompanhou o fim ao vivo continua na tela de progresso, ouve a conclusão uma vez e chega ao
+// relatório pelo botão "Ver relatório". Auditoria com falha fica na tela de progresso parada, com
+// o motivo da API (RF-RA029: a mensagem por status HTTP vem pronta do backend) e "Auditar de novo".
 //
 // Leitor de tela: a única região viva é a `LiveRegion` desta tela, montada vazia desde o
 // primeiro quadro (inclusive carregando) e fora das trocas de estado: fala os marcos de 25%
 // do `ScanProgress` e a conclusão. Contadores, etapas, feed e a linha de conexão não falam.
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { isFinalStatus, progressFromSummary, useAuditChannel, type ConnectionState, type PageActivity } from "../api/channel";
 import { isApiError } from "../api/client";
 import { useAudit, usePages } from "../api/hooks";
 import type { AuditStatus, AuditSummary, ChannelProgress, PageSummary } from "../api/types";
 import { ActivityFeed, type ActivityItem } from "../components/ActivityFeed";
+import { AuditAgainButton } from "../components/AuditAgainButton";
 import { Button } from "../components/Button";
 import { Icon } from "../components/Icon";
 import { Link } from "../components/Link";
@@ -24,8 +26,9 @@ import { ScanSteps } from "../components/ScanSteps";
 import { StatCard, StatGrid } from "../components/StatCard";
 import { StateMessage } from "../components/StateMessage";
 import { formatAt, formatTimeWithSeconds, plural, t } from "../i18n";
-import { severityLabel, severityPluralLabel, severityTotals, totalProblems } from "../severity";
-import { isAuditId } from "./AuditPlaceholderPage";
+import { hostOf, isAuditId, pathOf } from "../report";
+import { severityLabel, severityPluralLabel, severityTotals } from "../severity";
+import { AuditReport } from "./AuditReport";
 import { NotFoundPage } from "./NotFoundPage";
 
 export function AuditPage() {
@@ -33,16 +36,6 @@ export function AuditPage() {
   if (!isAuditId(id)) return <NotFoundPage />;
   // `key`: outra auditoria começa do zero (estado local e região viva novos).
   return <AuditView key={id} auditId={id} />;
-}
-
-/** Host do endereço auditado, para o título ("Auditando exemplo.com.br"). */
-function hostOf(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
 }
 
 function scanStatus(progress: ChannelProgress): ScanStatus {
@@ -75,15 +68,6 @@ function currentStep(status: AuditStatus): { current: number; stopped: boolean }
       return { current: t.audit.steps.items.length, stopped: false };
     default:
       return { current: 1, stopped: true };
-  }
-}
-
-function pathOf(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
   }
 }
 
@@ -195,7 +179,15 @@ function AuditView({ auditId }: { auditId: string }) {
           <StateMessage kind="carregando" title={t.audit.loading} />
         </>
       ) : view === "report" ? (
-        <ReportPlaceholder host={host} progress={progress} titleRef={reportTitle} />
+        <AuditReport
+          auditId={auditId}
+          host={host}
+          summary={summary.data}
+          error={summary.error}
+          fetching={summary.isFetching}
+          refetch={() => void summary.refetch()}
+          titleRef={reportTitle}
+        />
       ) : (
         <ProgressView
           auditId={auditId}
@@ -211,35 +203,6 @@ function AuditView({ auditId }: { auditId: string }) {
       )}
       {/* Fora das trocas de estado acima: a mesma região do primeiro ao último quadro. */}
       <LiveRegion text={channel.announcement ?? milestone} />
-    </>
-  );
-}
-
-function ReportPlaceholder({
-  host,
-  progress,
-  titleRef,
-}: {
-  host: string | null;
-  progress: ChannelProgress;
-  titleRef: Ref<HTMLHeadingElement>;
-}) {
-  return (
-    <>
-      <PageTitle ref={titleRef}>{host ? t.audit.report.title(host) : t.audit.report.titleNoHost}</PageTitle>
-      <StateMessage
-        kind="vazio"
-        icon="relogio"
-        title={t.audit.report.stateTitle}
-        text={t.audit.report.summary(totalProblems(progress.totals_by_severity), progress.pages_scanned)}
-        actions={
-          <Link href="/" standalone>
-            {t.audit.newAudit}
-          </Link>
-        }
-      >
-        <p className="rp-state__text">{t.audit.report.text}</p>
-      </StateMessage>
     </>
   );
 }
@@ -351,6 +314,13 @@ function ProgressView({
           actions={
             progress.status === "completed" ? (
               <Button onClick={onViewReport}>{t.audit.viewReport}</Button>
+            ) : progress.status === "failed" && summary ? (
+              <>
+                <AuditAgainButton startUrl={summary.start_url} pageLimit={summary.page_limit} />
+                <Link href="/" standalone>
+                  {t.audit.newAudit}
+                </Link>
+              </>
             ) : final ? (
               <Link href="/" standalone>
                 {t.audit.newAudit}

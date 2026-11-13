@@ -75,7 +75,7 @@ test.describe("Tela de progresso (RF-RA004)", () => {
     await expect(page.getByRole("button", { name: "Ver relatório" })).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
 
-    // "Ver relatório": o relatório (ainda em construção) com o foco no h1.
+    // "Ver relatório": o relatório resumido com o foco no h1.
     await page.getByRole("button", { name: "Ver relatório" }).press("Enter");
     await expect(page.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeFocused();
     expect(await axeViolations(page)).toEqual([]);
@@ -142,14 +142,14 @@ test.describe("Tela de progresso (RF-RA004)", () => {
     await expect(page.getByRole("progressbar")).toBeVisible();
   });
 
-  test("auditoria já concluída ao abrir: relatório em construção, com link claro e sem anúncio", async ({ page }) => {
+  test("auditoria já concluída ao abrir: relatório resumido, sem anúncio", async ({ page }) => {
     const state = { revision: 3, progress: progress({ status: "completed", pages_scanned: 1, totals_by_severity: { ...ZERO, minor: 2 } }) };
     await new PhoenixMock(state).install(page);
     await mockAuditApi(page, state);
     await page.goto(PATH);
     await expect(page.getByRole("heading", { level: 1, name: "Relatório de exemplo.com.br" })).toBeVisible();
-    await expect(page.getByText("A auditoria terminou: 2 problemas em 1 página.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Fazer uma nova auditoria" })).toHaveAttribute("href", "/");
+    await expect(page.locator('xpath=//dt[normalize-space(.)="Problemas confirmados"]/following-sibling::dd[1]')).toHaveText("2");
+    await expect(page.getByRole("button", { name: "Auditar de novo" })).toBeVisible();
     // A região viva existe (montada vazia desde o primeiro quadro), mas nada é anunciado.
     await expect(page.locator("[aria-live]")).toHaveCount(1);
     await expect(page.locator("[aria-live]")).toBeEmpty();
