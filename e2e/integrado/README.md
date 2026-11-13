@@ -51,8 +51,9 @@ Também em `support/`: `browser.ts` (`openBrowserPage`: contexto do navegador no
 app, com o IP simulado e sem movimento), `messages.ts` (os textos de `error.message` e, em
 `screenTexts`, os da tela que os critérios afirmam),
 `time.ts` (`saoPauloTime`, o `HH:MM` das mensagens) e `evidence.ts`. De `../tests/a11y.ts` (o único
-arquivo de `tests/` que vai para a imagem do runner): `axeViolations`, `A11Y_MEDIA` com `emulateOnly`,
-`revealAll` e `reflowOverflow` (320px, zoom de 200% e espaçamento de texto, cada um numa carga nova), as
+arquivo de `tests/` que vai para a imagem do runner): `axeViolations`, `A11Y_MEDIA` com `emulateOnly`
+(inclui dark + more + forced, o alto contraste escuro do Windows), `headerLogoContrast` (3:1 de cada parte
+do logotipo, que o axe não mede), `revealAll` e `reflowOverflow` (320px, zoom de 200% e espaçamento de texto, cada um numa carga nova), as
 mesmas checagens do RNF-RA001 que o `make e2e` usa. Todo caso leva a anotação
 `requisito` com o texto do critério (`requirement(...)`) e anexa o que mediu
 (`attachObserved`); o `afterEach` com `requireObserved` reprova o caso verde sem anexo.

@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { A11Y_MEDIA, axeViolations, emulateOnly, expectNoHorizontalScroll, reflowOverflow } from "./a11y.js";
+import {
+  A11Y_MEDIA,
+  axeViolations,
+  emulateOnly,
+  expectNoHorizontalScroll,
+  reflowOverflow,
+} from "./a11y.js";
 
 // Rotas da base do frontend (M2, feat/frontend-base): o 404, com axe, teclado, reflow e
 // espaçamento de texto. As telas da auditoria têm specs próprios (`tela-progresso.spec.ts` e

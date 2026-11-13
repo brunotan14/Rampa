@@ -3,7 +3,10 @@ import {
   A11Y_MEDIA,
   axeViolations,
   emulateOnly,
+  LOGO_MIN_PARTS,
+  belowContrast,
   expectNoHorizontalScroll,
+  headerLogoContrast,
   reflowOverflow,
   revealAll,
 } from "../tests/a11y.js";
@@ -399,17 +402,25 @@ test.describe("RNF-RA001: telas do relatório com dados reais", () => {
             await expect(screen.ready(page)).toBeVisible();
           };
           const axe: Record<string, string[]> = {};
+          // Partes do logotipo abaixo de 3:1 (o axe não mede SVG; ver `headerLogoContrast`).
+          const logo: Record<string, { found: number; failing: unknown[] }> = {};
           for (const media of A11Y_MEDIA) {
             await emulateOnly(page, media);
             await open();
             await revealAll(page);
             axe[JSON.stringify(media)] = await axeViolations(page);
+            const parts = await headerLogoContrast(page);
+            logo[JSON.stringify(media)] = { found: parts.length, failing: belowContrast(parts, 3) };
           }
           const reflow = await reflowOverflow(page, open);
           const audit = await getAudit(request, id);
-          await attachObserved(testInfo, { path, status: audit.status, axe, reflow });
+          await attachObserved(testInfo, { path, status: audit.status, axe, logo, reflow });
 
           for (const [media, violations] of Object.entries(axe)) expect(violations, media).toEqual([]);
+          for (const [media, { found, failing }] of Object.entries(logo)) {
+            expect(found, `logo ${media}: partes encontradas`).toBeGreaterThan(LOGO_MIN_PARTS);
+            expect(failing, `logo ${media}`).toEqual([]);
+          }
           expectNoHorizontalScroll(reflow);
         });
       },
