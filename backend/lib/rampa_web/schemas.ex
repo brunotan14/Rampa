@@ -70,6 +70,15 @@ defmodule RampaWeb.Schemas do
       status: %Schema{type: :string, enum: ~w(queued scanning analyzing done failed)},
       http_status: %Schema{type: :integer, nullable: true, minimum: 100, maximum: 599},
       error: RampaWeb.Schemas.AuditError,
+      login_wall: %Schema{
+        type: :boolean,
+        nullable: true,
+        description:
+          "A página pede login (RF-RA028): status 401, ou campo de senha visível depois de " <>
+            "um redirecionamento para outro caminho ou origem com termo de login (`entrar`, " <>
+            "`login`, `sso`...) no caminho ou no host. `null` quando o Rampa não sabe (fatos " <>
+            "ausentes, ou status 403, que pode ser bloqueio de robô)."
+      },
       scanned_at: %Schema{type: :string, format: :"date-time", nullable: true},
       counts_by_severity: RampaWeb.Schemas.SeverityTotals,
       needs_review_count: count,

@@ -13,6 +13,13 @@ export interface ApiError {
   error: { code: string; message: string; retry_after?: string };
 }
 
+/** Erro de página ou de auditoria; `http_status` quando o site respondeu com erro (RF-RA029). */
+export interface PageError {
+  code: string;
+  message: string;
+  http_status?: number;
+}
+
 export interface AuditSummary {
   id: string;
   status: AuditStatus;
@@ -23,7 +30,9 @@ export interface AuditSummary {
   pages_failed: number;
   totals_by_severity: Record<Severity, number>;
   needs_review_count: number;
-  error: { code: string; message: string } | null;
+  /** Páginas que pedem login (RF-RA028). */
+  login_wall_pages: number;
+  error: PageError | null;
   started_at: string | null;
   finished_at: string | null;
   inserted_at: string;
@@ -41,6 +50,17 @@ export interface Finding {
   selector: string | null;
   html_snippet: string | null;
   message: string | null;
+}
+
+export interface PageSummary {
+  id: string;
+  url: string;
+  final_url: string | null;
+  status: "queued" | "scanning" | "analyzing" | "done" | "failed";
+  http_status: number | null;
+  error: PageError | null;
+  /** A página pede login (RF-RA028); `null` quando não se sabe. */
+  login_wall: boolean | null;
 }
 
 export const FINAL_STATUSES: readonly AuditStatus[] = ["completed", "failed", "cancelled"];
@@ -177,6 +197,27 @@ export async function waitForAuditEnd(
     });
   }
   return last!;
+}
+
+/** `GET /api/audits/:id/pages`. */
+export async function listPages(
+  request: APIRequestContext,
+  id: string,
+  options: { baseURL?: string } = {},
+): Promise<PageSummary[]> {
+  const response = await request.get(`${options.baseURL ?? env.apiUrl}/api/audits/${id}/pages`);
+  expect(response.status(), `GET /api/audits/${id}/pages: ${await response.text()}`).toBe(200);
+  return ((await response.json()) as { data: PageSummary[] }).data;
+}
+
+/**
+ * Quantas vezes o documento de uma rota com contador do site de fixtures foi pedido
+ * (`/instavel/<uuid>` ou `/sempre-503/<uuid>`, RF-RA029): `GET <rota>/hits`.
+ */
+export async function fixtureHits(request: APIRequestContext, path: string): Promise<number> {
+  const response = await request.get(`${fixtureUrl(path)}/hits`);
+  expect(response.status(), `GET ${path}/hits: ${await response.text()}`).toBe(200);
+  return ((await response.json()) as { hits: number }).hits;
 }
 
 export interface FindingFilters {

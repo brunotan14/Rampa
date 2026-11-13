@@ -276,6 +276,7 @@ describe("AuditPage: tela de progresso (RF-RA004)", () => {
         counts_by_severity: { ...zero, serious: 2 },
         needs_review_count: 0,
         passed_count: null,
+        login_wall: null,
       },
     ];
     act(() =>
@@ -418,6 +419,7 @@ function pageOf(id: string): PageSummary {
     counts_by_severity: zero,
     needs_review_count: 0,
     passed_count: null,
+    login_wall: null,
   };
 }
 

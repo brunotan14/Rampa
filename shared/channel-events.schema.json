@@ -49,7 +49,7 @@
     },
     "PageError": {
       "title": "PageError",
-      "description": "Erro de página ou de auditoria, com a mensagem em português pronta para exibir. Os códigos são os de `pages.error` e `audits.error` (`Rampa.ErrorCodes.page/0`).",
+      "description": "Erro de página ou de auditoria, com a mensagem em português pronta para exibir e, quando houver, o status HTTP da página. Os códigos são os de `pages.error` e `audits.error` (`Rampa.ErrorCodes.page/0`).",
       "type": "object",
       "required": ["code", "message"],
       "additionalProperties": false,
@@ -76,7 +76,13 @@
             "scan_failed"
           ]
         },
-        "message": { "type": "string", "minLength": 1 }
+        "message": { "type": "string", "minLength": 1 },
+        "http_status": {
+          "description": "Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro (`http_error`). Ausente quando não há status. A `message` já o cita. Opcional, acrescentado sem subir a versão.",
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        }
       }
     },
     "Progress": {

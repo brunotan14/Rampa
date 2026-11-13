@@ -2,8 +2,11 @@ defmodule Rampa.Release do
   @moduledoc """
   Tarefas da release, sem o Mix (PRD §7, Hospedagem e deploy). As migrations rodam com
   `bin/migrate` antes de trocar os containers; no Compose de teste
-  (`infra/docker-compose.test.yml`), antes de subir o servidor.
+  (`infra/docker-compose.test.yml`), antes de subir o servidor. A medição do RF-RA028 sai de
+  `login_wall_stats/1`.
   """
+
+  alias Rampa.Audits.LoginWallDaily
 
   @app :rampa
 
@@ -37,6 +40,28 @@ defmodule Rampa.Release do
       Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))
 
     :ok
+  end
+
+  @doc """
+  Medição do RF-RA028: quantas auditorias encerradas tiveram barreira de login, por dia e no
+  período (`Rampa.Audits.LoginWallDaily.summary/1`; opções `:days`, `:from`, `:to`). Sem dado
+  pessoal. Na VPS, com o app no ar:
+
+      docker compose exec app bin/rampa eval 'Rampa.Release.login_wall_stats() |> IO.inspect()'
+
+  Sobe o repositório só para a consulta, se ele ainda não estiver de pé (o `eval` roda num nó
+  próprio, sem o app).
+  """
+  @spec login_wall_stats(keyword()) :: LoginWallDaily.summary()
+  def login_wall_stats(opts \\ []) do
+    load_app()
+
+    {:ok, summary, _apps} =
+      Ecto.Migrator.with_repo(Rampa.Repo, fn _repo ->
+        LoginWallDaily.summary(opts)
+      end)
+
+    summary
   end
 
   @doc """

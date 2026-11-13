@@ -60,6 +60,8 @@ defmodule Rampa.Audits do
     Finding,
     FindingCounts,
     Limits,
+    LoginWall,
+    LoginWallDaily,
     Page,
     PageData,
     PageTask,
@@ -364,7 +366,8 @@ defmodule Rampa.Audits do
       pages_failed: audit.pages_failed,
       totals_by_severity: totals,
       needs_review_count: needs_review,
-      error: audit.error
+      error: audit.error,
+      error_http_status: audit.error_http_status
     }
   end
 
@@ -742,7 +745,8 @@ defmodule Rampa.Audits do
   Os achados `source: :axe` da página são apagados e regravados na mesma transação: varrer a
   página de novo não duplica nada. Achados de outras fontes ficam. `pages.passed_rules`
   (RF-RA017, `Rampa.Audits.AxeMapper.passed_rules/1`) é sempre regravada, com `nil` quando o
-  resultado vem sem `axe.passes`.
+  resultado vem sem `axe.passes`. `pages.login_wall` (RF-RA028) é a decisão de
+  `Rampa.Audits.LoginWall` sobre os fatos do resultado (`nil` sem `login_wall`).
   """
   @spec record_scan_result(Page.t(), map()) ::
           {:ok, Page.t()}
@@ -767,18 +771,35 @@ defmodule Rampa.Audits do
   conclusão. Se a tarefa é o `scan`, as outras tarefas abertas da página fecham `failed` com
   `"scan_failed"` (dependem dos dados dele) e a página fica `failed`; falha de outra tarefa
   deixa a página seguir até `done`.
+
+  Na falha do `scan`, a página grava sempre, inclusive como `nil`, o status HTTP do documento
+  (`:http_status`, RF-RA029: o do `http_error`, já validado pelo `Rampa.Scanner.Contract`) e a
+  decisão de barreira de login sobre ele (`pages.login_wall`, RF-RA028: `true` com 401, senão
+  `nil`). Assim
+  uma nova tentativa que falha por outro motivo (`timeout` depois de um 503) não deixa o
+  status da tentativa anterior.
   """
-  @spec fail_task(Ecto.UUID.t(), PageTask.kind(), atom() | String.t()) ::
+  @spec fail_task(Ecto.UUID.t(), PageTask.kind(), atom() | String.t(), keyword()) ::
           {:ok, Page.t()} | {:error, transition_error() | Ecto.Changeset.t()}
-  def fail_task(page_id, kind, code) when is_atom(code) or is_binary(code) do
+  def fail_task(page_id, kind, code, opts \\ []) when is_atom(code) or is_binary(code) do
+    facts = failure_facts(kind, Keyword.get(opts, :http_status))
+
     transact_and_publish(fn ->
       with {:ok, audit, page, tasks} <- lock_chain(page_id),
            {:ok, task} <- fetch_open_task(tasks, kind),
-           {:ok, page, events} <- fail_locked(audit, page, tasks, task, to_string(code), now()) do
+           {:ok, page, events} <-
+             fail_locked(audit, page, tasks, task, to_string(code), now(), facts) do
         {:ok, {page, events}}
       end
     end)
   end
+
+  # Fatos da página na falha do `scan` (sempre os dois campos); outra tarefa não mexe neles.
+  # O status já vem validado pelo `Rampa.Scanner.Contract` (a faixa de erro, 400 a 599).
+  defp failure_facts(:scan, status),
+    do: %{http_status: status, login_wall: LoginWall.decide(%{http_status: status})}
+
+  defp failure_facts(_kind, _status), do: %{}
 
   ## Reconciliação
 
@@ -983,7 +1004,8 @@ defmodule Rampa.Audits do
   end
 
   defp fail_stale(audit, page, tasks, task, now) do
-    with {:ok, _page, events} <- fail_locked(audit, page, tasks, task, "stale", now) do
+    with {:ok, _page, events} <-
+           fail_locked(audit, page, tasks, task, "stale", now, failure_facts(task.kind, nil)) do
       Logger.warning("reconciliação: tarefa #{task.kind} da página #{page.id} presa, fechada")
       {:ok, {:failed, events}}
     end
@@ -998,7 +1020,7 @@ defmodule Rampa.Audits do
          {:ok, task} <- fetch_open_task(tasks, :scan),
          {:ok, task} <- update_task(task, %{status: :done, error: nil, finished_at: now}),
          {:ok, scanned} <-
-           refresh_scanned(page, replace(tasks, task), scan_attrs(result, axe, now)),
+           refresh_scanned(page, replace(tasks, task), scan_attrs(page, result, axe, now)),
          {_deleted, _} <- Repo.delete_all(axe_findings_query(scanned.id)),
          {:ok, _count} <- insert_findings(scanned, axe, DateTime.utc_now()),
          {:ok, _audit, events} <- settle(audit, now, {page, scanned}) do
@@ -1006,16 +1028,23 @@ defmodule Rampa.Audits do
     end
   end
 
-  # `passed_rules` vai sempre, mesmo `nil` (scanner sem `axe.passes`): uma nova varredura
-  # não deixa a lista de uma varredura anterior.
-  defp scan_attrs(result, axe, now) do
+  # `passed_rules` e `login_wall` vão sempre, mesmo `nil` (scanner sem `axe.passes` ou sem
+  # `login_wall`): uma nova varredura não deixa o valor de uma varredura anterior.
+  defp scan_attrs(page, result, axe, now) do
     %{
       final_url: result["final_url"],
       http_status: result["http_status"],
       title: PageData.truncate_bytes(result["title"], @title_max_bytes),
       axe_version: axe["version"],
       scanned_at: now,
-      passed_rules: fit_passed_rules(axe)
+      passed_rules: fit_passed_rules(axe),
+      login_wall:
+        LoginWall.decide(%{
+          requested_url: page.url,
+          final_url: result["final_url"],
+          http_status: result["http_status"],
+          password_field: get_in(result, ["login_wall", "password_field"])
+        })
     }
   end
 
@@ -1096,9 +1125,9 @@ defmodule Rampa.Audits do
 
   ## Falha, página e regra de conclusão (sempre com a auditoria, a página e as tarefas travadas)
 
-  defp fail_locked(audit, page, tasks, task, error, now) do
+  defp fail_locked(audit, page, tasks, task, error, now, page_attrs) do
     with {:ok, tasks} <- close_failed(tasks, task, error, now),
-         {:ok, closed} <- refresh_page(page, tasks),
+         {:ok, closed} <- refresh_page(page, tasks, page_attrs),
          {:ok, _audit, events} <- settle(audit, now, {page, closed}) do
       {:ok, closed, events}
     end
@@ -1145,10 +1174,12 @@ defmodule Rampa.Audits do
   # Regra de conclusão. Recebe a auditoria travada e fora de estado final; recalcula os
   # contadores a partir das páginas (repetir não conta duas vezes) e encerra a auditoria quando
   # não há tarefa aberta: `completed` se ao menos uma página terminou `done`, `failed` se
-  # nenhuma. O erro da auditoria `failed` é o da página que acabou de falhar (`closing`, a
-  # página depois da transição), a última; sem ela, o da página falha mais recente. Não
-  # consulta o Oban. `pages` é a página de antes e de depois da transição (ou `{nil, nil}`),
-  # para os eventos. Devolve a auditoria gravada e os eventos.
+  # nenhuma. O erro da auditoria `failed` (com o status HTTP) é o da página que acabou de
+  # falhar (`closing`, a página depois da transição), a última; sem ela, o da página falha
+  # mais recente. Na passagem a estado final, conta a auditoria na medição do RF-RA028
+  # (`Rampa.Audits.LoginWallDaily`), na mesma transação e por último. Não consulta o Oban.
+  # `pages` é a página de antes e de depois da transição (ou `{nil, nil}`), para os eventos.
+  # Devolve a auditoria gravada e os eventos.
   defp settle(%Audit{} = audit, now, {_before, closing} = pages \\ {nil, nil}) do
     open_tasks =
       Repo.aggregate(
@@ -1177,12 +1208,24 @@ defmodule Rampa.Audits do
 
     final =
       case Rules.audit_outcome(%{open_tasks: open_tasks, pages_done: done}) do
-        :open -> %{}
-        :completed -> %{status: :completed, error: nil, finished_at: now}
-        :failed -> %{status: :failed, error: failed_error(audit, closing), finished_at: now}
+        :open ->
+          %{}
+
+        :completed ->
+          %{status: :completed, error: nil, error_http_status: nil, finished_at: now}
+
+        :failed ->
+          {error, http_status} = failed_error(audit, closing)
+          %{status: :failed, error: error, error_http_status: http_status, finished_at: now}
       end
 
-    commit_progress(audit, Map.merge(counters, final), pages)
+    with {:ok, updated, events} <- commit_progress(audit, Map.merge(counters, final), pages) do
+      # Medição do RF-RA028: conta a auditoria uma vez, na passagem a estado final. É o último
+      # passo da transação, depois da escrita e das leituras do snapshot: a trava da linha do
+      # dia (auditoria → página → tarefas → dia) fica presa o mínimo e é a última pedida.
+      if final != %{}, do: LoginWallDaily.count_finished(audit.id, now)
+      {:ok, updated, events}
+    end
   end
 
   # Ponto único de escrita do andamento da auditoria (sempre com ela travada, e só por aqui).
@@ -1246,7 +1289,8 @@ defmodule Rampa.Audits do
     end
   end
 
-  defp failed_error(_audit, %Page{status: :failed, error: error}), do: error
+  # O código e o status HTTP saem sempre da mesma página.
+  defp failed_error(_audit, %Page{status: :failed} = page), do: {page.error, page.http_status}
 
   defp failed_error(audit, _closing) do
     Repo.one(
@@ -1254,8 +1298,8 @@ defmodule Rampa.Audits do
         where: p.audit_id == ^audit.id and p.status == :failed,
         order_by: [desc: p.updated_at, desc: p.id],
         limit: 1,
-        select: p.error
-    )
+        select: {p.error, p.http_status}
+    ) || {nil, nil}
   end
 
   ## Travas

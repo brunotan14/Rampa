@@ -37,6 +37,19 @@ describe("schema do contrato", () => {
     expect(validators.response({ ...okResponse(), http_status: null })).toBe(true);
   });
 
+  it("aceita login_wall só com o booleano (RF-RA028)", () => {
+    expect(validators.response({ ...okResponse(), login_wall: { password_field: true } })).toBe(true);
+    expect(validators.response({ ...okResponse(), login_wall: {} })).toBe(false);
+    expect(validators.response({ ...okResponse(), login_wall: { password_field: "sim" } })).toBe(false);
+    expect(validators.response({ ...okResponse(), login_wall: { password_field: true, html: "<input>" } })).toBe(false);
+  });
+
+  it("aceita http_status de 400 a 599 no erro (RF-RA029)", () => {
+    expect(validators.error({ ...scanError("http_error", "HTTP 503"), http_status: 503 })).toBe(true);
+    expect(validators.error({ ...scanError("http_error", "HTTP 200"), http_status: 200 })).toBe(false);
+    expect(validators.error({ ...scanError("http_error", "HTTP 999"), http_status: 999 })).toBe(false);
+  });
+
   it("valida o pedido", () => {
     expect(validators.request({ url: "https://exemplo.com/" })).toBe(true);
     expect(validators.request({ url: "https://exemplo.com/", options: { tab_limit: 100, max_images: 15 } })).toBe(true);
@@ -71,6 +84,23 @@ describe("cortes", () => {
     const error = scanError("navigation_failed", "log ".repeat(5_000));
     expect(error.detail).toHaveLength(CONTRACT_LIMITS.detail);
     assertValid(validators.error, error, "erro cortado");
+  });
+
+  it("http_status vai só no http_error e só dentro da faixa do contrato", () => {
+    expect(scanError("http_error", "HTTP 503", 503)).toMatchObject({ http_status: 503 });
+    expect(scanError("http_error", "HTTP 999", 999)).not.toHaveProperty("http_status");
+    expect(scanError("http_error", "HTTP 200", 200)).not.toHaveProperty("http_status");
+    expect(scanError("http_error", "HTTP 503")).not.toHaveProperty("http_status");
+    expect(scanError("timeout", "lento", 503)).not.toHaveProperty("http_status");
+  });
+
+  it("login_wall sai só com o booleano, e fica de fora quando não veio", () => {
+    const base = { final_url: "https://exemplo.com/", http_status: 200, title: "t", axe: { version: "4.14.0", violations: [], incomplete: [] }, blocked_requests: 0 };
+    expect(scanResponse(base)).not.toHaveProperty("login_wall");
+    const extra = { password_field: true, html: "<input>" } as unknown as { password_field: boolean };
+    const body = scanResponse({ ...base, login_wall: extra });
+    expect(body.login_wall).toEqual({ password_field: true });
+    assertValid(validators.response, body, "resposta com login_wall");
   });
 
   it("target dentro dos limites sai inteiro, sem target_truncated", () => {

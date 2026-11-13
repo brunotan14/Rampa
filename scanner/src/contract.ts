@@ -6,6 +6,7 @@ import {
   type AxePass,
   type AxeRule,
   type AxeTarget,
+  type LoginWallFacts,
   type ScanError,
   type ScanErrorCode,
   type ScanResponse,
@@ -116,6 +117,8 @@ export interface PageFacts {
   title: string;
   axe: AxeFacts;
   blocked_requests: number;
+  // Ausente quando a checagem falhou (`login.ts`): o backend grava "não sabido".
+  login_wall?: LoginWallFacts;
 }
 
 // Resposta de sucesso com a versão do contrato e os cortes.
@@ -127,11 +130,17 @@ export function scanResponse(facts: PageFacts): ScanResponse {
     title: truncate(facts.title, LIMITS.title),
     axe: limitAxe(facts.axe),
     blocked_requests: Math.min(facts.blocked_requests, LIMITS.blockedRequests),
+    ...(facts.login_wall === undefined ? {} : { login_wall: { password_field: facts.login_wall.password_field } }),
   };
 }
 
 // Resposta de erro com a versão do contrato; o `detail` (mensagens do Playwright podem trazer
-// o log inteiro da chamada) é cortado.
-export function scanError(error: ScanErrorCode, detail: string): ScanError {
-  return { contract_version: CONTRACT_VERSION, error, detail: truncate(detail, LIMITS.detail) };
+// o log inteiro da chamada) é cortado. `http_status` só no `http_error` (RF-RA029), e só
+// dentro da faixa do contrato (400 a 599): fora dela, fica de fora.
+export function scanError(error: ScanErrorCode, detail: string, httpStatus?: number): ScanError {
+  const status =
+    error === "http_error" && httpStatus !== undefined && Number.isInteger(httpStatus) && httpStatus >= 400 && httpStatus <= 599
+      ? { http_status: httpStatus }
+      : {};
+  return { contract_version: CONTRACT_VERSION, error, detail: truncate(detail, LIMITS.detail), ...status };
 }

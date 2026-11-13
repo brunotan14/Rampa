@@ -2,6 +2,7 @@
   "title": "Imagens com e sem texto alternativo",
   "http_status": 200,
   "blocked_requests": 0,
+  "login_wall": { "password_field": false },
   "violations": [{ "id": "image-alt", "impact": "critical", "nodes": 1 }],
   "incomplete": [],
   "passes_include": ["image-alt", "document-title"],

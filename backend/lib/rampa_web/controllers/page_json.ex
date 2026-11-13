@@ -1,7 +1,9 @@
 defmodule RampaWeb.PageJSON do
   @moduledoc """
   Páginas de uma auditoria (RF-RA006) e o detalhe de uma, com as regras aprovadas
-  (RF-RA017). O `error` da página vira `{ code, message }` (`RampaWeb.ErrorMessages`).
+  (RF-RA017). O `error` da página vira `{ code, message }` (`RampaWeb.ErrorMessages`), com o
+  `http_status` quando houver (RF-RA029). `login_wall` (RF-RA028): `true` se a página pede
+  login, `false` se não, `null` se não se sabe.
   `passed_count` e `passed_rules` são `null` quando o scanner não coletou as regras
   aprovadas (página que falhou ou varrida antes do RF-RA017), diferente de `0` e `[]`.
   """
@@ -25,7 +27,8 @@ defmodule RampaWeb.PageJSON do
       title: page.title,
       status: page.status,
       http_status: page.http_status,
-      error: error(page.error),
+      error: error(page.error, page.http_status),
+      login_wall: page.login_wall,
       scanned_at: page.scanned_at,
       counts_by_severity: data.counts_by_severity,
       needs_review_count: data.needs_review_count,
@@ -46,6 +49,6 @@ defmodule RampaWeb.PageJSON do
     end)
   end
 
-  defp error(nil), do: nil
-  defp error(code), do: ErrorMessages.error(code)
+  defp error(nil, _http_status), do: nil
+  defp error(code, http_status), do: ErrorMessages.page_error(code, http_status)
 end

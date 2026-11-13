@@ -272,6 +272,49 @@ defmodule RampaWeb.AuditControllerTest do
   end
 
   describe "GET /api/audits/:id" do
+    # RF-RA029: o erro da auditoria leva o status HTTP da página que falhou, já na mensagem.
+    test "auditoria failed por http_error traz o status no erro", %{conn: conn} do
+      audit =
+        audit_fixture(%{status: :failed, error: "http_error", error_http_status: 404})
+
+      body = conn |> get(~p"/api/audits/#{audit.id}") |> json_response(200)
+
+      assert body["error"] == %{
+               "code" => "http_error",
+               "http_status" => 404,
+               "message" => "A página não foi encontrada (HTTP 404). Confira o endereço."
+             }
+    end
+
+    test "erro sem status não leva o campo http_status", %{conn: conn} do
+      audit = audit_fixture(%{status: :failed, error: "timeout"})
+
+      body = conn |> get(~p"/api/audits/#{audit.id}") |> json_response(200)
+
+      assert Map.keys(body["error"]) |> Enum.sort() == ["code", "message"]
+    end
+
+    # RF-RA028: o resumo conta as páginas que pedem login (o aviso do resumo sai disso).
+    test "login_wall_pages conta só as páginas com login_wall verdadeiro", %{conn: conn} do
+      audit = audit_fixture()
+      page_fixture(%{audit: audit, status: :done, login_wall: true})
+
+      page_fixture(%{
+        audit: audit,
+        url: "https://exemplo.com/b",
+        status: :done,
+        login_wall: false
+      })
+
+      page_fixture(%{audit: audit, url: "https://exemplo.com/c", status: :done})
+
+      body = conn |> get(~p"/api/audits/#{audit.id}") |> json_response(200)
+      assert body["login_wall_pages"] == 1
+
+      body = conn |> get(~p"/api/audits/#{audit_fixture().id}") |> json_response(200)
+      assert body["login_wall_pages"] == 0
+    end
+
     test "campos do resumo, sem o hash do IP nem a chave de idempotência", %{conn: conn} do
       audit =
         audit_fixture(%{requester_ip_hash: "segredo-hash", idempotency_key: "segredo-chave"})
@@ -285,8 +328,8 @@ defmodule RampaWeb.AuditControllerTest do
       assert Map.keys(body) |> Enum.sort() ==
                Enum.sort(~w(id revision status start_url page_limit pages_found pages_scanned
                             pages_failed score totals_by_severity needs_review_by_severity
-                            needs_review_count top_issues error started_at finished_at
-                            inserted_at))
+                            needs_review_count login_wall_pages top_issues error started_at
+                            finished_at inserted_at))
 
       assert body["totals_by_severity"] == %{
                "critical" => 1,

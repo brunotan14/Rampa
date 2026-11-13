@@ -209,6 +209,25 @@ defmodule RampaWeb.AuditChannelTest do
                assert_event("audit_failed")
     end
 
+    # RF-RA029: o status HTTP vai no erro da página e no da auditoria; `login_wall`, não.
+    test "a falha por http_error leva o http_status no erro da página e da auditoria", %{
+      page: page
+    } do
+      assert {:ok, _task} = Audits.start_task(page.id, :scan, 1)
+      assert_event("status_changed")
+
+      assert {:ok, _page} = Audits.fail_task(page.id, :scan, :http_error, http_status: 503)
+
+      assert %{"error" => %{"code" => "http_error", "http_status" => 503, "message" => message}} =
+               payload = assert_event("page_failed")
+
+      assert message =~ "(HTTP 503)"
+      refute Jason.encode!(payload) =~ "login_wall"
+
+      assert %{"progress" => %{"error" => %{"code" => "http_error", "http_status" => 503}}} =
+               assert_event("audit_failed")
+    end
+
     test "o payload não leva URL, seletor, trecho de HTML nem dados de quem pediu",
          %{page: page} do
       assert {:ok, _task} = Audits.start_task(page.id, :scan, 1)

@@ -69,6 +69,12 @@ defmodule Rampa.Scanner.Contract do
 
   @error_codes_by_name Map.new(@error_codes, &{Atom.to_string(&1), &1})
 
+  # Faixa do status HTTP de erro (`ScanError.http_status`, RF-RA029): a fonte única. O
+  # changeset da auditoria, o OpenAPI e o teste do schema do canal leem daqui.
+  @error_status_schema get_in(@schema, ["definitions", "ScanError", "properties", "http_status"])
+  @error_status_min Map.fetch!(@error_status_schema, "minimum")
+  @error_status_max Map.fetch!(@error_status_schema, "maximum")
+
   # Definições e a raiz da resposta de sucesso, para descartar os campos desconhecidos.
   @definitions @schema["definitions"]
   @response_schema @definitions["ScanResponse"]
@@ -103,6 +109,14 @@ defmodule Rampa.Scanner.Contract do
   @doc "Status HTTP de cada código de erro do scanner (`x-http-status` do schema)."
   @spec error_statuses() :: %{atom() => pos_integer()}
   def error_statuses, do: @error_statuses
+
+  @doc """
+  Faixa do status HTTP de erro (`ScanError.http_status` do schema, de 400 a 599): a mesma do
+  `http_status` do erro da página e da auditoria na API e no canal (RF-RA029). O status da
+  página no sucesso é outra faixa (100 a 599, `pages.http_status`).
+  """
+  @spec error_http_status_range() :: Range.t()
+  def error_http_status_range, do: @error_status_min..@error_status_max//1
 
   @doc "Caminho do schema usado na compilação."
   @spec path() :: String.t()
@@ -144,14 +158,19 @@ defmodule Rampa.Scanner.Contract do
   @doc """
   Interpreta o corpo de uma resposta de erro (HTTP diferente de 200). O código vem primeiro:
 
-    * `"error"` com um código do contrato → `{:ok, %{code, detail}}` com o código real, mesmo
-      com a versão ausente ou diferente (só um aviso no log) e mesmo fora do schema: o
-      `detail` é cortado no limite do contrato, ou vira `"HTTP <status>"` se faltar;
+    * `"error"` com um código do contrato → `{:ok, %{code, detail, http_status}}` com o código
+      real, mesmo com a versão ausente ou diferente (só um aviso no log) e mesmo fora do
+      schema: o `detail` é cortado no limite do contrato, ou vira `"HTTP <status>"` se faltar.
+      `http_status` (RF-RA029) é o status do documento que o scanner informou no campo
+      próprio, só no `http_error` e só se for inteiro de 400 a 599; fora disso, `nil`. Nunca é
+      lido do `detail`, que é texto livre;
     * código desconhecido com `contract_version` de outra versão → `:contract_mismatch`;
     * qualquer outra coisa → `:unknown` (o cliente decide pelo status HTTP).
   """
   @spec scanner_error(pos_integer(), term()) ::
-          {:ok, %{code: atom(), detail: String.t()}} | {:error, failure()} | :unknown
+          {:ok, %{code: atom(), detail: String.t(), http_status: 400..599 | nil}}
+          | {:error, failure()}
+          | :unknown
   def scanner_error(status, %{"error" => name} = body)
       when is_map_key(@error_codes_by_name, name) do
     warn_divergent_version(body["contract_version"], name)
@@ -160,13 +179,24 @@ defmodule Rampa.Scanner.Contract do
       Logger.warning("erro do scanner fora do contrato (#{name}): #{detail}")
     end
 
-    {:ok, %{code: Map.fetch!(@error_codes_by_name, name), detail: error_detail(body, status)}}
+    code = Map.fetch!(@error_codes_by_name, name)
+
+    {:ok,
+     %{code: code, detail: error_detail(body, status), http_status: document_status(code, body)}}
   end
 
   def scanner_error(_status, %{"contract_version" => version}) when version != @version,
     do: mismatch(version)
 
   def scanner_error(_status, _body), do: :unknown
+
+  # Status do documento no `http_error`: só o campo próprio, inteiro dentro da faixa do
+  # schema. É a única validação do status de erro: daqui em diante ele já vale.
+  defp document_status(:http_error, %{"http_status" => status})
+       when is_integer(status) and status >= @error_status_min and status <= @error_status_max,
+       do: status
+
+  defp document_status(_code, _body), do: nil
 
   defp error_detail(%{"detail" => detail}, _status) when is_binary(detail),
     do: String.slice(detail, 0, @detail_max_length)

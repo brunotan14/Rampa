@@ -65,6 +65,7 @@ const pageSummary = (id: string, status: PageSummary["status"] = "done"): PageSu
   counts_by_severity: { critical: 0, serious: 1, moderate: 0, minor: 0 },
   needs_review_count: 0,
   passed_count: null,
+  login_wall: null,
 });
 
 /** `fetch` falso que responde por endereço. */

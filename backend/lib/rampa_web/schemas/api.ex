@@ -88,6 +88,7 @@ defmodule RampaWeb.Schemas.AuditError do
   require OpenApiSpex
 
   alias OpenApiSpex.Schema
+  alias Rampa.Scanner.Contract
 
   OpenApiSpex.schema(
     %{
@@ -101,7 +102,15 @@ defmodule RampaWeb.Schemas.AuditError do
       additionalProperties: false,
       properties: %{
         code: %Schema{type: :string, enum: RampaWeb.Schemas.page_codes()},
-        message: %Schema{type: :string}
+        message: %Schema{type: :string},
+        http_status: %Schema{
+          type: :integer,
+          minimum: Contract.error_http_status_range().first,
+          maximum: Contract.error_http_status_range().last,
+          description:
+            "Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro " <>
+              "(`http_error`). Ausente quando não há status. A `message` já o cita."
+        }
       }
     },
     struct?: false,
@@ -140,6 +149,7 @@ defmodule RampaWeb.Schemas.AuditSummary do
         :totals_by_severity,
         :needs_review_by_severity,
         :needs_review_count,
+        :login_wall_pages,
         :top_issues,
         :error,
         :started_at,
@@ -193,6 +203,13 @@ defmodule RampaWeb.Schemas.AuditSummary do
           type: :integer,
           minimum: 0,
           description: "Achados que pedem confirmação manual (IA, heurística, incompletos)."
+        },
+        login_wall_pages: %Schema{
+          type: :integer,
+          minimum: 0,
+          description:
+            "Páginas que pedem login (RF-RA028): o Rampa auditou só o que um visitante " <>
+              "anônimo vê. Maior que zero, a tela mostra o aviso de barreira de login."
         },
         error: RampaWeb.Schemas.AuditError,
         started_at: timestamp.("Início da varredura (UTC)."),
@@ -559,6 +576,7 @@ defmodule RampaWeb.Schemas.PageSummary do
         :status,
         :http_status,
         :error,
+        :login_wall,
         :scanned_at,
         :counts_by_severity,
         :needs_review_count,
@@ -645,6 +663,7 @@ defmodule RampaWeb.Schemas.PageDetail do
         :status,
         :http_status,
         :error,
+        :login_wall,
         :scanned_at,
         :counts_by_severity,
         :needs_review_count,

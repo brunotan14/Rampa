@@ -55,7 +55,7 @@ export interface SeverityCounts {
   minor: number;
 }
 /**
- * Erro de página ou de auditoria, com a mensagem em português pronta para exibir. Os códigos são os de `pages.error` e `audits.error` (`Rampa.ErrorCodes.page/0`).
+ * Erro de página ou de auditoria, com a mensagem em português pronta para exibir e, quando houver, o status HTTP da página. Os códigos são os de `pages.error` e `audits.error` (`Rampa.ErrorCodes.page/0`).
  */
 export interface PageError {
   code:
@@ -77,6 +77,10 @@ export interface PageError {
     | "stale"
     | "scan_failed";
   message: string;
+  /**
+   * Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro (`http_error`). Ausente quando não há status. A `message` já o cita. Opcional, acrescentado sem subir a versão.
+   */
+  http_status?: number;
 }
 /**
  * Recusa do join, no formato de erro da API. `audit_not_found`: id que não é um UUID em minúsculas ou auditoria inexistente (mesma resposta para os dois). `channel_limit_reached`: a conexão já acompanha o máximo de auditorias.

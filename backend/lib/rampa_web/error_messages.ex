@@ -21,6 +21,11 @@ defmodule RampaWeb.ErrorMessages do
   alias Rampa.Audits.Limits
 
   @type error :: %{code: String.t(), message: String.t()}
+  @type page_error :: %{
+          required(:code) => String.t(),
+          required(:message) => String.t(),
+          optional(:http_status) => 400..599
+        }
 
   @doc "Erro no formato da API: `%{code, message}`."
   @spec error(atom() | String.t(), keyword()) :: error()
@@ -30,8 +35,21 @@ defmodule RampaWeb.ErrorMessages do
   end
 
   @doc """
+  Erro de página ou de auditoria (`pages.error`, `audits.error`), com o status HTTP da página
+  quando houver (RF-RA029): `%{code, message, http_status}`, a mensagem já com o status. Sem
+  status, só `%{code, message}`.
+  """
+  @spec page_error(atom() | String.t(), integer() | nil) :: page_error()
+  # O status já foi validado na entrada (`Rampa.Scanner.Contract`) e no banco.
+  def page_error(code, http_status) when is_integer(http_status),
+    do: Map.put(error(code, http_status: http_status), :http_status, http_status)
+
+  def page_error(code, _http_status), do: error(code)
+
+  @doc """
   Mensagem do código. `rate_limited` recebe `:retry_at` (`DateTime`); o horário sai no fuso
-  de São Paulo, `HH:MM`.
+  de São Paulo, `HH:MM`. `http_error` recebe `:http_status` (opcional) e escolhe a mensagem
+  pelo status (RF-RA029).
   """
   @spec message(atom() | String.t(), keyword()) :: String.t()
   def message(code, bindings \\ [])
@@ -190,19 +208,24 @@ defmodule RampaWeb.ErrorMessages do
   def message("timeout", _bindings) do
     dgettext(
       "errors",
-      "A página demorou demais para carregar ou para ser analisada."
+      "A página demorou demais para carregar ou para ser analisada. Tente de novo em alguns " <>
+        "minutos."
     )
   end
 
-  def message("http_error", _bindings) do
+  # RF-RA029: a mensagem depende do status do documento. 401 é o aviso de barreira de login
+  # (RF-RA028), adaptado: a página de erro não é auditada, então não há "tela de entrada
+  # auditada" a mencionar. 403 tem mensagem própria: num site público costuma ser bloqueio de
+  # robô, não login.
+  def message("http_error", bindings),
+    do: http_error_message(Keyword.get(bindings, :http_status))
+
+  def message("navigation_failed", _bindings) do
     dgettext(
       "errors",
-      "A página respondeu com um erro HTTP e não foi analisada."
+      "Não foi possível abrir a página. Tente de novo em alguns minutos."
     )
   end
-
-  def message("navigation_failed", _bindings),
-    do: dgettext("errors", "Não foi possível abrir a página.")
 
   def message("analysis_failed", _bindings),
     do: dgettext("errors", "A página abriu, mas a análise falhou.")
@@ -252,6 +275,64 @@ defmodule RampaWeb.ErrorMessages do
     dgettext(
       "errors",
       "Ocorreu um erro inesperado. Tente de novo em alguns instantes."
+    )
+  end
+
+  defp http_error_message(status) when status in [404, 410] do
+    dgettext(
+      "errors",
+      "A página não foi encontrada (HTTP %{status}). Confira o endereço.",
+      status: status
+    )
+  end
+
+  defp http_error_message(status) when status in [500, 502, 503, 504] do
+    dgettext(
+      "errors",
+      "O site respondeu com um erro (HTTP %{status}) e pode estar instável. Tente de novo " <>
+        "em alguns minutos.",
+      status: status
+    )
+  end
+
+  defp http_error_message(429) do
+    dgettext(
+      "errors",
+      "O site limitou o acesso de robôs (HTTP %{status}). Tente mais tarde.",
+      status: 429
+    )
+  end
+
+  defp http_error_message(403) do
+    dgettext(
+      "errors",
+      "O site recusou o acesso (HTTP %{status}). Ele pode exigir login ou bloquear acessos " <>
+        "automáticos.",
+      status: 403
+    )
+  end
+
+  defp http_error_message(401) do
+    dgettext(
+      "errors",
+      "Esta página pede login (HTTP %{status}). O Rampa audita só o que um visitante " <>
+        "anônimo vê; áreas logadas ainda não são cobertas.",
+      status: 401
+    )
+  end
+
+  defp http_error_message(status) when is_integer(status) do
+    dgettext(
+      "errors",
+      "A página respondeu com um erro (HTTP %{status}) e não foi analisada.",
+      status: status
+    )
+  end
+
+  defp http_error_message(_unknown) do
+    dgettext(
+      "errors",
+      "A página respondeu com um erro HTTP e não foi analisada."
     )
   end
 end

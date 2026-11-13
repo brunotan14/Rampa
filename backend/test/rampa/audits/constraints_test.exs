@@ -70,6 +70,30 @@ defmodule Rampa.Audits.ConstraintsTest do
       end
     end
 
+    # RF-RA029: a faixa do status de erro (400 a 599, a do contrato do scanner), validada pela
+    # migration à parte (`ValidateErrorHttpStatusRange`).
+    for status <- [200, 399, 600] do
+      test "error_http_status #{status}" do
+        audit = audit_fixture()
+
+        assert_violates(:error_http_status_range, fn ->
+          update_raw("audits", audit.id, error_http_status: unquote(status))
+        end)
+      end
+    end
+
+    test "error_http_status nulo ou entre 400 e 599 passa, e o CHECK está validado" do
+      audit = audit_fixture()
+
+      for status <- [nil, 400, 599] do
+        assert {1, _} = update_raw("audits", audit.id, error_http_status: status)
+      end
+
+      assert Repo.query!(
+               "SELECT convalidated FROM pg_constraint WHERE conname = 'error_http_status_range'"
+             ).rows == [[true]]
+    end
+
     test "cancelled e as abertas não exigem finished_at" do
       audit = audit_fixture()
 

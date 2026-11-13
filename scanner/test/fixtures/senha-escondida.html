@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Senha escondida</title>
+</head>
+<body>
+  <header><p>Fixture do Rampa</p></header>
+  <main>
+    <h1>Campos de senha que ninguém vê</h1>
+    <!-- RF-RA028: nenhum destes conta como campo de senha visível. -->
+    <form hidden>
+      <label for="oculto-hidden">Senha</label>
+      <input id="oculto-hidden" type="password">
+    </form>
+    <div style="display: none">
+      <label for="oculto-display">Senha</label>
+      <input id="oculto-display" type="password">
+    </div>
+    <div style="visibility: hidden">
+      <label for="oculto-visibility">Senha</label>
+      <input id="oculto-visibility" type="password">
+    </div>
+    <p>
+      <label for="sem-tamanho">Senha</label>
+      <input id="sem-tamanho" type="password" style="width: 0; height: 0; padding: 0; border: 0">
+    </p>
+    <p>Texto comum, sem formulário de login à vista.</p>
+  </main>
+</body>
+</html>

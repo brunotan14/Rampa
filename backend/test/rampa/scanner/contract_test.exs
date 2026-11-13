@@ -190,7 +190,9 @@ defmodule Rampa.Scanner.ContractTest do
     test "cada código do contrato é aceito, com o status do schema" do
       for code <- Contract.error_codes() do
         body = %{"contract_version" => "1", "error" => Atom.to_string(code), "detail" => "x"}
-        assert Contract.scanner_error(422, body) == {:ok, %{code: code, detail: "x"}}
+
+        assert Contract.scanner_error(422, body) ==
+                 {:ok, %{code: code, detail: "x", http_status: nil}}
       end
 
       assert Map.keys(Contract.error_statuses()) |> Enum.sort() ==
@@ -205,7 +207,9 @@ defmodule Rampa.Scanner.ContractTest do
     @tag :capture_log
     test "código conhecido sem detail vira HTTP <status>" do
       body = %{"contract_version" => "1", "error" => "timeout"}
-      assert Contract.scanner_error(504, body) == {:ok, %{code: :timeout, detail: "HTTP 504"}}
+
+      assert Contract.scanner_error(504, body) ==
+               {:ok, %{code: :timeout, detail: "HTTP 504", http_status: nil}}
     end
 
     test "sem código reconhecível e sem versão é :unknown" do

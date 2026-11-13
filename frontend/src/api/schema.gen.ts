@@ -153,6 +153,8 @@ export interface components {
         AuditError: {
             /** @enum {string} */
             code: "invalid_url" | "unsupported_scheme" | "blocked_address" | "unresolvable" | "dns_error" | "resource_limit" | "timeout" | "http_error" | "navigation_failed" | "analysis_failed" | "invalid_request" | "unavailable" | "contract_mismatch" | "invalid_scan_result" | "internal_error" | "stale" | "scan_failed";
+            /** @description Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro (`http_error`). Ausente quando não há status. A `message` já o cita. */
+            http_status?: number;
             message: string;
         } | null;
         /**
@@ -188,6 +190,8 @@ export interface components {
              * @description Criação (UTC).
              */
             inserted_at: string;
+            /** @description Páginas que pedem login (RF-RA028): o Rampa auditou só o que um visitante anônimo vê. Maior que zero, a tela mostra o aviso de barreira de login. */
+            login_wall_pages: number;
             /** @description Achados que pedem confirmação manual (`needs_review = true`) por severidade. Não somam com `totals_by_severity` nem entram na pontuação. */
             needs_review_by_severity: components["schemas"]["SeverityTotals"];
             /** @description Achados que pedem confirmação manual (IA, heurística, incompletos). */
@@ -492,6 +496,8 @@ export interface components {
             http_status: number | null;
             /** Format: uuid */
             id: string;
+            /** @description A página pede login (RF-RA028): status 401, ou campo de senha visível depois de um redirecionamento para outro caminho ou origem com termo de login (`entrar`, `login`, `sso`...) no caminho ou no host. `null` quando o Rampa não sabe (fatos ausentes, ou status 403, que pode ser bloqueio de robô). */
+            login_wall: boolean | null;
             needs_review_count: number;
             /** @description Regras aprovadas; `null` quando não foram coletadas. */
             passed_count: number | null;
@@ -539,6 +545,8 @@ export interface components {
             http_status: number | null;
             /** Format: uuid */
             id: string;
+            /** @description A página pede login (RF-RA028): status 401, ou campo de senha visível depois de um redirecionamento para outro caminho ou origem com termo de login (`entrar`, `login`, `sso`...) no caminho ou no host. `null` quando o Rampa não sabe (fatos ausentes, ou status 403, que pode ser bloqueio de robô). */
+            login_wall: boolean | null;
             needs_review_count: number;
             /** @description Regras aprovadas; `null` quando não foram coletadas. */
             passed_count: number | null;
