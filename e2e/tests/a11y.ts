@@ -19,7 +19,46 @@ export async function axeViolations(page: Page) {
     ),
   );
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  return results.violations.map((v) => `${v.id} (${v.impact}): ${v.help} → ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+  const violations = await recheckForcedDarkContrast(page, results.violations);
+  return violations.map((v) => `${v.id} (${v.impact}): ${v.help} → ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+}
+
+type AxeViolation = Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"][number];
+
+/**
+ * Falso `color-contrast` do axe no alto contraste escuro do Windows (dark + more + forced, a
+ * única mídia em que isto vale). O axe lê a cor do texto em `-webkit-text-fill-color`, que o
+ * Chromium devolve com a cor do autor mesmo em forced-colors (aqui, a tinta escura do `more`),
+ * enquanto o fundo vem do Canvas preto do sistema: acusa ~1,5:1 num texto que o navegador pinta
+ * em CanvasText/LinkText sobre o preto. Não se desliga a regra: cada nó acusado é medido de novo
+ * com a `color` computada (a pintada, já com a cor do sistema) contra o fundo efetivo, e só sai
+ * da lista se passar no limiar que o próprio axe pediu para ele. Outras regras e outras mídias
+ * ficam como o axe disse.
+ */
+async function recheckForcedDarkContrast(page: Page, violations: AxeViolation[]): Promise<AxeViolation[]> {
+  const forcedDark = await page.evaluate(
+    () =>
+      matchMedia("(forced-colors: active)").matches &&
+      matchMedia("(prefers-color-scheme: dark)").matches &&
+      matchMedia("(prefers-contrast: more)").matches,
+  );
+  if (!forcedDark) return violations;
+  const result: AxeViolation[] = [];
+  for (const violation of violations) {
+    if (violation.id !== "color-contrast") {
+      result.push(violation);
+      continue;
+    }
+    const nodes = [];
+    for (const node of violation.nodes) {
+      const selector = node.target.length === 1 ? node.target[0] : undefined;
+      const expected = parseFloat(String(node.any[0]?.data?.expectedContrastRatio ?? "4.5"));
+      const [painted] = typeof selector === "string" ? await paintContrast(page, [{ selector, paint: "color" }]) : [];
+      if (!painted || painted.ratio < expected) nodes.push(node);
+    }
+    if (nodes.length > 0) result.push({ ...violation, nodes });
+  }
+  return result;
 }
 
 // --- Checagens do RNF-RA001, as mesmas no `make e2e` e no E2E integrado ----------------------
@@ -30,6 +69,9 @@ export const A11Y_MEDIA = [
   { colorScheme: "dark" },
   { contrast: "more" },
   { forcedColors: "active" },
+  // Tema de alto contraste escuro do Windows ("Céu noturno"): o sistema entrega as três juntas.
+  // Os tokens caem no `prefers-contrast: more` (tinta escura) e o Canvas do sistema é escuro.
+  { colorScheme: "dark", contrast: "more", forcedColors: "active" },
   { reducedMotion: "reduce" },
 ] as const;
 export type A11yMedia = (typeof A11Y_MEDIA)[number];
@@ -42,6 +84,79 @@ const NO_MEDIA = { colorScheme: null, contrast: null, forcedColors: null, reduce
  */
 export async function emulateOnly(page: Page, media: A11yMedia): Promise<void> {
   await page.emulateMedia({ ...NO_MEDIA, ...media });
+}
+
+export interface PaintContrast {
+  part: string;
+  paint: string;
+  backdrop: string;
+  ratio: number;
+}
+
+export interface PaintPart {
+  selector: string;
+  /** A propriedade que o navegador pinta: `color` no texto, `fill`/`stroke` no SVG. */
+  paint: "color" | "fill" | "stroke";
+  /** Elemento que fica atrás (o `fill` dele é o fundo); sem ele, o fundo efetivo do elemento. */
+  over?: string;
+}
+
+/**
+ * Contraste de cada parte contra o que está atrás dela, com as cores computadas, que são as que
+ * o navegador pinta (em forced-colors, `color` e `background-color` já vêm com as do sistema).
+ * `scope` limita a busca dos seletores (e do `over`) a um elemento.
+ */
+export async function paintContrast(page: Page, parts: PaintPart[], scope?: string): Promise<PaintContrast[]> {
+  return page.evaluate(
+    ({ parts, scope }) => {
+      const rgba = (color: string) => {
+        const n = color.match(/[\d.]+/g)?.map(Number) ?? [];
+        return { r: n[0] ?? 0, g: n[1] ?? 0, b: n[2] ?? 0, a: n[3] ?? 1 };
+      };
+      const luminance = (color: string) => {
+        const { r, g, b } = rgba(color);
+        const lin = (v: number) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      };
+      const ratio = (a: string, b: string) => {
+        const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+        return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+      };
+      const background = (el: Element) => {
+        for (let node: Element | null = el; node; node = node.parentElement) {
+          const color = getComputedStyle(node).backgroundColor;
+          if (rgba(color).a > 0) return color;
+        }
+        return "rgb(255, 255, 255)";
+      };
+      const root: ParentNode | null = scope ? document.querySelector(scope) : document;
+      if (!root) throw new Error(`Elemento não encontrado: ${scope}`);
+      return parts.flatMap(({ selector, paint, over }) =>
+        [...root.querySelectorAll(selector)].map((el, i) => {
+          const behind = over ? getComputedStyle(root.querySelector(over)!).fill : background(el);
+          const color = getComputedStyle(el)[paint];
+          return { part: `${selector}[${i}]`, paint: color, backdrop: behind, ratio: ratio(color, behind) };
+        }),
+      );
+    },
+    { parts, scope },
+  );
+}
+
+/** Contraste das partes de um SVG (fill/stroke), que o axe não mede. */
+export function svgContrast(page: Page, svg: string, parts: PaintPart[]): Promise<PaintContrast[]> {
+  return paintContrast(page, parts, svg);
+}
+
+/** Logotipo do cabeçalho: o ladrilho e a palavra contra o cabeçalho; o R do ladrilho contra o ladrilho. */
+export function headerLogoContrast(page: Page): Promise<PaintContrast[]> {
+  return svgContrast(page, ".rp-header .rp-logo", [
+    { selector: ".rp-logo__tile", paint: "fill" },
+    { selector: ".rp-logo__fg", paint: "fill", over: ".rp-logo__tile" },
+    { selector: ".rp-logo__ramp", paint: "fill", over: ".rp-logo__tile" },
+    { selector: ".rp-logo__ink", paint: "fill" },
+    { selector: ".rp-logo__accent", paint: "fill" },
+  ]);
 }
 
 /** O conteúdo que aparece ao rolar só entra quando chega à tela: rola até o fim antes do axe. */

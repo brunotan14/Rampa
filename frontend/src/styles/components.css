@@ -66,6 +66,21 @@
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--cerrado-700); } }
 /* Alto contraste do sistema (como o tokens.css): a rampa vira `on-action`, igual ao tema "contraste". */
 @media (prefers-contrast: more) { :root:not([data-theme]) .rp-logo__ramp { fill: var(--on-action); } }
+/* Cores forçadas (alto contraste do Windows): o navegador não troca o `fill` do SVG, que ficaria
+   com os tokens do autor. No tema escuro de alto contraste ("Céu noturno") o sistema entrega
+   dark + more + forced juntos: os tokens caem na tinta escura do `more` e a palavra sumia no Canvas
+   preto. Aqui toda parte usa cor do sistema, em qualquer combinação: a marca e a palavra na cor do
+   texto (`LinkText` dentro de link, como o link da home no cabeçalho) e o R do ladrilho em `Canvas`,
+   como no tema "contraste". `:root` no seletor vence as regras de tema/contraste acima. */
+@media (forced-colors: active) {
+  .rp-logo { forced-color-adjust: none; --rp-logo-forced-ink: CanvasText; }
+  :any-link .rp-logo { --rp-logo-forced-ink: LinkText; }
+  :root .rp-logo .rp-logo__tile,
+  :root .rp-logo .rp-logo__ink,
+  :root .rp-logo .rp-logo__accent { fill: var(--rp-logo-forced-ink); }
+  :root .rp-logo .rp-logo__fg,
+  :root .rp-logo .rp-logo__ramp { fill: Canvas; }
+}
 
 /* --- Button ---------------------------------------------------------------------------- */
 .rp-btn {
@@ -482,6 +497,9 @@
 
 @media (forced-colors: active) {
   .rp-sevbar__seg { forced-color-adjust: none; background: CanvasText; }
+  /* Mesmo motivo do logo: o `stroke` não é forçado e os tokens do `more` sumiriam no Canvas escuro. */
+  .rp-score__border { stroke: CanvasText; }
+  .rp-score__track { stroke: GrayText; }
   .rp-score__value { stroke: Highlight; }
   .rp-panel { border: var(--border-1) solid CanvasText; }
 }

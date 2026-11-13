@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { axeViolations, expectNoHorizontalScroll, reflowOverflow } from "./a11y.js";
+import { A11Y_MEDIA, axeViolations, emulateOnly, expectNoHorizontalScroll, reflowOverflow, svgContrast } from "./a11y.js";
 import { AUDIT_ID, PhoenixMock, mockAuditApi, progress } from "./simulado.js";
 
 // Tela inicial (TelaInicial, RF-RA001) com a API simulada: formulário, erros ligados ao campo
@@ -122,4 +122,24 @@ test.describe("Tela inicial: formulário de auditoria", () => {
     );
     expect(running).toBe(0);
   });
+});
+
+test.describe("Tela inicial: anel da pontuação do exemplo", () => {
+  // O traço do SVG não é forçado pelo navegador: em forced-colors o anel usa cores do sistema.
+  // Contorno e arco com 3:1 contra o fundo em todas as mídias (inclusive dark + more + forced,
+  // o alto contraste escuro do Windows, em que o contorno sumia no Canvas preto).
+  for (const media of A11Y_MEDIA) {
+    test(`contorno e arco têm 3:1 contra o fundo (${JSON.stringify(media)})`, async ({ page }) => {
+      await emulateOnly(page, media);
+      await page.goto("/");
+      await expect(page.locator(".rp-score__ring")).toBeVisible();
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+      const parts = await svgContrast(page, ".rp-score__ring", [
+        { selector: ".rp-score__border", paint: "stroke" },
+        { selector: ".rp-score__value", paint: "stroke" },
+      ]);
+      expect(parts).toHaveLength(2);
+      expect(parts.filter((p) => p.ratio < 3)).toEqual([]);
+    });
+  }
 });

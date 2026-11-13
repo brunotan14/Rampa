@@ -1,21 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { axeViolations, horizontalOverflow } from "./a11y.js";
+import { A11Y_MEDIA, axeViolations, emulateOnly, horizontalOverflow } from "./a11y.js";
 
 test.describe("Página inicial (M0)", () => {
-  for (const colorScheme of ["light", "dark"] as const) {
-    test(`não tem violações do axe no tema ${colorScheme === "light" ? "claro" : "escuro"}`, async ({ page }) => {
-      await page.emulateMedia({ colorScheme });
+  for (const media of A11Y_MEDIA) {
+    test(`não tem violações do axe (${JSON.stringify(media)})`, async ({ page }) => {
+      await emulateOnly(page, media);
       await page.goto("/");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       expect(await axeViolations(page)).toEqual([]);
     });
   }
-
-  test("não tem violações do axe com alto contraste preferido", async ({ page }) => {
-    await page.emulateMedia({ contrast: "more" });
-    await page.goto("/");
-    expect(await axeViolations(page)).toEqual([]);
-  });
 
   test("o primeiro Tab mostra o link de pular, e Enter leva ao conteúdo", async ({ page }) => {
     await page.goto("/");
