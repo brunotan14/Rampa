@@ -21,3 +21,16 @@ export const messages = {
   /** RF-RA028 e RF-RA029: `http_error` com 401 (início do aviso de barreira de login; o 403 tem mensagem própria). */
   loginWallStart: (status: number) => `Esta página pede login (HTTP ${status}).`,
 };
+
+/** Textos da interface que os critérios afirmam (a fonte é `frontend/src/i18n/pt-BR.ts`). */
+export const screenTexts = {
+  /** RF-RA028: aviso de barreira de login no relatório da página e no resumo. */
+  loginWall: "Esta página pede login. O Rampa auditou a tela de entrada; áreas logadas ainda não são cobertas.",
+  /** RF-RA005: aviso fixo do relatório. */
+  disclaimer:
+    "A verificação automática não garante conformidade e não substitui a avaliação com pessoas e tecnologias assistivas.",
+  /** RF-RA029: botão da tela de falha e do relatório concluído. */
+  auditAgain: "Auditar de novo",
+  /** RF-RA002/RF-RA029: limite por hora, com o horário no fuso do navegador. */
+  rateLimited: /^Você atingiu o limite de auditorias por hora\. Tente de novo a partir (das|de \d{2}\/\d{2}\/\d{4}, às) (\d{2}:\d{2})\.$/,
+};

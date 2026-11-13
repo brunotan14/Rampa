@@ -3,71 +3,22 @@
 // "Um relatório que todo mundo entende" mostra um exemplo com dados fictícios (a pontuação real
 // é do M3), sem o link para um relatório de exemplo, que ainda não existe.
 // Fora no M2: auditorias recentes (RF-RA018, `feat/recentes-e-retencao`), Entrar e Planos (pós-MVP).
-import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { getAudit, isApiError } from "../api/client";
-import { useCreateAudit } from "../api/hooks";
-import { queryKeys } from "../api/queryKeys";
 import { Icon } from "../components/Icon";
 import { Mosaic } from "../components/Mosaic";
 import { PageTitle } from "../components/PageTitle";
 import { ScoreIndicator } from "../components/ScoreIndicator";
 import { SeverityBar, type SeverityBarItem } from "../components/SeverityBar";
-import { UrlAuditField, type UrlFieldError } from "../components/UrlAuditField";
-import { errorMessage, formatFrom, t } from "../i18n";
+import { UrlAuditField } from "../components/UrlAuditField";
+import { t } from "../i18n";
+import { useStartAudit } from "../startAudit";
 
 const EXAMPLE_ITEMS: SeverityBarItem[] = (["critico", "serio", "moderado", "menor", "revisao"] as const).map((level) => ({
   level,
   count: t.home.example.counts[level],
 }));
 
-// Códigos em que o problema é o endereço digitado (o campo fica `aria-invalid`).
-const URL_ERRORS = new Set(["invalid_body", "unsupported_scheme", "invalid_url", "blocked_address", "unresolvable"]);
-
-/** Mensagem do erro da criação, ligada ao campo. O 429 diz o horário no fuso de quem usa. */
-export function createAuditError(error: unknown, now: Date = new Date()): UrlFieldError {
-  if (!isApiError(error)) return { message: errorMessage("internal_error"), invalid: false };
-  if (error.retryAfter !== null && error.code === "rate_limited") {
-    return { message: t.urlField.rateLimited(formatFrom(error.retryAfter, now)), invalid: false };
-  }
-  if (error.retryAfter !== null && error.code === "daily_limit_reached") {
-    return { message: t.urlField.dailyLimitReached(formatFrom(error.retryAfter, now)), invalid: false };
-  }
-  return { message: error.message, invalid: URL_ERRORS.has(error.code) };
-}
-
 export function HomePage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const create = useCreateAudit();
-  const [opening, setOpening] = useState(false);
-  const [failure, setFailure] = useState<{ error: UrlFieldError; key: number } | null>(null);
-  const errorCount = useRef(0);
-
-  function start(url: string) {
-    setFailure(null);
-    create.mutate(
-      { url },
-      {
-        onSuccess: async ({ id }) => {
-          // O resumo (endereço normalizado, status) é buscado antes de trocar de tela: o h1 da
-          // tela de progresso já nasce com o host. Se falhar, a tela busca sozinha.
-          setOpening(true);
-          await queryClient
-            .fetchQuery({ queryKey: queryKeys.audit(id), queryFn: ({ signal }) => getAudit(id, { signal }) })
-            .catch(() => undefined);
-          void navigate(`/auditorias/${id}`);
-        },
-        // Um número novo a cada erro (nunca volta a 1): o alerta é remontado e anunciado de novo,
-        // e o foco volta ao campo, mesmo com o mesmo texto.
-        onError: (error) => {
-          errorCount.current += 1;
-          setFailure({ error: createAuditError(error), key: errorCount.current });
-        },
-      },
-    );
-  }
+  const { start, pending, failure } = useStartAudit();
 
   return (
     <>
@@ -83,8 +34,8 @@ export function HomePage() {
             </PageTitle>
             <p className="rp-lead">{t.home.lead}</p>
             <UrlAuditField
-              onSubmit={start}
-              loading={create.isPending || opening}
+              onSubmit={(url) => start({ url })}
+              loading={pending}
               error={failure?.error ?? null}
               errorKey={failure?.key ?? 0}
             />

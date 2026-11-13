@@ -19,7 +19,7 @@ export interface Progress {
   pages_failed: number;
   totals_by_severity: Totals;
   needs_review_count: number;
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; http_status?: number } | null;
 }
 
 export const ZERO: Totals = { critical: 0, serious: 0, moderate: 0, minor: 0 };
@@ -45,6 +45,7 @@ export function summary(revision: number, p: Progress, startUrl = "https://exemp
     page_limit: 1,
     ...p,
     needs_review_by_severity: ZERO,
+    login_wall_pages: 0,
     score: null,
     top_issues: [],
     inserted_at: new Date().toISOString(),

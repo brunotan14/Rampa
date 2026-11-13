@@ -141,3 +141,93 @@
   .rp-pill { border-color: CanvasText; }
   .rp-howto li::before { color: CanvasText; }
 }
+
+/* --- Relatório (TelaRelatorioResumo, TelaRelatorioDetalhado, TelaDetalheProblema) ------- */
+.rp-report { display: flex; flex-direction: column; gap: var(--space-6); }
+.rp-report > .rp-notice { margin: 0; }
+.rp-report > .rp-section { margin-block-start: var(--space-6); }
+.rp-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3) var(--space-5); }
+.rp-with-icon { display: flex; align-items: center; gap: var(--space-2); }
+.rp-block { display: block; }
+.rp-inline { display: inline; }
+.rp-list-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.rp-list-plain li { overflow-wrap: anywhere; }
+
+/* Top 5: painéis numerados pela própria lista. */
+.rp-top {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--space-20) * 4)), 1fr));
+}
+.rp-top__title { overflow-wrap: anywhere; }
+
+/* Lista de páginas (PageList) */
+.rp-pages { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-pages__filters, .rp-filters {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--space-20) * 3)), 1fr));
+  align-items: end;
+}
+.rp-filters__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.rp-pages__count { margin: 0; color: var(--ink-muted); font-size: 0.9375rem; }
+.rp-pages__list { list-style: none; margin: 0; padding: 0; border: var(--border-1) solid var(--line); border-radius: var(--radius-lg); background: var(--surface-raised); }
+.rp-pages__item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4);
+  border-block-start: var(--border-1) solid var(--line);
+}
+.rp-pages__item:first-child { border-block-start: 0; }
+.rp-pages__main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1 1 calc(var(--space-20) * 3); }
+.rp-pages__main > a { font-weight: 600; overflow-wrap: anywhere; display: inline-block; min-height: var(--target-min); }
+.rp-pages__path { font-family: var(--font-mono); font-size: 0.875rem; color: var(--ink-muted); overflow-wrap: anywhere; }
+.rp-pages__status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.rp-pages__error { color: var(--ink); font-size: 0.9375rem; }
+.rp-pages__sev { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.rp-pagehead { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+
+/* Problemas e aprovados de uma página */
+.rp-findings { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-findings__list { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-passed { display: flex; flex-direction: column; gap: var(--space-3); }
+.rp-passed p { margin: 0; }
+.rp-passed__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rp-passed__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-3);
+  border-block-start: var(--border-1) solid var(--line);
+}
+.rp-passed__item:first-child { border-block-start: 0; }
+.rp-passed__text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1 1 calc(var(--space-20) * 3); overflow-wrap: anywhere; }
+.rp-passed__help { font-weight: 600; }
+
+/* Detalhe do problema: principal (2/3) e lateral (1/3) a partir de bp-lg. */
+.rp-detail { display: grid; gap: var(--space-8); grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 64em) {
+  .rp-detail { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+}
+.rp-detail__main, .rp-detail__aside { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
+.rp-detail__main .rp-card__section p { margin: 0; }
+.rp-axe-message { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* Troca de página no relatório (06-movimento.md): o painel antigo esmaece e o novo sobe. */
+@keyframes rp-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .rp-vt-painel { view-transition-name: rp-painel; }
+  ::view-transition-old(rp-painel) { animation: var(--duration-base) var(--ease-exit) both rp-fade reverse; }
+  ::view-transition-new(rp-painel) { animation: var(--duration-slow) var(--ease-enter) both rp-fade-up; }
+}
+
+@media (forced-colors: active) {
+  .rp-pages__list { border: var(--border-1) solid CanvasText; }
+}
+.rp-report > .rp-section--flush { margin-block-start: 0; }

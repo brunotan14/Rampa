@@ -5,7 +5,7 @@ import { AUDIT_ID, auditSummary } from "../../test/fixtures";
 import { axeViolations, jsonResponse, renderRoute } from "../../test/render";
 import { ApiError } from "../api/client";
 import { formatFrom } from "../i18n";
-import { createAuditError } from "./HomePage";
+import { createAuditError } from "../startAudit";
 
 const fetchMock = vi.fn<typeof fetch>();
 

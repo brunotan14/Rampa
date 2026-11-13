@@ -46,7 +46,9 @@ compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsí
 - `scanDirect(request, url)`: resposta do scanner, com `blocked_requests` (não é gravado no banco).
 - `retryAfterSeconds(result)`: o cabeçalho `Retry-After` de uma recusa 429.
 
-Também em `support/`: `messages.ts` (os textos de `error.message` que os critérios afirmam),
+Também em `support/`: `browser.ts` (`openBrowserPage`: contexto do navegador no frontend servido pelo
+app, com o IP simulado e sem movimento), `messages.ts` (os textos de `error.message` e, em
+`screenTexts`, os da tela que os critérios afirmam),
 `time.ts` (`saoPauloTime`, o `HH:MM` das mensagens) e `evidence.ts`. Todo caso leva a anotação
 `requisito` com o texto do critério (`requirement(...)`) e anexa o que mediu
 (`attachObserved`); o `afterEach` com `requireObserved` reprova o caso verde sem anexo.
@@ -61,8 +63,8 @@ Também em `support/`: `messages.ts` (os textos de `error.message` que os crité
 | `rf-ra002-protecao-ssrf.spec.ts` | RF-RA002 CA1, CA2, CA3 e CA6 |
 | `rf-ra002-limites.spec.ts` | RF-RA002 CA4, `X-Forwarded-For` fora da faixa confiável e teto diário (os dois baldes exclusivos) |
 | `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |
-| `rf-ra028-barreira-login.spec.ts` | RF-RA028 CA1 a CA3 pela API (`login_wall` da página e `login_wall_pages` do resumo) e a senha sem redirecionamento; o aviso na tela vem na `feat/tela-relatorio` e o CA4 (medição) está nos testes do backend |
-| `rf-ra029-falha-acesso.spec.ts` | RF-RA029 CA1 a CA4 pela API: mensagem e `http_status` do 404, nova tentativa no 503, 503 e depois 200, e a nova auditoria da mesma URL (o botão "Auditar de novo" e o CA5 vêm com a tela) |
+| `rf-ra028-barreira-login.spec.ts` | RF-RA028 CA1 a CA3 pela API (`login_wall` da página e `login_wall_pages` do resumo) e pela tela (aviso com ícone e texto no resumo e na página, a mensagem do 401 na tela de falha, nenhum aviso na `limpa.html`, com axe), a senha sem redirecionamento, e o RF-RA017 CA1 e CA2 (aba "Aprovados" da `limpa.html`); o CA4 (medição) está nos testes do backend |
+| `rf-ra029-falha-acesso.spec.ts` | RF-RA029 CA1 a CA4 pela API (mensagem e `http_status` do 404, nova tentativa no 503, 503 e depois 200, nova auditoria da mesma URL) e CA1, CA4 e CA5 pela tela: mensagem e "Auditar de novo", a nova auditoria com a antiga intacta no link dela, e o 429 com o horário de liberação no fuso do navegador |
 | `frontend-servido.spec.ts` | PRD §7 e RNF-RA008: o app serve o build do React (fallback da SPA no link direto) com a CSP, sem violação no navegador do início ao fim da auditoria |
 
 O RF-RA002 CA5 (produção não sobe com a allowlist) e o isolamento de rede do scanner são

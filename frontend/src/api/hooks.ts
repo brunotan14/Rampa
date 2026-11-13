@@ -1,45 +1,75 @@
 // Hooks finos sobre o cliente da API, um por endpoint do relatório (PRD §9).
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
 import { createAudit, getAudit, getFinding, getPage, isApiError, listFindings, listPages } from "./client";
+import { isRunning } from "../report";
 import { queryKeys } from "./queryKeys";
 import type { CreateAuditRequest, FindingsFilters } from "./types";
 
-export function useAudit(auditId: string) {
+/**
+ * Novas buscas periódicas das telas do relatório: `refetchInterval` em ms enquanto a auditoria
+ * anda; `false` (padrão) não busca de novo sozinho.
+ */
+export interface LiveOptions {
+  refetchInterval?: number | false;
+}
+
+/**
+ * Resumo da auditoria. Com `liveMs`, busca de novo a cada `liveMs` enquanto a auditoria está na
+ * fila ou em varredura, e para no estado final (as telas internas, que não têm o canal).
+ */
+export function useAudit(auditId: string, { liveMs }: { liveMs?: number } = {}) {
   return useQuery({
     queryKey: queryKeys.audit(auditId),
     queryFn: ({ signal }) => getAudit(auditId, { signal }),
+    refetchInterval: liveMs ? (query) => (isRunning(query.state.data) ? liveMs : false) : false,
   });
 }
 
-export function usePages(auditId: string) {
+export function usePages(auditId: string, { refetchInterval = false }: LiveOptions = {}) {
   return useQuery({
     queryKey: queryKeys.pages(auditId),
     queryFn: ({ signal }) => listPages(auditId, { signal }),
+    refetchInterval,
   });
 }
 
-export function usePage(auditId: string, pageId: string) {
+export function usePage(auditId: string, pageId: string, { refetchInterval = false }: LiveOptions = {}) {
   return useQuery({
     queryKey: queryKeys.page(auditId, pageId),
     queryFn: ({ signal }) => getPage(auditId, pageId, { signal }),
+    refetchInterval,
   });
 }
 
 /** Achados com paginação por cursor: `fetchNextPage` segue o `next_cursor` (`null` = fim). */
-export function useFindings(auditId: string, filters: FindingsFilters = {}) {
+export function useFindings(auditId: string, filters: FindingsFilters = {}, { refetchInterval = false }: LiveOptions = {}) {
   return useInfiniteQuery({
     queryKey: queryKeys.findings(auditId, filters),
     queryFn: ({ signal, pageParam }) => listFindings(auditId, filters, pageParam, { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor,
+    refetchInterval,
   });
 }
 
-export function useFinding(auditId: string, findingId: string) {
+/** Só o `total` de achados de cada filtro (`limit` 1), um pedido por filtro, em paralelo. */
+export function useFindingsTotals(auditId: string, filtersList: readonly FindingsFilters[], { refetchInterval = false }: LiveOptions = {}) {
+  return useQueries({
+    queries: filtersList.map((filters) => ({
+      queryKey: queryKeys.findingsTotal(auditId, filters),
+      queryFn: ({ signal }: { signal: AbortSignal }) => listFindings(auditId, filters, null, { signal }),
+      select: (page: { total: number | null; data: unknown[] }) => page.total ?? page.data.length,
+      refetchInterval,
+    })),
+  });
+}
+
+export function useFinding(auditId: string, findingId: string, { refetchInterval = false }: LiveOptions = {}) {
   return useQuery({
     queryKey: queryKeys.finding(auditId, findingId),
     queryFn: ({ signal }) => getFinding(auditId, findingId, { signal }),
+    refetchInterval,
   });
 }
 

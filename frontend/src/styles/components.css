@@ -502,3 +502,210 @@
 @media (forced-colors: active) {
   .rp-notice { border-color: CanvasText; }
 }
+
+/* --- Notice (variações) ---------------------------------------------------------------- */
+.rp-notice__body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+/* Barreira de login (RF-RA028): cadeado em `serio` e barra lateral; o texto diz o que é. */
+.rp-notice--atencao { border-inline-start: var(--space-1) solid var(--serio); }
+.rp-notice--atencao .rp-icon { color: var(--serio); }
+
+/* --- Breadcrumb ------------------------------------------------------------------------ */
+.rp-crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.rp-crumbs li { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.rp-crumbs li + li::before { content: "/"; color: var(--ink-muted); padding-inline: var(--space-1); }
+.rp-crumbs a { display: inline-block; min-height: var(--target-min); padding-block: var(--space-1); }
+.rp-crumbs [aria-current="page"] { color: var(--ink); font-weight: 600; }
+
+/* --- AiReviewBadge --------------------------------------------------------------------- */
+.rp-ai {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-2) dashed var(--revisao);
+  border-radius: var(--radius-sm);
+  background: var(--revisao-soft);
+  color: var(--revisao);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.rp-ai__conf { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 400; color: var(--ink); }
+.rp-ai__bars { display: inline-flex; gap: var(--border-2); align-items: flex-end; }
+.rp-ai__bars i { display: block; inline-size: var(--space-1); border: var(--border-1) solid var(--revisao); border-radius: var(--radius-none); }
+.rp-ai__bars i:nth-child(1) { block-size: calc(var(--space-1) * 1.5); }
+.rp-ai__bars i:nth-child(2) { block-size: calc(var(--space-1) * 2.5); }
+.rp-ai__bars i:nth-child(3) { block-size: calc(var(--space-1) * 3.5); }
+.rp-ai__bars i.on { background: var(--revisao); }
+
+/* --- Status da página ------------------------------------------------------------------ */
+.rp-pstatus { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.rp-pstatus--done .rp-icon { color: var(--sucesso); }
+.rp-pstatus--failed .rp-icon, .rp-pstatus--login .rp-icon { color: var(--serio); }
+.rp-pstatus--queued .rp-icon, .rp-pstatus--scanning .rp-icon, .rp-pstatus--analyzing .rp-icon { color: var(--ink-muted); }
+
+/* --- Campos (TextField e Select nativos) ----------------------------------------------- */
+.rp-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.rp-field__label { font-weight: 600; color: var(--ink); }
+.rp-field__hint { font-size: 0.875rem; color: var(--ink-muted); }
+.rp-field__input, .rp-select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--input-bg);
+  border: var(--border-1) solid var(--input-border);
+  border-radius: var(--radius-md);
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+.rp-field__input:hover, .rp-select:hover { border-color: var(--input-border-hover); }
+.rp-field__input[aria-invalid="true"] { border: var(--border-2) solid var(--input-border-error); }
+.rp-field__error { display: flex; gap: var(--space-2); align-items: flex-start; color: var(--critico); font-weight: 600; font-size: 0.9375rem; }
+.rp-field__error .rp-icon { margin-block-start: var(--space-1); }
+
+/* --- Tabs (React Aria Components, design/components/Tabs) ------------------------------ */
+.rp-tabs { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-tabs__list { display: flex; flex-wrap: wrap; gap: var(--space-1); border-block-end: var(--border-1) solid var(--line-strong); }
+.rp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target-comfort);
+  padding: var(--space-2) var(--space-4);
+  margin-block-end: calc(-1 * var(--border-1));
+  border-block-end: var(--focus-width) solid transparent;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  color: var(--ink-muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rp-tab[data-hovered] { color: var(--ink); background: var(--action-soft); }
+/* Ativa: cor e barra de 3px, dois sinais além da cor do texto. */
+.rp-tab[data-selected] { color: var(--action); border-block-end-color: var(--tab-indicator); }
+.rp-tab[data-focus-visible] { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+.rp-count {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.rp-tabs__panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-tabs__panel[data-focus-visible] { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+@media (prefers-reduced-motion: no-preference) {
+  /* Troca de aba (06-movimento.md): o painel sobe ao aparecer. */
+  .rp-tabs__panel { animation: rp-fade-up var(--duration-slow) var(--ease-enter); }
+}
+
+/* --- DataTable ------------------------------------------------------------------------- */
+.rp-table-wrap { overflow-x: auto; border: var(--border-1) solid var(--line); border-radius: var(--radius-lg); background: var(--surface-raised); }
+.rp-table { border-collapse: collapse; inline-size: 100%; font-size: 0.9375rem; }
+.rp-table caption { text-align: start; padding: var(--space-4); font-weight: 600; font-size: 1.125rem; }
+.rp-table th, .rp-table td { text-align: start; padding: var(--space-3) var(--space-4); border-block-start: var(--border-1) solid var(--line); vertical-align: top; }
+.rp-table thead th { font-weight: 600; background: var(--surface-sunken); }
+.rp-table .num { text-align: end; font-variant-numeric: tabular-nums; }
+.rp-table tfoot th, .rp-table tfoot td { font-weight: 700; }
+
+/* --- Card de problema (IssueCard) ------------------------------------------------------ */
+.rp-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: var(--border-1) solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--elevation-1);
+  min-width: 0;
+}
+@media (max-width: 30em) {
+  .rp-card { padding: var(--space-4); }
+}
+.rp-card__head { display: flex; flex-direction: column; gap: var(--space-2); }
+.rp-card__meta { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.rp-card__title { margin: 0; font-size: 1.25rem; line-height: 1.4; overflow-wrap: anywhere; }
+.rp-card__dl { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; }
+.rp-card__dl dt { font-weight: 600; color: var(--ink-muted); }
+.rp-card__dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 30em) {
+  .rp-card__dl { grid-template-columns: minmax(0, 1fr); }
+  .rp-card__dl dd { margin-block-end: var(--space-2); }
+}
+/* Na lateral do detalhe, termo em cima e valor embaixo. */
+.rp-card__dl--stack { grid-template-columns: minmax(0, 1fr); }
+.rp-card__dl--stack dd { margin-block-end: var(--space-2); }
+.rp-card__section { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.rp-card__section h4 { margin: 0; font-size: 1rem; }
+.rp-elements { margin: 0; padding-inline-start: var(--space-6); display: flex; flex-direction: column; gap: var(--space-1); }
+.rp-elements li { overflow-wrap: anywhere; }
+.rp-elements__link { display: inline-block; min-height: var(--target-min); padding-block: var(--space-1); }
+
+/* --- Código encontrado ----------------------------------------------------------------- */
+.rp-codeblock {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --- Auditar de novo ------------------------------------------------------------------- */
+.rp-again { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.rp-again__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--critico);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+.rp-again__error .rp-icon { margin-block-start: var(--space-1); }
+
+/* --- Revelar ao rolar e elevação (06-movimento.md) ------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .rp-reveal {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+    transition:
+      opacity calc(var(--duration-slow) * 2) var(--ease-enter) calc(var(--rp-step, 0) * var(--duration-fast)),
+      transform calc(var(--duration-slow) * 2) var(--ease-enter) calc(var(--rp-step, 0) * var(--duration-fast));
+  }
+  .rp-reveal.is-in { opacity: 1; transform: none; }
+  .rp-panel--lift { transition: transform var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard); }
+  .rp-panel--lift:hover, .rp-panel--lift:focus-within { transform: translateY(calc(-1 * var(--space-1))); }
+  /* Painel do top 5 que também aparece ao rolar: as duas transições juntas. */
+  .rp-reveal.rp-panel--lift {
+    transition:
+      opacity calc(var(--duration-slow) * 2) var(--ease-enter) calc(var(--rp-step, 0) * var(--duration-fast)),
+      transform calc(var(--duration-slow) * 2) var(--ease-enter) calc(var(--rp-step, 0) * var(--duration-fast)),
+      box-shadow var(--duration-base) var(--ease-standard);
+  }
+}
+.rp-panel--lift:hover, .rp-panel--lift:focus-within { border-color: var(--line-strong); box-shadow: var(--elevation-2); }
+@media print {
+  .rp-reveal { opacity: 1 !important; transform: none !important; }
+}
+
+@media (forced-colors: active) {
+  .rp-ai, .rp-card, .rp-field__input, .rp-select, .rp-table-wrap, .rp-codeblock { border: var(--border-1) solid CanvasText; }
+  .rp-ai { border-style: dashed; }
+  .rp-ai__bars i.on { forced-color-adjust: none; background: Highlight; }
+  .rp-tab[data-selected] { border-block-end-color: Highlight; }
+  .rp-notice--atencao { border-inline-start-color: CanvasText; }
+}
+
+/* Selo com rótulo longo ("O axe não conseguiu decidir: confirme manualmente"): quebra a linha em
+   vez de passar da largura da tela (320px, 1.4.10). Os curtos continuam numa linha. */
+.rp-badge { max-inline-size: 100%; }
+.rp-badge__label { white-space: normal; min-width: 0; }

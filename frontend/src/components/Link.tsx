@@ -14,13 +14,16 @@ export interface LinkProps {
   /** Isolado (fora de parágrafo): `body-strong` e alvo mínimo de 24px. */
   standalone?: boolean;
   className?: string;
+  id?: string;
+  /** Troca de tela com View Transitions, quando o navegador tem e o movimento é permitido. */
+  viewTransition?: boolean;
 }
 
-export function Link({ href, children, external, standalone, className }: LinkProps) {
+export function Link({ href, children, external, standalone, className, id, viewTransition }: LinkProps) {
   const classes = ["rp-link", standalone && "rp-link--standalone", className].filter(Boolean).join(" ");
   if (external) {
     return (
-      <a href={href} className={classes} target="_blank" rel="noopener noreferrer">
+      <a href={href} id={id} className={classes} target="_blank" rel="noopener noreferrer">
         {children}{" "}
         <Icon name="externo" size="sm" className="rp-link__icon" />
         <span className="rp-sr">{t.link.newTab}</span>
@@ -28,7 +31,7 @@ export function Link({ href, children, external, standalone, className }: LinkPr
     );
   }
   return (
-    <RouterLink to={href} className={classes}>
+    <RouterLink to={href} id={id} className={classes} viewTransition={viewTransition}>
       {children}
     </RouterLink>
   );

@@ -10,5 +10,7 @@ export const queryKeys = {
   /** Prefixo de todas as listas de achados da auditoria, com qualquer filtro. */
   findingsAll: (auditId: string) => ["audits", auditId, "findings"] as const,
   findings: (auditId: string, filters: FindingsFilters = {}) => ["audits", auditId, "findings", filters] as const,
+  /** Só o `total` de uma lista de achados (`limit` 1), sem paginação: fora de `findingsAll`. */
+  findingsTotal: (auditId: string, filters: FindingsFilters) => ["audits", auditId, "findings-total", filters] as const,
   finding: (auditId: string, findingId: string) => ["audits", auditId, "finding", findingId] as const,
 };
