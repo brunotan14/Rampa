@@ -21,3 +21,12 @@ export async function axeViolations(page: Page) {
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   return results.violations.map((v) => `${v.id} (${v.impact}): ${v.help} → ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
+
+// Espaçamento de texto do critério 1.4.12 (o mesmo do bookmarklet).
+export const TEXT_SPACING = `* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
+p { margin-bottom: 2em !important; }`;
+
+/** Rolagem horizontal da tela, em px (> 0 quebra o 1.4.10). */
+export async function horizontalOverflow(page: Page) {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}

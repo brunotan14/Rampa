@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <!-- `user-scalable=no` impede o zoom: meta-viewport (moderado, 1.4.4). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Problemas de severidades diferentes</title>
+  <style>
+    /* Cinza-claro sobre branco (2,3:1): color-contrast em `violations`. */
+    .apagado { color: #aaaaaa; background: #ffffff; }
+    /* Texto sobre imagem de fundo: o axe não decide o contraste (color-contrast em `incomplete`). */
+    .banner {
+      background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2240%22%3E%3Crect%20width%3D%2220%22%20height%3D%2240%22%20fill%3D%22%23333333%22%2F%3E%3Crect%20x%3D%2220%22%20width%3D%2220%22%20height%3D%2240%22%20fill%3D%22%23cccccc%22%2F%3E%3C%2Fsvg%3E");
+      padding: 1rem;
+    }
+    .banner p { color: #ffffff; margin: 0; }
+  </style>
+</head>
+<body>
+  <header><p>Fixture do Rampa</p></header>
+  <main>
+    <h1>Problemas de severidades diferentes</h1>
+    <p>Relatório completo do E2E integrado (RF-RA005, RF-RA006, RF-RA007): achados críticos,
+      sérios, moderados, menores e um que pede confirmação manual, na mesma página.</p>
+    <!-- Duas imagens sem `alt`: image-alt (crítico, 1.1.1), dois elementos. -->
+    <img class="foto-capa" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC" width="1" height="1">
+    <img class="foto-rodape" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC" width="1" height="1">
+    <!-- Botão sem nome: button-name (crítico, 4.1.2). -->
+    <button type="button" class="botao-vazio"></button>
+    <!-- Link sem nome: link-name (sério, 2.4.4 e 4.1.2). -->
+    <p><a class="link-vazio" href="/limpa.html"></a></p>
+    <p class="apagado">Texto com pouco contraste</p>
+    <div class="banner">
+      <p>Texto sobre imagem de fundo</p>
+    </div>
+    <!-- Papel ARIA obsoleto: aria-deprecated-role (menor, 4.1.2). -->
+    <div role="directory">Lista de serviços</div>
+    <!-- Mapa de imagem do lado do servidor: o axe não decide (server-side-image-map, menor, em `incomplete`). -->
+    <p><a href="/limpa.html"><img class="mapa" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwTpsJAAICATNWh+JUAAAAAElFTkSuQmCC" alt="Mapa do site" ismap width="1" height="1"></a></p>
+  </main>
+</body>
+</html>

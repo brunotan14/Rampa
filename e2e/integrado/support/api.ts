@@ -30,12 +30,26 @@ export interface AuditSummary {
   pages_failed: number;
   totals_by_severity: Record<Severity, number>;
   needs_review_count: number;
+  /** Achados que pedem confirmação, por severidade (RF-RA005). */
+  needs_review_by_severity: Record<Severity, number>;
+  /** As regras confirmadas mais frequentes, até 5 (RF-RA005). */
+  top_issues: TopIssue[];
   /** Páginas que pedem login (RF-RA028). */
   login_wall_pages: number;
   error: PageError | null;
   started_at: string | null;
   finished_at: string | null;
   inserted_at: string;
+}
+
+export interface TopIssue {
+  rule_id: string;
+  help: string | null;
+  severity: Severity;
+  wcag_criteria: string[];
+  pages_affected: number;
+  occurrences: number;
+  sample_finding_id: string;
 }
 
 export interface Finding {
@@ -61,6 +75,18 @@ export interface PageSummary {
   error: PageError | null;
   /** A página pede login (RF-RA028); `null` quando não se sabe. */
   login_wall: boolean | null;
+}
+
+/** Uma página com as regras aprovadas (`GET /api/audits/:id/pages/:page_id`, RF-RA017). */
+export interface PageDetail extends PageSummary {
+  title: string | null;
+  passed_rules: { rule_id: string; help: string; wcag_criteria: string[]; nodes_total: number }[] | null;
+}
+
+/** Um achado com o contexto do detalhe (`GET /api/audits/:id/findings/:finding_id`, RF-RA007). */
+export interface FindingDetail extends Finding {
+  help: string | null;
+  page: { id: string; url: string; final_url: string | null; title: string | null };
 }
 
 export const FINAL_STATUSES: readonly AuditStatus[] = ["completed", "failed", "cancelled"];
@@ -210,9 +236,23 @@ export async function listPages(
   return ((await response.json()) as { data: PageSummary[] }).data;
 }
 
+/** `GET /api/audits/:id/pages/:page_id`. */
+export async function getPage(request: APIRequestContext, id: string, pageId: string): Promise<PageDetail> {
+  const response = await request.get(`${env.apiUrl}/api/audits/${id}/pages/${pageId}`);
+  expect(response.status(), `GET /api/audits/${id}/pages/${pageId}: ${await response.text()}`).toBe(200);
+  return (await response.json()) as PageDetail;
+}
+
+/** `GET /api/audits/:id/findings/:finding_id`. */
+export async function getFinding(request: APIRequestContext, id: string, findingId: string): Promise<FindingDetail> {
+  const response = await request.get(`${env.apiUrl}/api/audits/${id}/findings/${findingId}`);
+  expect(response.status(), `GET /api/audits/${id}/findings/${findingId}: ${await response.text()}`).toBe(200);
+  return (await response.json()) as FindingDetail;
+}
+
 /**
  * Quantas vezes o documento de uma rota com contador do site de fixtures foi pedido
- * (`/instavel/<uuid>` ou `/sempre-503/<uuid>`, RF-RA029): `GET <rota>/hits`.
+ * (`/instavel/<uuid>`, `/sempre-503/<uuid>` ou `/proibido/<uuid>`, RF-RA029): `GET <rota>/hits`.
  */
 export async function fixtureHits(request: APIRequestContext, path: string): Promise<number> {
   const response = await request.get(`${fixtureUrl(path)}/hits`);
@@ -221,8 +261,11 @@ export async function fixtureHits(request: APIRequestContext, path: string): Pro
 }
 
 export interface FindingFilters {
+  page_id?: string;
   severity?: Severity;
   source?: FindingSource;
+  /** Critério WCAG só com o número (`"1.4.3"`). */
+  wcag?: string;
   needs_review?: boolean;
 }
 

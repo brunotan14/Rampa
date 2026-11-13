@@ -5,6 +5,9 @@
 // (`shared/openapi.json` e `shared/channel-events.schema.json`).
 import type { Page, WebSocketRoute } from "@playwright/test";
 
+// Ajudantes de 1.4.10 e 1.4.12: moram no `a11y.ts`, que o runner do E2E integrado também leva.
+export { TEXT_SPACING, horizontalOverflow } from "./a11y.js";
+
 export const AUDIT_ID = "3f2b8c1e-7a4d-4e5f-9b0c-1d2e3f4a5b6c";
 export const PAGE_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const TOPIC = `audit:${AUDIT_ID}`;
@@ -136,12 +139,4 @@ export async function recordLiveRegion(page: Page) {
 
 export function liveRegionTexts(page: Page) {
   return page.evaluate(() => (window as unknown as { __said: string[] }).__said);
-}
-
-// Espaçamento de texto do critério 1.4.12 (o mesmo do bookmarklet).
-export const TEXT_SPACING = `* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
-p { margin-bottom: 2em !important; }`;
-
-export async function horizontalOverflow(page: Page) {
-  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }

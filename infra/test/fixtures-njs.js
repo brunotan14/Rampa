@@ -5,8 +5,10 @@
 //
 //   /instavel/<uuid>          503 na primeira visita; depois, a `img-sem-alt.html` (200);
 //   /sempre-503/<uuid>        503 sempre;
+//   /proibido/<uuid>          403 sempre (falha definitiva: o contador prova que não há nova tentativa);
 //   /<rota>/<uuid>/hits       `{"hits": N}`: quantas vezes o documento foi pedido.
 
+const FORBIDDEN_PAGE = '<!doctype html><html lang="pt-BR"><title>Proibido</title><h1>Acesso recusado</h1></html>';
 const ERROR_PAGE = '<!doctype html><html lang="pt-BR"><title>Indisponível</title><h1>Serviço indisponível</h1></html>';
 
 function count(r) {
@@ -28,10 +30,16 @@ function alwaysUnavailable(r) {
   unavailable(r);
 }
 
+function forbidden(r) {
+  count(r);
+  r.headersOut['Content-Type'] = 'text/html; charset=utf-8';
+  r.return(403, FORBIDDEN_PAGE);
+}
+
 function hits(r) {
   r.headersOut['Content-Type'] = 'application/json';
   r.headersOut['Cache-Control'] = 'no-store';
   r.return(200, JSON.stringify({ hits: ngx.shared.hits.get(r.variables.hit_key) || 0 }));
 }
 
-export default { unstable, alwaysUnavailable, hits };
+export default { unstable, alwaysUnavailable, forbidden, hits };
