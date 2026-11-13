@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright";
 import type { FastifyInstance } from "fastify";
+import { runAxe } from "../src/axe.js";
 import { launchBrowser } from "../src/browser.js";
 import { buildServer, type ServerOptions } from "../src/server.js";
 import { CONTRACT_LIMITS, CONTRACT_VERSION, type AxeTarget, type ScanResponse } from "../src/contract.gen.js";
@@ -313,6 +314,26 @@ describe("RF-RA028: fatos de barreira de login", () => {
       expect(res.json()).not.toHaveProperty("login_wall");
     } finally {
       await broken.close();
+    }
+  });
+
+  // O axe roda scripts na página: o fato de login é lido antes, junto com a `final_url`.
+  it("lê o campo de senha antes do axe", async () => {
+    const mutating = buildServer(
+      browser,
+      serverOptions({
+        analyze: async (page) => {
+          await page.evaluate(() => document.querySelectorAll("input[type=password]").forEach((el) => el.remove()));
+          return runAxe(page);
+        },
+      }),
+    );
+    try {
+      const res = await scanOn(mutating, `${fixturesUrl}/entrar.html`);
+      expect(res.statusCode).toBe(200);
+      expect(res.json<ScanResponse>().login_wall).toEqual({ password_field: true });
+    } finally {
+      await mutating.close();
     }
   });
 

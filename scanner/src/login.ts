@@ -11,13 +11,9 @@ import type { LoginWallFacts } from "./contract.gen.js";
 // que troque `querySelectorAll` não engana a contagem.
 const PASSWORD_SELECTOR = 'input[type="password" i]';
 
-// Falha da checagem (página navegou, contexto destruído) devolve `undefined`: o campo fica
-// de fora da resposta e o backend grava "não sabido". Nunca derruba a varredura.
-export async function loginWallFacts(page: Page): Promise<LoginWallFacts | undefined> {
-  try {
-    const visible = await page.locator(PASSWORD_SELECTOR).filter({ visible: true }).count();
-    return { password_field: visible > 0 };
-  } catch {
-    return undefined;
-  }
+// Falha da checagem (página navegou, contexto destruído) rejeita a promessa; quem a trata é o
+// `server.ts` (`collectLoginWall`), o único lugar da regra "nunca derruba a varredura".
+export async function loginWallFacts(page: Page): Promise<LoginWallFacts> {
+  const visible = await page.locator(PASSWORD_SELECTOR).filter({ visible: true }).count();
+  return { password_field: visible > 0 };
 }

@@ -24,7 +24,7 @@ defmodule RampaWeb.ErrorMessages do
   @type page_error :: %{
           required(:code) => String.t(),
           required(:message) => String.t(),
-          optional(:http_status) => 100..599
+          optional(:http_status) => 400..599
         }
 
   @doc "Erro no formato da API: `%{code, message}`."
@@ -40,7 +40,8 @@ defmodule RampaWeb.ErrorMessages do
   status, só `%{code, message}`.
   """
   @spec page_error(atom() | String.t(), integer() | nil) :: page_error()
-  def page_error(code, http_status) when is_integer(http_status) and http_status in 100..599,
+  # O status já foi validado na entrada (`Rampa.Scanner.Contract`) e no banco.
+  def page_error(code, http_status) when is_integer(http_status),
     do: Map.put(error(code, http_status: http_status), :http_status, http_status)
 
   def page_error(code, _http_status), do: error(code)
@@ -212,9 +213,10 @@ defmodule RampaWeb.ErrorMessages do
     )
   end
 
-  # RF-RA029: a mensagem depende do status do documento. 401 e 403 são o aviso de barreira de
-  # login (RF-RA028), adaptado: a página de erro não é auditada, então não há "tela de
-  # entrada auditada" a mencionar.
+  # RF-RA029: a mensagem depende do status do documento. 401 é o aviso de barreira de login
+  # (RF-RA028), adaptado: a página de erro não é auditada, então não há "tela de entrada
+  # auditada" a mencionar. 403 tem mensagem própria: num site público costuma ser bloqueio de
+  # robô, não login.
   def message("http_error", bindings),
     do: http_error_message(Keyword.get(bindings, :http_status))
 
@@ -301,16 +303,25 @@ defmodule RampaWeb.ErrorMessages do
     )
   end
 
-  defp http_error_message(status) when status in [401, 403] do
+  defp http_error_message(403) do
+    dgettext(
+      "errors",
+      "O site recusou o acesso (HTTP %{status}). Ele pode exigir login ou bloquear acessos " <>
+        "automáticos.",
+      status: 403
+    )
+  end
+
+  defp http_error_message(401) do
     dgettext(
       "errors",
       "Esta página pede login (HTTP %{status}). O Rampa audita só o que um visitante " <>
         "anônimo vê; áreas logadas ainda não são cobertas.",
-      status: status
+      status: 401
     )
   end
 
-  defp http_error_message(status) when is_integer(status) and status in 100..599 do
+  defp http_error_message(status) when is_integer(status) do
     dgettext(
       "errors",
       "A página respondeu com um erro (HTTP %{status}) e não foi analisada.",

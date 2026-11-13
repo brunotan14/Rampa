@@ -20,30 +20,63 @@ defmodule Rampa.Audits.LoginWallTest do
   end
 
   describe "status 401 e 403" do
-    for status <- [401, 403] do
-      test "#{status} é barreira, com ou sem os outros fatos" do
-        status = unquote(status)
-        assert LoginWall.decide(%{http_status: status})
-        assert decide(nil, nil, status)
-        assert decide(@requested, false, status)
-      end
+    test "401 é barreira, com ou sem os outros fatos" do
+      assert LoginWall.decide(%{http_status: 401})
+      assert decide(nil, nil, 401)
+      assert decide(@requested, false, 401)
+    end
+
+    # 403 em site público costuma ser bloqueio de robô (WAF): sozinho, não se sabe.
+    test "403 não é barreira sozinho: não se sabe" do
+      assert LoginWall.decide(%{http_status: 403}) == nil
+      assert decide(nil, nil, 403) == nil
     end
 
     test "outros 4xx e 5xx, sem os outros fatos, não se sabe" do
-      for status <- [400, 404, 410, 429, 500, 503, nil] do
+      for status <- [400, 403, 404, 410, 429, 500, 503, nil] do
         assert LoginWall.decide(%{http_status: status}) == nil, inspect(status)
       end
     end
   end
 
-  describe "campo de senha e redirecionamento" do
-    test "senha visível depois de ir para outro caminho é barreira" do
-      assert decide("https://exemplo.com/entrar?next=/painel", true)
-    end
+  describe "campo de senha, redirecionamento e termo de login" do
+    # {URL pedida, final_url, barreira?}, todos com campo de senha visível.
+    @cases [
+      # Home de banco com a caixa de internet banking: redireciona, mas não é tela de login.
+      {"https://banco.com.br/", "https://www.banco.com.br/pt/", false},
+      {"https://exemplo.com/", "https://exemplo.com/pt/", false},
+      {"https://exemplo.com/painel", "https://exemplo.com/entrar.html", true},
+      {"https://exemplo.gov.br/servicos", "https://sso.exemplo.gov.br/cas/", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/entrar?next=/painel", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/Account/LogOn", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/users/sign-in", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/signin", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/acesso-restrito", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/auth/realms/x", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/minha-conta", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/sess%C3%A3o", false},
+      {"https://exemplo.com/painel", "https://exemplo.com/sessao/nova", true},
+      {"https://exemplo.com/painel", "https://login.exemplo.com/", true},
+      {"https://exemplo.com/painel", "https://exemplo.com/session", true},
+      # Termo só como pedaço de palavra não conta.
+      {"https://exemplo.com/painel", "https://exemplo.com/contato", false},
+      {"https://exemplo.com/painel", "https://exemplo.com/blogin", false},
+      {"https://exemplo.com/painel", "https://autores.exemplo.com/", false},
+      # Na consulta não conta: só caminho e host.
+      {"https://exemplo.com/", "https://exemplo.com/pt/?login=1", false},
+      # Termo de login, mas sem redirecionamento.
+      {"https://exemplo.com/entrar", "https://exemplo.com/entrar/", false}
+    ]
 
-    test "senha visível depois de ir para outra origem é barreira" do
-      assert decide("https://sso.exemplo.com/login", true)
-      assert decide("https://exemplo.com:8443/painel", true)
+    for {requested, final, expected} <- @cases do
+      test "#{requested} → #{final}: #{expected}" do
+        assert LoginWall.decide(%{
+                 requested_url: unquote(requested),
+                 final_url: unquote(final),
+                 http_status: 200,
+                 password_field: true
+               }) == unquote(expected)
+      end
     end
 
     test "senha visível sem redirecionamento não é barreira (formulário no cabeçalho)" do
@@ -62,9 +95,9 @@ defmodule Rampa.Audits.LoginWallTest do
       end
     end
 
-    test "redirecionamento sem campo de senha não é barreira" do
-      refute decide("https://exemplo.com/pt-br/", false)
-      refute decide("https://outra.exemplo.com/", false)
+    test "redirecionamento para tela de login sem campo de senha não é barreira" do
+      refute decide("https://exemplo.com/entrar", false)
+      refute decide("https://sso.exemplo.com/", false)
     end
 
     test "raiz com e sem barra é o mesmo caminho" do
@@ -73,10 +106,6 @@ defmodule Rampa.Audits.LoginWallTest do
                final_url: "https://exemplo.com/",
                password_field: true
              })
-    end
-
-    test "o caminho diferencia maiúsculas" do
-      assert decide("https://exemplo.com/Painel", true)
     end
   end
 

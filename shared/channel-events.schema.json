@@ -80,7 +80,7 @@
         "http_status": {
           "description": "Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro (`http_error`). Ausente quando não há status. A `message` já o cita. Opcional, acrescentado sem subir a versão.",
           "type": "integer",
-          "minimum": 100,
+          "minimum": 400,
           "maximum": 599
         }
       }

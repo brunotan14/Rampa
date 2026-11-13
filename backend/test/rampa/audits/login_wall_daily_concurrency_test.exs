@@ -102,14 +102,14 @@ defmodule Rampa.Audits.LoginWallDailyConcurrencyTest do
 
     results =
       concurrently([
-        fn -> Audits.fail_task(page.id, :scan, :http_error, http_status: 403) end,
+        fn -> Audits.fail_task(page.id, :scan, :http_error, http_status: 401) end,
         fn -> Audits.fail_task(page.id, :scan, :timeout) end
       ])
 
     assert Enum.count(results, &match?({:ok, _}, &1)) == 1
     assert Enum.count(results, &match?({:error, :already_finished}, &1)) == 1
 
-    expected = if Repo.get!(Audit, page.audit_id).error_http_status == 403, do: 1, else: 0
+    expected = if Repo.get!(Audit, page.audit_id).error_http_status == 401, do: 1, else: 0
     assert delta(before) == %{audits_total: 1, audits_with_login_wall: expected}
   end
 end

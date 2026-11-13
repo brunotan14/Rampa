@@ -39,7 +39,7 @@ defmodule Rampa.Audits.Events do
           totals_by_severity: %{atom() => non_neg_integer()},
           needs_review_count: non_neg_integer(),
           error: String.t() | nil,
-          error_http_status: 100..599 | nil
+          error_http_status: 400..599 | nil
         }
 
   @type snapshot :: %{revision: non_neg_integer(), progress: progress()}

@@ -19,6 +19,7 @@ defmodule Rampa.Audits.Audit do
   import Ecto.Changeset
 
   alias Rampa.Audits.{Finding, Page}
+  alias Rampa.Scanner.Contract
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -86,7 +87,7 @@ defmodule Rampa.Audits.Audit do
       :finished_at
     ])
     |> validate_required([:status])
-    |> validate_number(:error_http_status, greater_than_or_equal_to: 100, less_than: 600)
+    |> validate_inclusion(:error_http_status, Contract.error_http_status_range())
     |> validate_number(:pages_found, greater_than_or_equal_to: 0)
     |> validate_number(:pages_scanned, greater_than_or_equal_to: 0)
     |> validate_number(:pages_failed, greater_than_or_equal_to: 0)

@@ -63,12 +63,21 @@ defmodule RampaWeb.ErrorMessagesTest do
                "O site limitou o acesso de robôs (HTTP 429). Tente mais tarde."
     end
 
-    test "401 e 403: o aviso de barreira de login (RF-RA028)" do
-      for status <- [401, 403] do
-        message = ErrorMessages.message(:http_error, http_status: status)
-        assert message =~ "Esta página pede login (HTTP #{status})."
-        assert message =~ "áreas logadas ainda não são cobertas"
-      end
+    test "401: o aviso de barreira de login (RF-RA028)" do
+      assert ErrorMessages.message(:http_error, http_status: 401) ==
+               "Esta página pede login (HTTP 401). O Rampa audita só o que um visitante " <>
+                 "anônimo vê; áreas logadas ainda não são cobertas."
+    end
+
+    # 403 num site público costuma ser bloqueio de robô: a mensagem não afirma que é login.
+    test "403: acesso recusado, login ou bloqueio de acessos automáticos" do
+      message = ErrorMessages.message(:http_error, http_status: 403)
+
+      assert message ==
+               "O site recusou o acesso (HTTP 403). Ele pode exigir login ou bloquear " <>
+                 "acessos automáticos."
+
+      refute message =~ "pede login"
     end
 
     test "outro status: a mensagem genérica com o status; sem status, sem número" do

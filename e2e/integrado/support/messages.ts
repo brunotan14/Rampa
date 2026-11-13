@@ -18,6 +18,6 @@ export const messages = {
   /** RF-RA029: `http_error` com 500, 502, 503 ou 504 (site instável). */
   unstable: (status: number) =>
     `O site respondeu com um erro (HTTP ${status}) e pode estar instável. Tente de novo em alguns minutos.`,
-  /** RF-RA028 e RF-RA029: `http_error` com 401 ou 403 (início do aviso de barreira de login). */
+  /** RF-RA028 e RF-RA029: `http_error` com 401 (início do aviso de barreira de login; o 403 tem mensagem própria). */
   loginWallStart: (status: number) => `Esta página pede login (HTTP ${status}).`,
 };

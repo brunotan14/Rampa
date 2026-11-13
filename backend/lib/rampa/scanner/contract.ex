@@ -69,6 +69,12 @@ defmodule Rampa.Scanner.Contract do
 
   @error_codes_by_name Map.new(@error_codes, &{Atom.to_string(&1), &1})
 
+  # Faixa do status HTTP de erro (`ScanError.http_status`, RF-RA029): a fonte única. O
+  # changeset da auditoria, o OpenAPI e o teste do schema do canal leem daqui.
+  @error_status_schema get_in(@schema, ["definitions", "ScanError", "properties", "http_status"])
+  @error_status_min Map.fetch!(@error_status_schema, "minimum")
+  @error_status_max Map.fetch!(@error_status_schema, "maximum")
+
   # Definições e a raiz da resposta de sucesso, para descartar os campos desconhecidos.
   @definitions @schema["definitions"]
   @response_schema @definitions["ScanResponse"]
@@ -103,6 +109,14 @@ defmodule Rampa.Scanner.Contract do
   @doc "Status HTTP de cada código de erro do scanner (`x-http-status` do schema)."
   @spec error_statuses() :: %{atom() => pos_integer()}
   def error_statuses, do: @error_statuses
+
+  @doc """
+  Faixa do status HTTP de erro (`ScanError.http_status` do schema, de 400 a 599): a mesma do
+  `http_status` do erro da página e da auditoria na API e no canal (RF-RA029). O status da
+  página no sucesso é outra faixa (100 a 599, `pages.http_status`).
+  """
+  @spec error_http_status_range() :: Range.t()
+  def error_http_status_range, do: @error_status_min..@error_status_max//1
 
   @doc "Caminho do schema usado na compilação."
   @spec path() :: String.t()
@@ -176,9 +190,10 @@ defmodule Rampa.Scanner.Contract do
 
   def scanner_error(_status, _body), do: :unknown
 
-  # Status do documento no `http_error`: só o campo próprio, inteiro de 400 a 599.
+  # Status do documento no `http_error`: só o campo próprio, inteiro dentro da faixa do
+  # schema. É a única validação do status de erro: daqui em diante ele já vale.
   defp document_status(:http_error, %{"http_status" => status})
-       when is_integer(status) and status in 400..599,
+       when is_integer(status) and status >= @error_status_min and status <= @error_status_max,
        do: status
 
   defp document_status(_code, _body), do: nil

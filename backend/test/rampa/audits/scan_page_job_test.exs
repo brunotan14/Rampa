@@ -1071,6 +1071,31 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert {:ok, %{login_wall_pages: 1}} = Rampa.Audits.get_audit_summary(page.audit_id)
     end
 
+    test "senha depois de redirecionamento para endereço sem termo de login não é barreira" do
+      page = page_fixture(%{url: "https://banco.com.br/"})
+      expect_scan(page, {:ok, with_login("https://www.banco.com.br/pt/", true)})
+
+      assert :ok = perform(page)
+
+      assert %Page{status: :done, login_wall: false} = reload(page)
+      assert {:ok, %{login_wall_pages: 0}} = Rampa.Audits.get_audit_summary(page.audit_id)
+    end
+
+    # 403 em site público costuma ser bloqueio de robô (WAF): não se sabe se é login.
+    @tag :capture_log
+    test "403 não marca barreira (não se sabe)" do
+      page = page_fixture()
+
+      expect_scan(
+        page,
+        {:error, %{code: :http_error, detail: "HTTP 403", http_status: 403}}
+      )
+
+      assert {:cancel, :http_error} = perform(page, attempt: 1)
+      assert %Page{status: :failed, login_wall: nil, http_status: 403} = reload(page)
+      assert {:ok, %{login_wall_pages: 0}} = Rampa.Audits.get_audit_summary(page.audit_id)
+    end
+
     @tag :capture_log
     test "404 não marca barreira (não se sabe)" do
       page = page_fixture()

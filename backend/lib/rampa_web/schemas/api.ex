@@ -88,6 +88,7 @@ defmodule RampaWeb.Schemas.AuditError do
   require OpenApiSpex
 
   alias OpenApiSpex.Schema
+  alias Rampa.Scanner.Contract
 
   OpenApiSpex.schema(
     %{
@@ -104,8 +105,8 @@ defmodule RampaWeb.Schemas.AuditError do
         message: %Schema{type: :string},
         http_status: %Schema{
           type: :integer,
-          minimum: 100,
-          maximum: 599,
+          minimum: Contract.error_http_status_range().first,
+          maximum: Contract.error_http_status_range().last,
           description:
             "Status HTTP da página que falhou (RF-RA029), quando o site respondeu com erro " <>
               "(`http_error`). Ausente quando não há status. A `message` já o cita."

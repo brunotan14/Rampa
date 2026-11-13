@@ -138,13 +138,14 @@ defmodule Rampa.Audits.ScanPageJob do
     case Task.yield(child, deadline_ms()) || Task.shutdown(child, :brutal_kill) do
       {:ok, :ok} -> :ok
       {:ok, {:error, reason}} when reason in @nothing_to_record -> {:cancel, reason}
-      {:ok, {:error, code, detail}} -> fail(task, job, code, detail)
-      {:ok, {:error, code, detail, http_status}} -> fail(task, job, code, detail, http_status)
+      {:ok, {:error, code, detail, opts}} -> fail(task, job, code, detail, opts)
       {:exit, reason} -> crashed(task, job, reason)
-      nil -> fail(task, job, :timeout, "a varredura passou de #{deadline_ms()} ms")
+      nil -> fail(task, job, :timeout, "a varredura passou de #{deadline_ms()} ms", [])
     end
   end
 
+  # Toda falha da varredura sai como `{:error, code, detail, opts}` (`opts`: `:http_status`
+  # no `http_error`), num formato só; `{:error, reason}` é só o "nada a gravar".
   defp scan_page(page) do
     with {:ok, url} <- guard(page),
          {:ok, result} <- scan(url),
@@ -167,7 +168,7 @@ defmodule Rampa.Audits.ScanPageJob do
           {:exit, other, []}
       end
 
-    case fail(task, job, :internal_error, Exception.format_banner(kind, error, stacktrace)) do
+    case fail(task, job, :internal_error, Exception.format_banner(kind, error, stacktrace), []) do
       {:cancel, _code} = cancel -> cancel
       {:error, _code} -> reraise_crash(kind, error, stacktrace)
     end
@@ -180,7 +181,7 @@ defmodule Rampa.Audits.ScanPageJob do
   defp guard(page) do
     case URLGuard.validate(page.url) do
       {:ok, url} -> {:ok, url}
-      {:error, reason} -> {:error, reason, "URL recusada antes da varredura"}
+      {:error, reason} -> {:error, reason, "URL recusada antes da varredura", []}
     end
   end
 
@@ -190,7 +191,7 @@ defmodule Rampa.Audits.ScanPageJob do
         {:ok, result}
 
       {:error, %{code: code, detail: detail} = error} ->
-        {:error, code, detail, error[:http_status]}
+        {:error, code, detail, http_status: error[:http_status]}
     end
   end
 
@@ -207,23 +208,26 @@ defmodule Rampa.Audits.ScanPageJob do
         {:error, reason}
 
       {:error, :invalid_scan_result} ->
-        {:error, :invalid_scan_result, "resultado sem axe"}
+        {:error, :invalid_scan_result, "resultado sem axe", []}
 
       {:error, {:invalid_finding, changeset}} ->
-        {:error, :invalid_scan_result, "achado recusado: #{inspect(changeset.errors)}"}
+        {:error, :invalid_scan_result, "achado recusado: #{inspect(changeset.errors)}", []}
 
       {:error, {:invalid_passed_rules, changeset}} ->
-        {:error, :invalid_scan_result, "regras aprovadas recusadas: #{inspect(changeset.errors)}"}
+        {:error, :invalid_scan_result, "regras aprovadas recusadas: #{inspect(changeset.errors)}",
+         []}
 
       {:error, reason} ->
-        {:error, :internal_error, "gravação do resultado falhou: #{inspect(reason)}"}
+        {:error, :internal_error, "gravação do resultado falhou: #{inspect(reason)}", []}
     end
   end
 
   # Caminho único de falha: definitiva ou na última tentativa, a tarefa fecha `failed` e o job
   # é cancelado. A última tentativa conta também as da tarefa (depois de um reenfileiramento
-  # pela reconciliação, o `attempt` do Oban recomeça do 1).
-  defp fail(task, job, code, detail, http_status \\ nil) do
+  # pela reconciliação, o `attempt` do Oban recomeça do 1). `opts`: `:http_status`, o status do
+  # documento no `http_error` (já validado pelo `Rampa.Scanner.Contract`).
+  defp fail(task, job, code, detail, opts) do
+    http_status = Keyword.get(opts, :http_status)
     definitive? = definitive?(code, http_status)
     last_attempt? = max(job.attempt, task.attempt) >= job.max_attempts
 

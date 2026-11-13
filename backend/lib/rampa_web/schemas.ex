@@ -74,9 +74,10 @@ defmodule RampaWeb.Schemas do
         type: :boolean,
         nullable: true,
         description:
-          "A página pede login (RF-RA028): status 401 ou 403, ou campo de senha visível " <>
-            "depois de um redirecionamento para outro caminho ou origem. `null` quando o " <>
-            "Rampa não sabe (fatos ausentes)."
+          "A página pede login (RF-RA028): status 401, ou campo de senha visível depois de " <>
+            "um redirecionamento para outro caminho ou origem com termo de login (`entrar`, " <>
+            "`login`, `sso`...) no caminho ou no host. `null` quando o Rampa não sabe (fatos " <>
+            "ausentes, ou status 403, que pode ser bloqueio de robô)."
       },
       scanned_at: %Schema{type: :string, format: :"date-time", nullable: true},
       counts_by_severity: RampaWeb.Schemas.SeverityTotals,

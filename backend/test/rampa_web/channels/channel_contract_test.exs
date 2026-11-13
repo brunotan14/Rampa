@@ -11,10 +11,12 @@ defmodule RampaWeb.ChannelContractTest do
 
   import RampaWeb.ChannelContract
 
-  alias Rampa.Audits.{Events, Finding}
+  alias Rampa.Audits.{Audit, Events, Finding}
   alias Rampa.Audits.Events.Event
   alias Rampa.ErrorCodes
+  alias Rampa.Scanner.Contract
   alias RampaWeb.AuditChannelJSON
+  alias RampaWeb.Schemas.AuditError
   alias StreamData, as: SD
 
   defp definition(name), do: schema()["definitions"][name]
@@ -31,6 +33,27 @@ defmodule RampaWeb.ChannelContractTest do
 
   test "x-events são exatamente os eventos que o backend publica" do
     assert Enum.sort(event_names()) == strings(Events.names())
+  end
+
+  # RF-RA029: a faixa do status de erro tem uma fonte só, o contrato do scanner.
+  test "a faixa do http_status de erro é a do contrato do scanner, no canal, na API e no banco" do
+    range = Contract.error_http_status_range()
+    assert range == 400..599
+
+    channel = definition("PageError")["properties"]["http_status"]
+    assert {channel["minimum"], channel["maximum"]} == {range.first, range.last}
+
+    api = AuditError.schema().properties.http_status
+    assert {api.minimum, api.maximum} == {range.first, range.last}
+
+    changeset = fn status ->
+      Audit.progress_changeset(%Audit{status: :running}, %{
+        error_http_status: status
+      })
+    end
+
+    for status <- [range.first, range.last], do: assert(changeset.(status).valid?)
+    for status <- [200, 399, 600], do: refute(changeset.(status).valid?)
   end
 
   test "os enum vêm das fontes únicas" do

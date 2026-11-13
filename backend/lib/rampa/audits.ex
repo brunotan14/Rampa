@@ -773,8 +773,9 @@ defmodule Rampa.Audits do
   deixa a página seguir até `done`.
 
   Na falha do `scan`, a página grava sempre, inclusive como `nil`, o status HTTP do documento
-  (`:http_status`, RF-RA029: só o do `http_error`, de 400 a 599) e a decisão de barreira de
-  login sobre ele (`pages.login_wall`, RF-RA028: `true` com 401 ou 403, senão `nil`). Assim
+  (`:http_status`, RF-RA029: o do `http_error`, já validado pelo `Rampa.Scanner.Contract`) e a
+  decisão de barreira de login sobre ele (`pages.login_wall`, RF-RA028: `true` com 401, senão
+  `nil`). Assim
   uma nova tentativa que falha por outro motivo (`timeout` depois de um 503) não deixa o
   status da tentativa anterior.
   """
@@ -794,11 +795,9 @@ defmodule Rampa.Audits do
   end
 
   # Fatos da página na falha do `scan` (sempre os dois campos); outra tarefa não mexe neles.
-  defp failure_facts(:scan, status) do
-    status = if is_integer(status) and status in 400..599, do: status
-
-    %{http_status: status, login_wall: LoginWall.decide(%{http_status: status})}
-  end
+  # O status já vem validado pelo `Rampa.Scanner.Contract` (a faixa de erro, 400 a 599).
+  defp failure_facts(:scan, status),
+    do: %{http_status: status, login_wall: LoginWall.decide(%{http_status: status})}
 
   defp failure_facts(_kind, _status), do: %{}
 
@@ -1178,9 +1177,9 @@ defmodule Rampa.Audits do
   # nenhuma. O erro da auditoria `failed` (com o status HTTP) é o da página que acabou de
   # falhar (`closing`, a página depois da transição), a última; sem ela, o da página falha
   # mais recente. Na passagem a estado final, conta a auditoria na medição do RF-RA028
-  # (`Rampa.Audits.LoginWallDaily`), na mesma transação. Não
-  # consulta o Oban. `pages` é a página de antes e de depois da transição (ou `{nil, nil}`),
-  # para os eventos. Devolve a auditoria gravada e os eventos.
+  # (`Rampa.Audits.LoginWallDaily`), na mesma transação e por último. Não consulta o Oban.
+  # `pages` é a página de antes e de depois da transição (ou `{nil, nil}`), para os eventos.
+  # Devolve a auditoria gravada e os eventos.
   defp settle(%Audit{} = audit, now, {_before, closing} = pages \\ {nil, nil}) do
     open_tasks =
       Repo.aggregate(
@@ -1220,10 +1219,13 @@ defmodule Rampa.Audits do
           %{status: :failed, error: error, error_http_status: http_status, finished_at: now}
       end
 
-    # Medição do RF-RA028: conta a auditoria uma vez, na passagem a estado final.
-    if final != %{}, do: LoginWallDaily.count_finished(audit.id, now)
-
-    commit_progress(audit, Map.merge(counters, final), pages)
+    with {:ok, updated, events} <- commit_progress(audit, Map.merge(counters, final), pages) do
+      # Medição do RF-RA028: conta a auditoria uma vez, na passagem a estado final. É o último
+      # passo da transação, depois da escrita e das leituras do snapshot: a trava da linha do
+      # dia (auditoria → página → tarefas → dia) fica presa o mínimo e é a última pedida.
+      if final != %{}, do: LoginWallDaily.count_finished(audit.id, now)
+      {:ok, updated, events}
+    end
   end
 
   # Ponto único de escrita do andamento da auditoria (sempre com ela travada, e só por aqui).

@@ -38,9 +38,9 @@ export interface ServerOptions {
   navigationTimeoutMs?: number;
   // Coleta do axe; substituível nos testes.
   analyze?: (page: Page) => Promise<AxeFacts>;
-  // Fatos de barreira de login (RF-RA028); substituível nos testes. `undefined` deixa o
-  // campo fora da resposta.
-  loginWall?: (page: Page) => Promise<LoginWallFacts | undefined>;
+  // Fatos de barreira de login (RF-RA028); substituível nos testes. Se rejeitar, o campo fica
+  // fora da resposta (ver `collectLoginWall`).
+  loginWall?: (page: Page) => Promise<LoginWallFacts>;
   // Proteção contra SSRF. Em produção só a `allowlist` vem de fora (`SSRF_ALLOWLIST`); os
   // testes trocam o DNS e acrescentam às portas a do servidor local.
   ssrf?: Partial<SsrfPolicy>;
@@ -63,6 +63,20 @@ const refused = (reason: BlockReason, detail: string) =>
   fail(reason === "blocked_address" ? "blocked_address" : "invalid_url", detail);
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+// A regra "o fato de login nunca derruba a varredura" (RF-RA028) vive só aqui: qualquer falha
+// da checagem (página navegou, contexto destruído, implementação injetada que rejeita) deixa
+// `login_wall` fora da resposta, e o backend grava "não sabido" (`NULL`).
+async function collectLoginWall(
+  check: (page: Page) => Promise<LoginWallFacts>,
+  page: Page,
+): Promise<LoginWallFacts | undefined> {
+  try {
+    return await check(page);
+  } catch {
+    return undefined;
+  }
+}
 
 export function buildServer(browser: Browser, options: ServerOptions = {}): FastifyInstance {
   const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS;
@@ -129,15 +143,16 @@ export function buildServer(browser: Browser, options: ServerOptions = {}): Fast
     const status = doc.status;
     if (status !== null && status >= 400) return fail("http_error", `HTTP ${status}`, status);
 
+    // O fato de login é lido junto com a `final_url` e antes do axe: o axe roda scripts e pode
+    // mexer no DOM, e o par (`final_url`, campo de senha) tem que descrever o mesmo documento.
+    const login = await collectLoginWall(loginWall, page);
+
     let facts: { title: string; axe: AxeFacts };
     try {
       facts = { title: await page.title(), axe: await analyze(page) };
     } catch (error) {
       return verdict() ?? fail("analysis_failed", message(error));
     }
-
-    // Num passo à parte, que nunca falha a varredura: sem o fato, o campo fica de fora.
-    const login = await loginWall(page).catch(() => undefined);
 
     const late = verdict();
     if (late) return late;
