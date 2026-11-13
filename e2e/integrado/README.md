@@ -51,7 +51,9 @@ Também em `support/`: `browser.ts` (`openBrowserPage`: contexto do navegador no
 app, com o IP simulado e sem movimento), `messages.ts` (os textos de `error.message` e, em
 `screenTexts`, os da tela que os critérios afirmam),
 `time.ts` (`saoPauloTime`, o `HH:MM` das mensagens) e `evidence.ts`. De `../tests/a11y.ts` (o único
-arquivo de `tests/` que vai para a imagem do runner): `axeViolations`, `horizontalOverflow` e `TEXT_SPACING`. Todo caso leva a anotação
+arquivo de `tests/` que vai para a imagem do runner): `axeViolations`, `A11Y_MEDIA` com `emulateOnly`,
+`revealAll` e `reflowOverflow` (320px, zoom de 200% e espaçamento de texto, cada um numa carga nova), as
+mesmas checagens do RNF-RA001 que o `make e2e` usa. Todo caso leva a anotação
 `requisito` com o texto do critério (`requirement(...)`) e anexa o que mediu
 (`attachObserved`); o `afterEach` com `requireObserved` reprova o caso verde sem anexo.
 
@@ -67,7 +69,7 @@ arquivo de `tests/` que vai para a imagem do runner): `axeViolations`, `horizont
 | `rf-ra003-varredura-axe.spec.ts` | RF-RA003 CA2 e `incomplete` com `needs_review = true` |
 | `rf-ra028-barreira-login.spec.ts` | RF-RA028 CA1 a CA3 pela API (`login_wall` da página e `login_wall_pages` do resumo) e pela tela (aviso com ícone e texto no resumo e na página, a mensagem do 401 na tela de falha, nenhum aviso na `limpa.html`, com axe), a senha sem redirecionamento, e o RF-RA017 CA1 e CA2 (aba "Aprovados" da `limpa.html`); o CA4 (medição) está nos testes do backend |
 | `rf-ra029-falha-acesso.spec.ts` | RF-RA029 CA1 a CA4 pela API (mensagem e `http_status` do 404, nova tentativa no 503, 503 e depois 200, nova auditoria da mesma URL) e CA1, CA4 e CA5 pela tela: mensagem e "Auditar de novo", a nova auditoria com a antiga intacta no link dela, e o 429 com o horário de liberação no fuso do navegador. O 403 pela API (definitivo, um pedido só, `login_wall` nulo) e pela tela (mensagem e "Auditar de novo", sem aviso de login) |
-| `rf-ra005-007-relatorio.spec.ts` | RF-RA005, RF-RA006, RF-RA007 e RF-RA017 pelo navegador com a `relatorio-variado.html`, com a API como oráculo: totais confirmados × para confirmar, top 5 e aviso fixo no resumo; filtro de severidade na URL da lista e no link da página; origem e critério WCAG na página; aba "Aprovados"; severidade, seletor e trecho de HTML de cada detalhe. RNF-RA001 nas cinco telas: axe nos temas e mídias do `make e2e`, 320px, zoom de 200% e espaçamento de texto. Com 9 achados não há "Mostrar mais problemas" (a API pagina de 50 em 50) |
+| `rf-ra005-007-relatorio.spec.ts` | RF-RA005, RF-RA006, RF-RA007 e RF-RA017 pelo navegador com a `relatorio-variado.html`, com a API como oráculo: totais confirmados × para confirmar, top 5 e aviso fixo no resumo; filtro de severidade na URL da lista e no link da página; origem e critério WCAG na página; aba "Aprovados"; severidade, seletor e trecho de HTML de cada detalhe. RNF-RA001 nas cinco telas: axe nos temas e mídias do `make e2e`, 320px, zoom de 200% e espaçamento de texto. Uma auditoria só para o arquivo (`serial`, no `beforeAll`). Com 9 achados não há "Mostrar mais problemas" (a API pagina de 50 em 50) |
 | `frontend-servido.spec.ts` | PRD §7 e RNF-RA008: o app serve o build do React (fallback da SPA no link direto) com a CSP, sem violação no navegador do início ao fim da auditoria |
 
 O RF-RA002 CA5 (produção não sobe com a allowlist) e o isolamento de rede do scanner são

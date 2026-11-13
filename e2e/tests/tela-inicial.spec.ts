@@ -1,13 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { axeViolations } from "./a11y.js";
-import {
-  AUDIT_ID,
-  PhoenixMock,
-  TEXT_SPACING,
-  horizontalOverflow,
-  mockAuditApi,
-  progress,
-} from "./simulado.js";
+import { axeViolations, expectNoHorizontalScroll, reflowOverflow } from "./a11y.js";
+import { AUDIT_ID, PhoenixMock, mockAuditApi, progress } from "./simulado.js";
 
 // Tela inicial (TelaInicial, RF-RA001) com a API simulada: formulário, erros ligados ao campo
 // e a ida para a tela de progresso. O axe roda também com a mensagem de erro na tela.
@@ -101,17 +94,15 @@ test.describe("Tela inicial: formulário de auditoria", () => {
   test("320px, zoom de 200% e espaçamento de texto não criam rolagem horizontal nem escondem o formulário", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await page.goto("/");
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     // No mobile, o botão Auditar tem pelo menos 44px de altura.
     const box = await page.getByRole("button", { name: "Auditar" }).boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
 
-    await page.setViewportSize({ width: 640, height: 480 });
-    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-
-    await page.addStyleTag({ content: TEXT_SPACING });
-    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const reflow = await reflowOverflow(page, async () => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    });
+    expectNoHorizontalScroll(reflow);
     await expect(page.getByRole("textbox", { name: "Endereço do site" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Auditar" })).toBeVisible();
   });

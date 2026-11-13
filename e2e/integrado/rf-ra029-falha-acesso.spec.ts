@@ -137,7 +137,8 @@ test.describe("RF-RA029: falha de acesso à página", () => {
           error: { code: "http_error", http_status: 403, message: messages.forbidden(403) },
         }),
       ]);
-      // Com a auditoria já encerrada, um pedido só: o 403 não teve nova tentativa (o 503 tem duas).
+      // Hoje cada tentativa da varredura pede o documento uma vez: um pedido com a auditoria já
+      // encerrada é uma tentativa só. O caso do 503 (CA2) prova que a nova tentativa faria 2.
       expect(hits).toBe(1);
     },
   );
@@ -196,24 +197,26 @@ test.describe("RF-RA029: falha de acesso à página", () => {
       const { id } = await createAudit(request, fixtureUrl(`proibido/${randomUUID()}`), { clientIp });
       const audit = await waitForAuditEnd(request, id);
       const { context, page } = await openBrowserPage(browser, clientIp);
+      try {
+        await page.goto(`/auditorias/${id}`);
+        await expect(page.getByRole("heading", { level: 1, name: "A auditoria de fixtures parou" })).toBeVisible();
+        const message = page.getByText(messages.forbidden(403), { exact: false }).first();
+        const button = page.getByRole("button", { name: screenTexts.auditAgain });
+        const observed = {
+          visible: await message.isVisible(),
+          button: await button.isVisible(),
+          loginWallNotices: await page.getByText(/pede login/).count(),
+          axe: await axeViolations(page),
+        };
+        await attachObserved(testInfo, { audit, ...observed });
 
-      await page.goto(`/auditorias/${id}`);
-      await expect(page.getByRole("heading", { level: 1, name: "A auditoria de fixtures parou" })).toBeVisible();
-      const message = page.getByText(messages.forbidden(403), { exact: false }).first();
-      const button = page.getByRole("button", { name: screenTexts.auditAgain });
-      const observed = {
-        visible: await message.isVisible(),
-        button: await button.isVisible(),
-        loginWallNotices: await page.getByText(/pede login/).count(),
-        axe: await axeViolations(page),
-      };
-      await attachObserved(testInfo, { audit, ...observed });
-
-      expect(observed.visible).toBe(true);
-      expect(observed.button).toBe(true);
-      expect(observed.loginWallNotices).toBe(0);
-      expect(observed.axe).toEqual([]);
-      await context.close();
+        expect(observed.visible).toBe(true);
+        expect(observed.button).toBe(true);
+        expect(observed.loginWallNotices).toBe(0);
+        expect(observed.axe).toEqual([]);
+      } finally {
+        await context.close();
+      }
     },
   );
 
