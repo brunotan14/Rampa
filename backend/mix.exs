@@ -52,7 +52,7 @@ defmodule Rampa.MixProject do
       {:bandit, "~> 1.5"},
       {:oban, "~> 2.24"},
       {:req, "~> 0.7.5"},
-      {:idna, "~> 7.1"},
+      {:idna, "~> 8.0"},
       {:tz, "~> 0.28"},
       {:open_api_spex, "~> 3.22"},
       {:ex_json_schema, "~> 0.11.5"},
