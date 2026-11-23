@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FakeSocket } from "../../test/fakeSocket";
 import { AUDIT_ID, auditSummary } from "../../test/fixtures";
@@ -164,6 +164,54 @@ describe("HomePage", () => {
     );
     expect(posts()).toHaveLength(2);
     expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+});
+
+describe("HomePage: auditorias recentes (RF-RA018)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("CA1.1: a seção fica depois do exemplo de relatório, com h2, aviso e o estado vazio sem nada guardado", async () => {
+    const { container } = renderRoute("/");
+    const h2s = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(h2s).toEqual(["Como funciona", "Um relatório que todo mundo entende", "Auditorias recentes"]);
+    const section = screen.getByRole("region", { name: "Auditorias recentes" });
+    expect(section).toHaveTextContent("Esta lista fica só neste navegador. Nada dela vai para o servidor.");
+    expect(within(section).getByRole("heading", { level: 3, name: "Nenhuma auditoria ainda" })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("CA1.1: a auditoria criada aparece na lista ao voltar à tela inicial", async () => {
+    fetchMock.mockImplementation(async (_input, init) =>
+      init?.method === "POST"
+        ? jsonResponse({ id: AUDIT_ID }, { status: 202 })
+        : jsonResponse(auditSummary({ status: "queued", start_url: "https://exemplo.com.br/" })),
+    );
+    const { router, container } = renderRoute("/", { socket: new FakeSocket() });
+    await submit("exemplo.com.br");
+    await screen.findByRole("heading", { level: 1, name: "Auditando exemplo.com.br" });
+    await act(() => router.navigate("/"));
+    const section = await screen.findByRole("region", { name: "Auditorias recentes" });
+    expect(within(section).getByRole("link", { name: /^exemplo\.com\.br, Criada .*, Na fila$/ })).toHaveAttribute(
+      "href",
+      `/auditorias/${AUDIT_ID}`,
+    );
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("CA4.2: sem armazenamento local, a auditoria é criada normalmente, sem mensagem de erro", async () => {
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("bloqueado", "SecurityError");
+    });
+    fetchMock.mockImplementation(async (_input, init) =>
+      init?.method === "POST" ? jsonResponse({ id: AUDIT_ID }, { status: 202 }) : jsonResponse(auditSummary()),
+    );
+    const { router } = renderRoute("/", { socket: new FakeSocket() });
+    await submit("exemplo.com.br");
+    expect(await screen.findByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toHaveFocus();
+    expect(router.state.location.pathname).toBe(`/auditorias/${AUDIT_ID}`);
+    expect(posts()).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

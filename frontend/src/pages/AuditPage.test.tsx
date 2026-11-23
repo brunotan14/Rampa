@@ -7,6 +7,7 @@ import { BATCH_MS, SILENCE_MS } from "../api/channel";
 import { queryKeys } from "../api/queryKeys";
 import { PAGES_MAX_TRIES, PAGES_REFRESH_MS } from "./AuditPage";
 import type { AuditSummary, ChannelProgress, PageSummary } from "../api/types";
+import { readRecent } from "../recentAudits";
 
 const fetchMock = vi.fn<typeof fetch>();
 const PATH = `/auditorias/${AUDIT_ID}`;
@@ -478,3 +479,60 @@ function pageOf(id: string): PageSummary {
 }
 
 const pagesGets = () => fetchMock.mock.calls.filter(([url]) => String(url) === PAGES_URL).length;
+
+describe("AuditPage: auditorias recentes deste navegador (RF-RA018)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("CA1.2: abrir o link de uma auditoria grava na lista, com o endereço, a criação e o status", async () => {
+    expect(readRecent()).toEqual([]);
+    await open();
+    expect(readRecent()).toEqual([
+      {
+        id: AUDIT_ID,
+        startUrl: "https://exemplo.com.br/",
+        createdAt: "2026-11-12T10:00:00Z",
+        status: "running",
+        lastOpenedAt: "2026-11-12T14:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("CA1.2: não grava com 'não encontrada' (GET 404 e join recusado)", async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ error: { code: "audit_not_found", message: "Auditoria não encontrada." } }, { status: 404 }),
+    );
+    const { channel } = await open();
+    act(() => channel().refuse({ error: { code: "audit_not_found", message: "Auditoria não encontrada." } }));
+    await advance(0);
+    expect(screen.getByRole("heading", { level: 1, name: "Auditoria não encontrada" })).toBeInTheDocument();
+    expect(readRecent()).toEqual([]);
+  });
+
+  it("CA1.2: não grava com o resumo carregado se o canal disser 'não encontrada' antes", async () => {
+    let release: (r: Response) => void = () => undefined;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (release = resolve)));
+    const { channel } = await open();
+    act(() => channel().refuse({ error: { code: "audit_not_found", message: "Auditoria não encontrada." } }));
+    release(jsonResponse(summary));
+    await advance(0);
+    expect(readRecent()).toEqual([]);
+  });
+
+  it("CA1.3: o status ao vivo do canal atualiza o item, sem renovar lastOpenedAt", async () => {
+    const { channel } = await open();
+    const opened = readRecent()[0]!.lastOpenedAt;
+    await advance(60_000);
+    act(() => channel().reply(at(2, { status: "completed", pages_scanned: 5 })));
+    await advance(BATCH_MS);
+    expect(readRecent()).toEqual([expect.objectContaining({ id: AUDIT_ID, status: "completed", lastOpenedAt: opened })]);
+  });
+
+  it("CA4.2: sem armazenamento local, a tela da auditoria funciona normalmente", async () => {
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("bloqueado", "SecurityError");
+    });
+    await open();
+    expect(screen.getByRole("heading", { level: 1, name: "Auditando exemplo.com.br" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});

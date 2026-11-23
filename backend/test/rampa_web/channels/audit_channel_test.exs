@@ -166,6 +166,21 @@ defmodule RampaWeb.AuditChannelTest do
       # O `Registry` apaga a entrada do processo que saiu de forma assíncrona.
       assert eventually(fn -> match?({:ok, _, _}, join_audit(List.last(audits).id, socket)) end)
     end
+
+    test "CA2.3 auditoria apagada pela retenção: a mesma recusa de uma inexistente" do
+      audit = audit_fixture(%{status: :completed, expires_at: ~U[2000-01-01 00:00:00Z]})
+      page_fixture(%{audit: audit, status: :done})
+      assert {:ok, _reply, _socket} = join_audit(audit.id, socket(AuditSocket))
+
+      assert %{deleted: deleted} = Audits.purge_expired(now: ~U[2000-06-01 00:00:00Z])
+      assert deleted >= 1
+
+      assert {:error, purged} = join_audit(audit.id)
+      assert {:error, missing} = join_audit(Ecto.UUID.generate())
+
+      assert assert_contract(:join_error, purged) == assert_contract(:join_error, missing)
+      assert %{"error" => %{"code" => "audit_not_found"}} = assert_contract(:join_error, purged)
+    end
   end
 
   describe "eventos" do

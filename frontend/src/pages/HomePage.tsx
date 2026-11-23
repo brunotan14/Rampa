@@ -2,10 +2,12 @@
 // como funciona e o aviso de que a verificação automática não garante conformidade.
 // "Um relatório que todo mundo entende" mostra um exemplo com dados fictícios (a pontuação real
 // é do M3), sem o link para um relatório de exemplo, que ainda não existe.
-// Fora no M2: auditorias recentes (RF-RA018, `feat/recentes-e-retencao`), Entrar e Planos (pós-MVP).
+// "Auditorias recentes" (RF-RA018) lista as auditorias deste navegador, sem conta.
+// Fora no M2: Entrar e Planos (pós-MVP).
 import { Icon } from "../components/Icon";
 import { Mosaic } from "../components/Mosaic";
 import { PageTitle } from "../components/PageTitle";
+import { RecentAudits } from "../components/RecentAudits";
 import { ScoreIndicator } from "../components/ScoreIndicator";
 import { SeverityBar, type SeverityBarItem } from "../components/SeverityBar";
 import { UrlAuditField } from "../components/UrlAuditField";
@@ -82,6 +84,8 @@ export function HomePage() {
             </div>
           </div>
         </section>
+
+        <RecentAudits />
         <p className="rp-caption rp-disclaimer">{t.home.disclaimer}</p>
       </div>
     </>

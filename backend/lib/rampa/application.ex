@@ -15,8 +15,10 @@ defmodule Rampa.Application do
 
     # RF-RA002: em produção, `SSRF_ALLOWLIST` preenchida impede a subida; sem
     # `IP_HASH_SECRET` ou com `TRUSTED_PROXIES` inválida, o app não sobe em nenhum ambiente.
-    # A release `:e2e` sem o marcador `RAMPA_E2E=1` segue as regras de produção.
+    # A release `:e2e` sem o marcador `RAMPA_E2E=1` segue as regras de produção. RF-RA014:
+    # `:retention_days` inválido também impede a subida.
     with :ok <- Allowlist.check_startup(env, Allowlist.hosts()),
+         :ok <- Rampa.Audits.check_retention_startup(),
          :ok <- IPHash.check_startup(env, IPHash.secret()),
          :ok <- TrustedProxies.load(env, Application.get_env(:rampa, :trusted_proxies)) do
       start_children()

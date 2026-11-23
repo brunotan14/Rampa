@@ -565,6 +565,44 @@ defmodule Rampa.Audits.ScanPageJobTest do
       assert %Page{status: :failed, error: "internal_error"} = reload(page)
     end
 
+    test "CA2.3 auditoria apagada pela retenção entre start_task e record_scan_result cancela" do
+      page = page_fixture()
+      later = DateTime.add(DateTime.utc_now(:second), 91, :day)
+
+      expect(ClientMock, :scan, fn _url ->
+        assert %{deleted: deleted} = Rampa.Audits.purge_expired(now: later)
+        assert deleted >= 1
+        {:ok, scanner_response("img-sem-alt")}
+      end)
+
+      assert {:cancel, :page_not_found} = perform(page, attempt: 1)
+
+      refute Repo.get(Audit, page.audit_id)
+      refute Repo.get(Page, page.id)
+      assert findings(page) == []
+    end
+
+    test "FR-014 auditoria apagada pela retenção durante a varredura que falha na última tentativa" do
+      page = page_fixture()
+      later = DateTime.add(DateTime.utc_now(:second), 91, :day)
+
+      expect(ClientMock, :scan, fn _url ->
+        Rampa.Audits.purge_expired(now: later)
+        {:error, %{code: :timeout, detail: "detalhe"}}
+      end)
+
+      # Não há tarefa a fechar: cancela sem recriar nada e sem erro no log.
+      log =
+        ExUnit.CaptureLog.capture_log([level: :error], fn ->
+          assert {:cancel, :timeout} = perform(page, attempt: 2)
+        end)
+
+      refute log =~ "não consegui fechar a tarefa"
+
+      refute Repo.get(Audit, page.audit_id)
+      refute Repo.get(Page, page.id)
+    end
+
     @tag :capture_log
     test "tarefa scan apagada durante a varredura cancela sem marcar falha" do
       page = page_fixture()

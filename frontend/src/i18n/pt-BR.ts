@@ -1,7 +1,7 @@
 // Textos da interface em português do Brasil, centralizados (CLAUDE.md, Idioma).
 // Tom, microcopy e glossário: design/04-conteudo.md. Nenhum texto afirma que um site "está
 // conforme" ou "é acessível" (test/i18n.test.ts confere).
-import type { AuditError, KnownErrorCode } from "../api/types";
+import type { AuditError, AuditStatus, KnownErrorCode } from "../api/types";
 
 /** Plural simples do português: 1 → singular; 0 e 2+ → plural. Números no formato pt-BR. */
 export function plural(count: number, one: string, many: string): string {
@@ -133,7 +133,33 @@ export const ptBR = {
       counts: { critico: 5, serio: 8, moderado: 11, menor: 12, revisao: 11 },
     },
     disclaimer,
+    // RF-RA018: lista só deste navegador, sem conta (design/03-padroes-de-tela.md §1; o PRD tira
+    // o "Suas" e o "se logado" do design system, que são pós-MVP).
+    recent: {
+      title: "Auditorias recentes",
+      notice: "Esta lista fica só neste navegador. Nada dela vai para o servidor.",
+      listLabel: "Auditorias recentes deste navegador",
+      clear: "Limpar lista",
+      // Anúncio curto, no presente (04-conteudo.md, "Anúncios para leitor de tela").
+      cleared: "Lista apagada.",
+      created: (when: string) => `Criada ${when}`,
+      /** Separador lido entre as partes do link (endereço, data, status). */
+      separator: ",",
+      stale: "Não foi possível atualizar o status agora.",
+      // 04-conteudo.md, "Estados vazios": diga o que vai aparecer aqui e como começar.
+      emptyTitle: "Nenhuma auditoria ainda",
+      emptyText:
+        "Cole o endereço de um site para descobrir o que impede pessoas de usá-lo. As auditorias que você criar ou abrir neste navegador aparecem aqui.",
+    },
   },
+  // Status da auditoria (contrato: `AuditSummary.status`). Fala do andamento, nunca do resultado.
+  auditStatus: {
+    queued: "Na fila",
+    running: "Em andamento",
+    completed: "Concluída",
+    failed: "Interrompida",
+    cancelled: "Cancelada",
+  } satisfies Record<AuditStatus, string>,
   // design/components/ScoreIndicator (PRD §10.6: sempre com este rótulo; nunca "nota de
   // acessibilidade" nem "conformidade").
   score: {
