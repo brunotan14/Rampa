@@ -41,6 +41,12 @@ design/
 scanner/dist/
 docs
 
-# spec-kit (teste local, fora do repositório público)
+# spec-kit e guias de SDD (locais, fora do repositório público)
 .specify/
 specs/
+GuiaSDD.md
+
+# Configuração local de outros agentes
+AGENTS.md
+.agents/
+.codex/
