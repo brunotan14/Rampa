@@ -38,13 +38,21 @@ config :phoenix, :json_library, Jason
 # Reconciliação de trabalho preso (ciclo de vida em Rampa.Audits.Rules):
 #   * Lifeline: devolve à fila o job que ficou `executing` depois de o nó cair. `rescue_after`
 #     acima do `timeout` do ScanPageJob (3 min), para nunca resgatar um job vivo;
-#   * Cron: `ReconcileTasksJob` a cada 5 min, com os critérios de `:task_reconciliation`.
+#   * Cron: `ReconcileTasksJob` a cada 5 min, com os critérios de `:task_reconciliation`, e
+#     `PurgeExpiredJob` uma vez por dia (timeout de 4 min, também abaixo do `rescue_after`).
 config :rampa, Oban,
   engine: Oban.Engines.Basic,
   repo: Rampa.Repo,
   queues: [scan: 2, ai: 5, maintenance: 1],
   lifeline: [rescue_after: {5, :minutes}],
-  cron: [crontab: [{"*/5 * * * *", Rampa.Audits.ReconcileTasksJob}]]
+  cron: [
+    crontab: [
+      {"*/5 * * * *", Rampa.Audits.ReconcileTasksJob},
+      # Retenção (RF-RA014): uma vez por dia, 03:17 em São Paulo, fora do pico e longe do
+      # minuto cheio da reconciliação.
+      {"17 6 * * *", Rampa.Audits.PurgeExpiredJob}
+    ]
+  ]
 
 # Critérios da reconciliação (`Rampa.Audits.reconcile_stale_tasks/1`), em segundos. Só entra
 # tarefa sem job vivo no Oban. `running`: timeout do job + `running_grace` (tipos com job) ou
@@ -56,6 +64,12 @@ config :rampa, :task_reconciliation,
   stale_pending_after: 600,
   max_requeues: 3,
   batch_size: 500
+
+# Retenção (RF-RA014): dias entre a criação da auditoria e a limpeza que a apaga com páginas,
+# tarefas e achados. Fonte única da criação (`expires_at`) e do `PurgeExpiredJob`, lida por
+# `Rampa.Audits.retention_days/0`. Inteiro de pelo menos 2: as janelas de 24 h (idempotência e
+# limites) contam auditorias, que não podem sumir antes delas. Valor inválido impede a subida.
+config :rampa, :retention_days, 90
 
 # Prazo de uma varredura dentro do `ScanPageJob`, em ms: DNS (5 s) + cliente do scanner
 # (100 s) + gravação, com folga, e abaixo do `timeout` do job (3 min), que fica de reserva.

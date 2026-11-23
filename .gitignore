@@ -40,3 +40,7 @@ design/
 # Build do scanner
 scanner/dist/
 docs
+
+# spec-kit (teste local, fora do repositório público)
+.specify/
+specs/

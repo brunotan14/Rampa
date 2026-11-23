@@ -95,6 +95,11 @@ defmodule Rampa.Audits do
   @findings_default_limit 50
   @findings_max_limit 100
 
+  # Limpeza da retenção (`purge_expired/1`): lotes pequenos, para as transições que esperam a
+  # trava de uma auditoria vencida esperarem pouco, e teto por execução.
+  @purge_batch_size 20
+  @purge_max_batches 50
+
   # Estados do Oban em que o job ainda vai rodar ou está rodando: os mesmos da chave única.
   @live_job_states Enum.map(Oban.Job.unique_states(:incomplete), &Atom.to_string/1)
 
@@ -235,10 +240,15 @@ defmodule Rampa.Audits do
       idempotency_key: request.key
     }
 
+    # `expires_at` com o mesmo relógio da criação (RF-RA014), fora do `cast`: não vem de fora.
     changeset =
       attrs
       |> Audit.create_changeset()
-      |> Ecto.Changeset.change(inserted_at: now, updated_at: now)
+      |> Ecto.Changeset.change(
+        inserted_at: now,
+        updated_at: now,
+        expires_at: DateTime.add(now, retention_days(), :day)
+      )
 
     with :ok <- Limits.check_hourly(request.ip_hash, limits.per_ip_per_hour, now),
          :ok <- Limits.check_daily(limits.daily, now),
@@ -288,6 +298,134 @@ defmodule Rampa.Audits do
 
   defp idempotency_query(ip_hash, key) do
     from a in Audit, where: a.requester_ip_hash == ^ip_hash and a.idempotency_key == ^key
+  end
+
+  ## Retenção (RF-RA014)
+
+  @doc """
+  Dias entre a criação de uma auditoria e a limpeza que a apaga (`config :rampa,
+  :retention_days`). Usado na criação, que fixa o `expires_at` da auditoria, e em
+  `purge_expired/1` só para as linhas antigas com `expires_at` nulo. Mudar o valor vale para
+  as auditorias novas; as que já têm `expires_at` mantêm o prazo da criação. Levanta
+  `ArgumentError` se o valor não for um inteiro de pelo menos 2 (as janelas de 24 h da
+  idempotência e dos limites contam auditorias); `check_retention_startup/0` impede a subida
+  do app nesse caso.
+  """
+  @spec retention_days() :: pos_integer()
+  def retention_days do
+    case validate_retention_days(Application.get_env(:rampa, :retention_days)) do
+      {:ok, days} -> days
+      {:error, message} -> raise ArgumentError, message
+    end
+  end
+
+  @doc """
+  Confere `config :rampa, :retention_days` na subida (`Rampa.Application.start/2`): valor
+  inválido registra o motivo no log e devolve `{:error, motivo}`.
+  """
+  @spec check_retention_startup() :: :ok | {:error, String.t()}
+  def check_retention_startup do
+    case validate_retention_days(Application.get_env(:rampa, :retention_days)) do
+      {:ok, _days} ->
+        :ok
+
+      {:error, message} = error ->
+        Logger.error(message)
+        error
+    end
+  end
+
+  defp validate_retention_days(days) when is_integer(days) and days >= 2, do: {:ok, days}
+
+  defp validate_retention_days(other) do
+    {:error,
+     "config :rampa, :retention_days precisa ser um inteiro de pelo menos 2 (dias); " <>
+       "veio #{inspect(other)}"}
+  end
+
+  @doc """
+  Apaga as auditorias vencidas, com páginas, tarefas e achados (`ON DELETE CASCADE`), em
+  lotes (RF-RA014; agendada pelo `Rampa.Audits.PurgeExpiredJob`). A medição diária de login
+  (`Rampa.Audits.LoginWallDaily`) não referencia auditorias e não é tocada.
+
+  Vencida: `expires_at < now` ou, sem `expires_at` (criada antes de ele ser preenchido),
+  `inserted_at < now - retention_days/0`. Auditoria ainda aberta também é apagada.
+
+  Cada lote é uma transação: trava até `:batch_size` auditorias vencidas com
+  `FOR UPDATE SKIP LOCKED` e as apaga. Só a auditoria é travada pela limpeza; páginas e
+  tarefas são travadas depois, pelo cascade, na mesma ordem das transições (auditoria →
+  página → tarefa). Auditoria travada por uma transição fica para a próxima execução; a
+  transição que esperava a trava da limpeza encontra a auditoria apagada e recebe
+  `:audit_not_found` (ou `:page_not_found`), como se ela nunca tivesse existido. Interromper no
+  meio deixa os lotes já confirmados apagados por inteiro e os outros intactos: não sobra
+  página nem achado órfão. Rodar de novo não apaga nada que não venceu.
+
+  Opções:
+
+    * `:now`: o instante de referência (padrão: agora; testes);
+    * `:batch_size`: auditorias por lote (padrão 20);
+    * `:max_batches`: teto de lotes por execução (padrão 50). O que sobrar sai na próxima.
+
+  Devolve quantas auditorias foram apagadas, em quantos lotes, e se o teto deixou vencidas
+  para trás (`more?`).
+  """
+  @spec purge_expired(keyword()) :: %{
+          deleted: non_neg_integer(),
+          batches: non_neg_integer(),
+          more?: boolean()
+        }
+  def purge_expired(opts \\ []) do
+    now = opts |> Keyword.get_lazy(:now, &now/0) |> DateTime.truncate(:second)
+    batch_size = positive_option(opts, :batch_size, @purge_batch_size)
+    max_batches = positive_option(opts, :max_batches, @purge_max_batches)
+    expired = expired_audits_query(now, retention_days())
+
+    purge_batches(expired, batch_size, max_batches, %{deleted: 0, batches: 0, more?: false})
+  end
+
+  defp purge_batches(expired, _batch_size, max_batches, %{batches: max_batches} = acc) do
+    %{acc | more?: Repo.exists?(expired)}
+  end
+
+  defp purge_batches(expired, batch_size, max_batches, acc) do
+    {:ok, deleted} =
+      Repo.transact(fn ->
+        ids =
+          Repo.all(
+            from a in expired,
+              select: a.id,
+              limit: ^batch_size,
+              lock: "FOR UPDATE SKIP LOCKED"
+          )
+
+        {count, _} = Repo.delete_all(from a in Audit, where: a.id in ^ids)
+        {:ok, count}
+      end)
+
+    acc = %{acc | deleted: acc.deleted + deleted, batches: acc.batches + 1}
+
+    # Lote incompleto: não há mais vencida livre (as travadas ficam para a próxima execução).
+    if deleted < batch_size,
+      do: acc,
+      else: purge_batches(expired, batch_size, max_batches, acc)
+  end
+
+  # `OR` em vez de `COALESCE`: o PostgreSQL combina os índices de `expires_at` e `inserted_at`.
+  defp expired_audits_query(now, retention_days) do
+    created_before = DateTime.add(now, -retention_days, :day)
+
+    from a in Audit,
+      where: a.expires_at < ^now or (is_nil(a.expires_at) and a.inserted_at < ^created_before)
+  end
+
+  defp positive_option(opts, key, default) do
+    case Keyword.get(opts, key, default) do
+      value when is_integer(value) and value > 0 ->
+        value
+
+      other ->
+        raise ArgumentError, "#{key} precisa ser um inteiro positivo, veio #{inspect(other)}"
+    end
   end
 
   ## Consulta

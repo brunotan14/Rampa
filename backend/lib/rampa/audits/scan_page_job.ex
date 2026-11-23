@@ -250,6 +250,12 @@ defmodule Rampa.Audits.ScanPageJob do
       {:error, :already_finished} ->
         false
 
+      # Auditoria apagada pela retenção no meio da varredura (`lock_chain/1` devolve
+      # `:page_not_found`): não há tarefa a fechar. `:task_not_found` com a página de pé é
+      # inconsistência e continua indo para o log.
+      {:error, :page_not_found} ->
+        true
+
       {:error, reason} ->
         log_mark_failed(reason)
         false

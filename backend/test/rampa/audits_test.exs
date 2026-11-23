@@ -28,6 +28,32 @@ defmodule Rampa.AuditsTest do
     assert {:ok, _page} = Audits.record_scan_result(page, scanner_response("img-sem-alt"))
   end
 
+  describe "RF-RA014: expiração na criação" do
+    test "CA2.1 expires_at fica 90 dias depois da criação, com o mesmo relógio" do
+      now = ~U[2026-11-23 15:04:05Z]
+      requester = %{ip_hash: "hash-" <> Ecto.UUID.generate()}
+
+      assert {:ok, %Audit{} = audit} =
+               Audits.create_audit("https://exemplo.com/", requester, now: now)
+
+      assert %Audit{inserted_at: ^now, expires_at: expires_at} = reload(audit)
+      assert expires_at == ~U[2027-02-21 15:04:05Z]
+      assert DateTime.diff(expires_at, now, :day) == Audits.retention_days()
+    end
+
+    test "CA2.1 expires_at não vem dos atributos de fora" do
+      changeset =
+        Audit.create_changeset(%{
+          start_url: "https://exemplo.com/",
+          page_limit: 1,
+          requester_ip_hash: "hash",
+          expires_at: ~U[2099-01-01 00:00:00Z]
+        })
+
+      refute Ecto.Changeset.changed?(changeset, :expires_at)
+    end
+  end
+
   describe "add_page/2" do
     test "cria a página queued com a tarefa scan pending e o job, na mesma transação" do
       audit = audit_fixture(%{page_limit: 2})

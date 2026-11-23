@@ -405,6 +405,38 @@ defmodule RampaWeb.AuditControllerTest do
     end
   end
 
+  describe "RF-RA014: auditoria apagada pela retenção" do
+    test "CA2.3 resumo, páginas e achados respondem como auditoria inexistente" do
+      audit = audit_fixture(%{status: :completed, expires_at: ~U[2000-01-01 00:00:00Z]})
+      page = page_fixture(%{audit: audit, status: :done})
+      finding = finding_fixture(page)
+      missing_id = Ecto.UUID.generate()
+
+      paths = fn id ->
+        [
+          ~p"/api/audits/#{id}",
+          ~p"/api/audits/#{id}/pages",
+          ~p"/api/audits/#{id}/pages/#{page.id}",
+          ~p"/api/audits/#{id}/findings",
+          ~p"/api/audits/#{id}/findings/#{finding.id}"
+        ]
+      end
+
+      for path <- paths.(audit.id), do: assert(build_conn() |> get(path) |> response(200))
+
+      assert %{deleted: deleted} = Rampa.Audits.purge_expired(now: ~U[2000-06-01 00:00:00Z])
+      assert deleted >= 1
+
+      for {purged, missing} <- Enum.zip(paths.(audit.id), paths.(missing_id)) do
+        purged_body = build_conn() |> get(purged) |> json_response(404)
+        missing_body = build_conn() |> get(missing) |> json_response(404)
+
+        assert purged_body == missing_body
+        assert %{"error" => %{"code" => "audit_not_found"}} = purged_body
+      end
+    end
+  end
+
   test "rota inexistente da API: 404 no formato do PRD", %{conn: conn} do
     assert %{"error" => %{"code" => "not_found", "message" => _}} =
              conn |> get("/api/nao-existe") |> json_response(404)
