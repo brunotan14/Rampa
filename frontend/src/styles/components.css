@@ -562,9 +562,10 @@
 
 /* --- Status da página ------------------------------------------------------------------ */
 .rp-pstatus { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 0.875rem; font-weight: 600; color: var(--ink); }
-.rp-pstatus--done .rp-icon { color: var(--sucesso); }
+.rp-pstatus--done .rp-icon, .rp-pstatus--completed .rp-icon { color: var(--sucesso); }
 .rp-pstatus--failed .rp-icon, .rp-pstatus--login .rp-icon { color: var(--serio); }
-.rp-pstatus--queued .rp-icon, .rp-pstatus--scanning .rp-icon, .rp-pstatus--analyzing .rp-icon { color: var(--ink-muted); }
+.rp-pstatus--queued .rp-icon, .rp-pstatus--scanning .rp-icon, .rp-pstatus--analyzing .rp-icon,
+.rp-pstatus--running .rp-icon, .rp-pstatus--cancelled .rp-icon { color: var(--ink-muted); }
 
 /* --- Campos (TextField e Select nativos) ----------------------------------------------- */
 .rp-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }

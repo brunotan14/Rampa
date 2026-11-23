@@ -116,6 +116,43 @@
   background: var(--surface-raised);
   box-shadow: var(--elevation-1);
 }
+/* Auditorias recentes (RF-RA018): PageList compacta. O item inteiro é um link (alvo ≥ 44px);
+   só o endereço fica sublinhado, para o resto não virar um bloco sublinhado. */
+.rp-recent__notice { display: flex; align-items: flex-start; gap: var(--space-2); max-width: var(--measure); }
+.rp-recent__notice .rp-icon { flex: none; margin-block-start: var(--space-1); }
+.rp-recent__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.rp-recent__item { border-block-start: var(--border-1) solid var(--line); }
+.rp-recent__item:first-child { border-block-start: 0; }
+.rp-recent__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: var(--target-comfort);
+  padding: var(--space-3) var(--space-4);
+  color: var(--ink);
+  text-decoration: none;
+}
+.rp-recent__link:visited { color: var(--ink); }
+.rp-recent__url { color: var(--link); font-weight: 600; text-decoration: underline; text-decoration-thickness: var(--border-1); text-underline-offset: 0.2em; overflow-wrap: anywhere; }
+.rp-recent__link:visited .rp-recent__url { color: var(--link-visited); }
+.rp-recent__link:hover .rp-recent__url { text-decoration-thickness: var(--focus-width); }
+.rp-recent__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-4); }
+.rp-recent__date { color: var(--ink-muted); }
+.rp-recent__stale { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--ink-muted); }
+.rp-recent__stale .rp-icon { flex: none; }
+.rp-recent__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+@media (forced-colors: active) {
+  .rp-recent__list { border-color: CanvasText; }
+  .rp-recent__item { border-block-start-color: CanvasText; }
+}
+
 /* Numeração "01", "02", "03" (TelaInicial): a ordem já vem da lista numerada. Em cerrado só
    como texto grande (24px): `brand-accent` dá 4,43:1 no claro, acima dos 3:1 de texto grande. */
 .rp-howto li::before {

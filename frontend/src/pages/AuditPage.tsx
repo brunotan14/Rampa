@@ -8,6 +8,9 @@
 // Leitor de tela: a única região viva é a `LiveRegion` desta tela, montada vazia desde o
 // primeiro quadro (inclusive carregando) e fora das trocas de estado: fala os marcos de 25%
 // do `ScanProgress` e a conclusão. Contadores, etapas, feed e a linha de conexão não falam.
+//
+// Auditorias recentes (RF-RA018): esta é a única tela que grava na lista do navegador. As
+// subpáginas (`/paginas`, `/problemas`) não gravam.
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { isFinalStatus, progressFromSummary, useAuditChannel, type ConnectionState, type PageActivity } from "../api/channel";
@@ -26,6 +29,7 @@ import { ScanSteps } from "../components/ScanSteps";
 import { StatCard, StatGrid } from "../components/StatCard";
 import { StateMessage } from "../components/StateMessage";
 import { formatAt, formatTimeWithSeconds, plural, t } from "../i18n";
+import { recordRecent, updateRecentStatus } from "../recentAudits";
 import { hostOf, isAuditId, pathOf } from "../report";
 import { severityLabel, severityPluralLabel, severityTotals } from "../severity";
 import { AuditReport } from "./AuditReport";
@@ -124,6 +128,22 @@ function AuditView({ auditId }: { auditId: string }) {
   // Join recusado por outro motivo (ex.: limite de canais): a tela segue pelo resumo e pelo GET
   // periódico do hook, com um aviso de que não há atualização ao vivo.
   const offline = channel.error !== null && !notFound;
+
+  // Auditorias recentes deste navegador (RF-RA018). Grava uma vez por abertura (a `key` do
+  // `AuditView` é o id), quando o resumo chega e a auditoria existe: sobe para o topo da lista
+  // da tela inicial. Depois, só o status ao vivo (canal ou resumo) é atualizado, sem mexer na
+  // ordem. Nunca durante a renderização, nunca com "não encontrada".
+  const recorded = useRef(false);
+  const liveStatus = progress?.status ?? null;
+  const loaded = summary.data;
+  useEffect(() => {
+    if (recorded.current || notFound || loaded === undefined || liveStatus === null) return;
+    recorded.current = true;
+    recordRecent({ id: auditId, startUrl: loaded.start_url, createdAt: loaded.inserted_at, status: liveStatus });
+  }, [auditId, loaded, notFound, liveStatus]);
+  useEffect(() => {
+    if (recorded.current && !notFound && liveStatus !== null) updateRecentStatus(auditId, liveStatus);
+  }, [auditId, notFound, liveStatus]);
 
   const view: View = notFound
     ? "not-found"
