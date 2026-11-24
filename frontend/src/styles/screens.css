@@ -256,6 +256,21 @@
 .rp-detail__main .rp-card__section p { margin: 0; }
 .rp-axe-message { white-space: pre-line; overflow-wrap: anywhere; }
 
+/* Critérios relacionados (RF-RA007): um bloco por critério, separados por uma linha. Título em
+   body-lg com peso de h3; nada quebra a 320px (títulos e recomendações quebram onde precisar). */
+.rp-criteria { display: flex; flex-direction: column; gap: var(--space-4); }
+.rp-criterion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-1) solid var(--line);
+  overflow-wrap: anywhere;
+}
+.rp-criterion__title { margin: 0; font-size: 1.125rem; line-height: 1.6; font-weight: 600; }
+.rp-criterion__emag { margin: 0; padding-inline-start: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1); }
+
 /* Troca de página no relatório (06-movimento.md): o painel antigo esmaece e o novo sobe. */
 @keyframes rp-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {

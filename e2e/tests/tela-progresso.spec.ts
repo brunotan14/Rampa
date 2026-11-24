@@ -4,7 +4,9 @@ import {
   AUDIT_ID,
   PAGE_ID,
   PhoenixMock,
+  WCAG_CRITERIA_PATH,
   ZERO,
+  fulfillWcagCriteria,
   liveRegionTexts,
   mockAuditApi,
   progress,
@@ -170,6 +172,7 @@ test.describe("Tela de progresso (RF-RA004)", () => {
   });
 
   test("404: auditoria inexistente mostra o erro e o caminho de volta", async ({ page }) => {
+    await page.route(`**${WCAG_CRITERIA_PATH}`, fulfillWcagCriteria);
     await page.route(`**/api/audits/${AUDIT_ID}**`, (route) =>
       route.fulfill({ status: 404, json: { error: { code: "audit_not_found", message: "Auditoria não encontrada. Confira o endereço do relatório." } } }),
     );

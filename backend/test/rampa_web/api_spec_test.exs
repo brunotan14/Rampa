@@ -36,7 +36,7 @@ defmodule RampaWeb.ApiSpecTest do
   defp create(conn, body), do: post(conn, ~p"/api/audits", body)
 
   describe "a especificação" do
-    test "é servida em /api/openapi.json com as sete rotas", %{conn: conn} do
+    test "é servida em /api/openapi.json com as oito rotas", %{conn: conn} do
       spec = conn |> get("/api/openapi.json") |> json_response(200)
 
       assert spec["openapi"] =~ ~r/^3\./
@@ -45,7 +45,7 @@ defmodule RampaWeb.ApiSpecTest do
       assert Map.keys(spec["paths"]) |> Enum.sort() ==
                ~w(/api/audits /api/audits/{audit_id}/findings /api/audits/{audit_id}/findings/{id}
                   /api/audits/{audit_id}/pages /api/audits/{audit_id}/pages/{id}
-                  /api/audits/{id} /api/health)
+                  /api/audits/{id} /api/health /api/wcag/criteria)
     end
 
     test "documenta o Idempotency-Key, o Retry-After do 429 e o cursor", %{spec: spec} do
@@ -357,6 +357,17 @@ defmodule RampaWeb.ApiSpecTest do
         assert missing.status == 404
         assert_operation_response(missing, "getFinding")
       end
+    end
+  end
+
+  describe "GET /api/wcag/criteria" do
+    test "FR-014: 200 com o catálogo compilado", %{conn: conn, spec: spec} do
+      conn |> get(~p"/api/wcag/criteria") |> assert_operation_response("listWcagCriteria")
+
+      # Os níveis e as versões do OpenAPI vêm do schema do conteúdo (`shared/wcag/`).
+      criterion = spec.components.schemas["WcagCriterion"]
+      assert criterion.properties.level.enum == ~w(A AA AAA)
+      assert criterion.properties.since.enum == ~w(2.0 2.1 2.2)
     end
   end
 

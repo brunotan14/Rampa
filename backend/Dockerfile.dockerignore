@@ -8,6 +8,7 @@
 !backend/priv/
 !backend/rel/
 !shared/scanner-contract.schema.json
+!shared/wcag/
 !frontend/
 !infra/docker-compose.prod.yml
 

@@ -8,7 +8,7 @@ import {
   reflowOverflow,
   revealAll,
 } from "./a11y.js";
-import { AUDIT_ID, PAGE_ID, PhoenixMock, ZERO, progress, summary } from "./simulado.js";
+import { AUDIT_ID, PAGE_ID, PhoenixMock, WCAG_CRITERIA_PATH, ZERO, fulfillWcagCriteria, progress, summary } from "./simulado.js";
 
 // Telas do relatório (M2, feat/tela-relatorio) com a API e o canal simulados: resumo
 // (RF-RA005), páginas (RF-RA006), uma página com as abas Problemas e Aprovados (RF-RA006,
@@ -160,6 +160,7 @@ async function mockReport(page: Page, options: Options = {}) {
       const create = options.create ?? { status: 202, json: { id: NEW_ID } };
       return route.fulfill({ status: create.status, json: create.json });
     }
+    if (path === WCAG_CRITERIA_PATH) return fulfillWcagCriteria(route);
     if (path === `/api/audits/${NEW_ID}`) return route.fulfill({ json: { ...summary(1, progress({ status: "queued" })), id: NEW_ID } });
     if (path === `/api/audits/${NEW_ID}/pages`) return route.fulfill({ json: { data: [] } });
     if (path === `/api/audits/${AUDIT_ID}`) return route.fulfill({ json: audit });

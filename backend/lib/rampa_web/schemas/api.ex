@@ -706,8 +706,8 @@ defmodule RampaWeb.Schemas.FindingDetail do
     %{
       title: "FindingDetail",
       description:
-        "Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número no M2; o " <>
-          "título em português e o eMAG entram no M3.",
+        "Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número; o título " <>
+          "em português, o resumo e o eMAG vêm do catálogo (`GET /api/wcag/criteria`).",
       type: :object,
       required:
         finding.required ++
@@ -830,6 +830,137 @@ defmodule RampaWeb.Schemas.FindingNotFound do
         "auditoria).",
       RampaWeb.Schemas.codes(:get_finding, 404)
     ),
+    struct?: false,
+    derive?: false
+  )
+end
+
+defmodule RampaWeb.Schemas.WcagSource do
+  @moduledoc false
+  require OpenApiSpex
+
+  alias OpenApiSpex.Schema
+
+  OpenApiSpex.schema(
+    %{
+      title: "WcagSource",
+      description: "Fonte de uma parte do conteúdo, para a atribuição.",
+      type: :object,
+      required: [:name, :url, :license],
+      additionalProperties: false,
+      properties: %{
+        name: %Schema{type: :string},
+        url: %Schema{type: :string, format: :uri},
+        license: %Schema{type: :string}
+      }
+    },
+    struct?: false,
+    derive?: false
+  )
+end
+
+defmodule RampaWeb.Schemas.WcagCriterion do
+  @moduledoc false
+  require OpenApiSpex
+
+  alias OpenApiSpex.Schema
+  alias Rampa.Wcag.Catalog
+
+  text = fn description -> %Schema{type: :string, minLength: 1, description: description} end
+
+  OpenApiSpex.schema(
+    %{
+      title: "WcagCriterion",
+      description:
+        "Um critério de sucesso da WCAG 2.2 (RF-RA007). O achado traz só o número " <>
+          "(`wcag_criteria`); o cliente cruza com este catálogo. Número fora do catálogo " <>
+          "(ex.: 4.1.1, removido na WCAG 2.2) aparece só como número.",
+      type: :object,
+      required: [:id, :level, :since, :title, :summary, :who_is_affected, :url, :emag],
+      additionalProperties: false,
+      properties: %{
+        id: %Schema{type: :string, pattern: Catalog.criterion_id_pattern(), example: "1.1.1"},
+        level: %Schema{type: :string, enum: Catalog.levels()},
+        since: %Schema{
+          type: :string,
+          enum: Catalog.versions(),
+          description:
+            "Versão da WCAG em que o critério surgiu. O eMAG 3.1 (2014) só cita critérios " <>
+              "da 2.0."
+        },
+        title: text.("Título da Tradução Autorizada da WCAG 2.2 para o português do Brasil."),
+        summary: text.("O que o critério pede, em linguagem simples."),
+        who_is_affected:
+          text.(
+            "Quem é afetado e o que acontece. O `who_is_affected` do próprio achado, quando " <>
+              "houver, tem precedência sobre este (FR-008)."
+          ),
+        url: %Schema{
+          type: :string,
+          format: :uri,
+          description: "O critério na tradução autorizada da W3C (em português)."
+        },
+        emag: %Schema{
+          type: :array,
+          description:
+            "Recomendações do eMAG 3.1 que citam o critério, em ordem numérica; vazio quando " <>
+              "nenhuma cita. O link do documento é `sources.emag.url`.",
+          items: %Schema{
+            type: :object,
+            required: [:id, :title],
+            additionalProperties: false,
+            properties: %{
+              id: %Schema{
+                type: :string,
+                pattern: Catalog.recommendation_id_pattern(),
+                example: "3.6"
+              },
+              title: %Schema{type: :string}
+            }
+          }
+        }
+      }
+    },
+    struct?: false,
+    derive?: false
+  )
+end
+
+defmodule RampaWeb.Schemas.WcagCriteriaResponse do
+  @moduledoc false
+  require OpenApiSpex
+
+  alias OpenApiSpex.Schema
+
+  OpenApiSpex.schema(
+    %{
+      title: "WcagCriteriaResponse",
+      description:
+        "Catálogo dos critérios WCAG em português: os 55 critérios A e AA da WCAG 2.2 e os " <>
+          "AAA citados pelas regras do axe que o Rampa roda, em ordem numérica, com as " <>
+          "recomendações do eMAG 3.1 que citam cada um. Conteúdo fixo, igual para todas as " <>
+          "auditorias.",
+      type: :object,
+      required: [:content_version, :sources, :data],
+      additionalProperties: false,
+      properties: %{
+        content_version: %Schema{
+          type: :string,
+          pattern: "^[0-9a-f]{12}$",
+          description: "Muda quando qualquer texto, link ou correspondência do catálogo muda."
+        },
+        sources: %Schema{
+          type: :object,
+          required: [:wcag, :emag],
+          additionalProperties: false,
+          properties: %{
+            wcag: RampaWeb.Schemas.WcagSource,
+            emag: RampaWeb.Schemas.WcagSource
+          }
+        },
+        data: %Schema{type: :array, items: RampaWeb.Schemas.WcagCriterion}
+      }
+    },
     struct?: false,
     derive?: false
   )

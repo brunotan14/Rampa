@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
 import { A11Y_MEDIA, axeViolations, emulateOnly, revealAll } from "./a11y.js";
-import { ZERO, progress, summary } from "./simulado.js";
+import { WCAG_CRITERIA_PATH, ZERO, fulfillWcagCriteria, progress, summary } from "./simulado.js";
 
 // RF-RA018, auditorias recentes deste navegador, com a API e o canal simulados: a lista sai do
 // `localStorage` e a tela inicial só pede o status atual de cada item (`GET /api/audits/:id`).
@@ -58,6 +58,8 @@ async function mockAudits(page: Page, audits: Map<string, FakeAudit>, nextIds: s
       audits.set(id, { startUrl, createdAt: new Date().toISOString(), status: "queued" });
       return route.fulfill({ status: 202, json: { id } });
     }
+    // As rotas da auditoria buscam o catálogo dos critérios WCAG ao abrir (RF-RA007).
+    if (path === WCAG_CRITERIA_PATH) return fulfillWcagCriteria(route);
     const match = /^\/api\/audits\/([0-9a-f-]{36})(\/pages|\/findings)?$/.exec(path);
     const audit = match ? audits.get(match[1]!) : undefined;
     if (!match || audit === undefined) {

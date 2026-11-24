@@ -14,6 +14,12 @@ describe("i18n", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("SC-005/FR-011: os textos dos critérios dizem 'relacionado', nunca que o site cumpre, falha ou está conforme", () => {
+    const forbidden = /conforme|conformidade|é acessível|cumpre|falha o critério|viola/i;
+    expect(allStrings(t.report.criteria).filter((s) => forbidden.test(s))).toEqual([]);
+    expect(t.report.criteria.intro(1)).toMatch(/relacionado/);
+  });
+
   it("sem ponto de exclamação nem 'Ops'", () => {
     expect(allStrings(t).filter((s) => /!|\bops\b/i.test(s))).toEqual([]);
   });

@@ -296,6 +296,31 @@ export const ptBR = {
     follow: "Acompanhar o andamento",
     criterion: (id: string) => `WCAG ${id}`,
     noCriteria: "Sem critério WCAG associado",
+    // Critérios com o conteúdo do catálogo (RF-RA007, M3). O problema está "relacionado" ao
+    // critério; nunca dizer que o site cumpre, falha ou está conforme (FR-011).
+    criteria: {
+      /** Rótulo curto: "1.1.1 Conteúdo Não Textual" (título da tradução autorizada). */
+      short: (id: string, title: string) => `${id} ${title}`,
+      /** Entre rótulos curtos numa linha: os títulos têm vírgula ("Nome, Função, Valor"). */
+      listSeparator: "; ",
+      title: "Critérios relacionados",
+      // Primeira menção ao eMAG na tela: a sigla vem por extenso (04-conteudo.md).
+      intro: (n: number) =>
+        n === 1
+          ? "Este problema está relacionado ao critério da WCAG 2.2 abaixo, com as recomendações do Modelo de Acessibilidade em Governo Eletrônico (eMAG) 3.1 que o citam."
+          : `Este problema está relacionado aos ${formatNumber(n)} critérios da WCAG 2.2 abaixo, cada um com as recomendações do Modelo de Acessibilidade em Governo Eletrônico (eMAG) 3.1 que o citam.`,
+      level: (level: string) => `Nível ${level}`,
+      official: (id: string) => `Critério ${id} na WCAG 2.2 em português (W3C)`,
+      emagTitle: (id: string) => `Recomendações do eMAG que citam o critério ${id}`,
+      emagItem: (id: string, title: string) => `${id} ${title}`,
+      emagLink: "Documento do eMAG 3.1 (Governo Federal)",
+      // CA3.2: o critério surgiu depois do eMAG 3.1 (WCAG 2.1 ou 2.2) ou é da 2.0 e nenhuma
+      // recomendação o cita.
+      emagBefore: "O eMAG 3.1 (2014) é anterior a este critério e não o cita.",
+      emagNone: "Nenhuma recomendação do eMAG 3.1 cita este critério.",
+      attribution:
+        "Títulos da tradução autorizada da WCAG 2.2 (W3C). Recomendações do eMAG 3.1 (Governo Federal, CC BY 4.0).",
+    },
     sources: {
       axe: "Verificação automática (axe-core)",
       ai: "Avaliação por IA",

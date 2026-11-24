@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 import { AppShell, type RouteHandle } from "./layout/AppShell";
+import { ReportLayout } from "./layout/ReportLayout";
 import { AuditPage } from "./pages/AuditPage";
 import { FindingPage } from "./pages/FindingPage";
 import { HomePage } from "./pages/HomePage";
@@ -20,10 +21,17 @@ export const routes: RouteObject[] = [
           // A faixa da tela inicial vai de ponta a ponta (TelaInicial).
           { index: true, element: <HomePage />, handle: { fullBleed: true } satisfies RouteHandle },
           // Progresso enquanto a auditoria anda; relatório resumido depois.
-          { path: "auditorias/:id", element: <AuditPage /> },
-          { path: "auditorias/:id/paginas", element: <PagesPage /> },
-          { path: "auditorias/:id/paginas/:pageId", element: <PageReportPage /> },
-          { path: "auditorias/:id/problemas/:findingId", element: <FindingPage /> },
+          // Todas sob o `ReportLayout`, que busca antes o catálogo dos critérios WCAG.
+          {
+            path: "auditorias/:id",
+            element: <ReportLayout />,
+            children: [
+              { index: true, element: <AuditPage /> },
+              { path: "paginas", element: <PagesPage /> },
+              { path: "paginas/:pageId", element: <PageReportPage /> },
+              { path: "problemas/:findingId", element: <FindingPage /> },
+            ],
+          },
           { path: "*", element: <NotFoundPage /> },
         ],
       },

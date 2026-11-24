@@ -409,7 +409,7 @@
       },
       "FindingDetail": {
         "additionalProperties": false,
-        "description": "Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número no M2; o título em português e o eMAG entram no M3.",
+        "description": "Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número; o título em português, o resumo e o eMAG vêm do catálogo (`GET /api/wcag/criteria`).",
         "properties": {
           "ai_model": {
             "nullable": true,
@@ -1264,6 +1264,151 @@
         ],
         "title": "TopIssue",
         "type": "object"
+      },
+      "WcagCriteriaResponse": {
+        "additionalProperties": false,
+        "description": "Catálogo dos critérios WCAG em português: os 55 critérios A e AA da WCAG 2.2 e os AAA citados pelas regras do axe que o Rampa roda, em ordem numérica, com as recomendações do eMAG 3.1 que citam cada um. Conteúdo fixo, igual para todas as auditorias.",
+        "properties": {
+          "content_version": {
+            "description": "Muda quando qualquer texto, link ou correspondência do catálogo muda.",
+            "pattern": "^[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WcagCriterion"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "additionalProperties": false,
+            "properties": {
+              "emag": {
+                "$ref": "#/components/schemas/WcagSource"
+              },
+              "wcag": {
+                "$ref": "#/components/schemas/WcagSource"
+              }
+            },
+            "required": [
+              "wcag",
+              "emag"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "content_version",
+          "sources",
+          "data"
+        ],
+        "title": "WcagCriteriaResponse",
+        "type": "object"
+      },
+      "WcagCriterion": {
+        "additionalProperties": false,
+        "description": "Um critério de sucesso da WCAG 2.2 (RF-RA007). O achado traz só o número (`wcag_criteria`); o cliente cruza com este catálogo. Número fora do catálogo (ex.: 4.1.1, removido na WCAG 2.2) aparece só como número.",
+        "properties": {
+          "emag": {
+            "description": "Recomendações do eMAG 3.1 que citam o critério, em ordem numérica; vazio quando nenhuma cita. O link do documento é `sources.emag.url`.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "example": "3.6",
+                  "pattern": "^[1-6]\\.\\d{1,2}$",
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "example": "1.1.1",
+            "pattern": "^[1-4]\\.\\d{1,2}\\.\\d{1,2}$",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "A",
+              "AA",
+              "AAA"
+            ],
+            "type": "string"
+          },
+          "since": {
+            "description": "Versão da WCAG em que o critério surgiu. O eMAG 3.1 (2014) só cita critérios da 2.0.",
+            "enum": [
+              "2.0",
+              "2.1",
+              "2.2"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "description": "O que o critério pede, em linguagem simples.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Título da Tradução Autorizada da WCAG 2.2 para o português do Brasil.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "O critério na tradução autorizada da W3C (em português).",
+            "format": "uri",
+            "type": "string"
+          },
+          "who_is_affected": {
+            "description": "Quem é afetado e o que acontece. O `who_is_affected` do próprio achado, quando houver, tem precedência sobre este (FR-008).",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "since",
+          "title",
+          "summary",
+          "who_is_affected",
+          "url",
+          "emag"
+        ],
+        "title": "WcagCriterion",
+        "type": "object"
+      },
+      "WcagSource": {
+        "additionalProperties": false,
+        "description": "Fonte de uma parte do conteúdo, para a atribuição.",
+        "properties": {
+          "license": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "license"
+        ],
+        "title": "WcagSource",
+        "type": "object"
       }
     }
   },
@@ -1769,6 +1914,30 @@
         "summary": "Saúde do serviço",
         "tags": [
           "saúde"
+        ]
+      }
+    },
+    "/api/wcag/criteria": {
+      "get": {
+        "callbacks": {},
+        "description": "Número, nível, título, resumo, quem é afetado, link oficial e recomendações do eMAG 3.1 de cada critério conhecido. Sem parâmetros. O cliente busca uma vez por sessão e cruza com os números de `wcag_criteria` dos achados; em qualquer falha, mostra só os números.",
+        "operationId": "listWcagCriteria",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WcagCriteriaResponse"
+                }
+              }
+            },
+            "description": "Catálogo"
+          }
+        },
+        "summary": "Critérios WCAG em português",
+        "tags": [
+          "critérios"
         ]
       }
     }

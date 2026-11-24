@@ -1,5 +1,6 @@
 // Query keys do TanStack Query, num lugar só. Tudo de uma auditoria fica sob
-// `["audits", id]`: invalidar esse prefixo recarrega resumo, páginas e achados juntos.
+// `["audits", id]`: invalidar esse prefixo recarrega resumo, páginas e achados juntos. O
+// catálogo dos critérios WCAG fica fora dele: não muda com a auditoria.
 import type { FindingsFilters } from "./types";
 
 export const queryKeys = {
@@ -13,4 +14,6 @@ export const queryKeys = {
   /** Só o `total` de uma lista de achados (`limit` 1), sem paginação: fora de `findingsAll`. */
   findingsTotal: (auditId: string, filters: FindingsFilters) => ["audits", auditId, "findings-total", filters] as const,
   finding: (auditId: string, findingId: string) => ["audits", auditId, "finding", findingId] as const,
+  /** Catálogo dos critérios WCAG: um só para a sessão, fora de `["audits"]`. */
+  wcagCriteria: ["wcag-criteria"] as const,
 };

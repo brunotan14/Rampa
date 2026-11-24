@@ -1,0 +1,378 @@
+{
+  "url": "https://emag.governoeletronico.gov.br/",
+  "recommendations": [
+    {
+      "id": "1.1",
+      "section": "Marcação",
+      "title": "Respeitar os Padrões Web",
+      "wcag20": [
+        "4.1.1",
+        "4.1.2"
+      ]
+    },
+    {
+      "id": "1.2",
+      "section": "Marcação",
+      "title": "Organizar o código HTML de forma lógica e semântica",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "1.3",
+      "section": "Marcação",
+      "title": "Utilizar corretamente os níveis de cabeçalho",
+      "wcag20": [
+        "1.3.1",
+        "2.4.10"
+      ]
+    },
+    {
+      "id": "1.4",
+      "section": "Marcação",
+      "title": "Ordenar de forma lógica e intuitiva a leitura e tabulação",
+      "wcag20": [
+        "1.3.2",
+        "2.4.3"
+      ]
+    },
+    {
+      "id": "1.5",
+      "section": "Marcação",
+      "title": "Fornecer âncoras para ir direto a um bloco de conteúdo",
+      "wcag20": [
+        "2.4.1"
+      ]
+    },
+    {
+      "id": "1.6",
+      "section": "Marcação",
+      "title": "Não utilizar tabelas para diagramação",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "1.7",
+      "section": "Marcação",
+      "title": "Separar links adjacentes",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "1.8",
+      "section": "Marcação",
+      "title": "Dividir as áreas de informação",
+      "wcag20": [
+        "3.2.3"
+      ]
+    },
+    {
+      "id": "1.9",
+      "section": "Marcação",
+      "title": "Não abrir novas instâncias sem a solicitação do usuário",
+      "wcag20": [
+        "3.2.5"
+      ]
+    },
+    {
+      "id": "2.1",
+      "section": "Comportamento (DOM)",
+      "title": "Disponibilizar todas as funções da página via teclado",
+      "wcag20": [
+        "2.1.1",
+        "2.1.2"
+      ]
+    },
+    {
+      "id": "2.2",
+      "section": "Comportamento (DOM)",
+      "title": "Garantir que os objetos programáveis sejam acessíveis",
+      "wcag20": [
+        "2.1.1",
+        "2.1.2"
+      ]
+    },
+    {
+      "id": "2.3",
+      "section": "Comportamento (DOM)",
+      "title": "Não criar páginas com atualização automática periódica",
+      "wcag20": [
+        "3.2.5"
+      ]
+    },
+    {
+      "id": "2.4",
+      "section": "Comportamento (DOM)",
+      "title": "Não utilizar redirecionamento automático de páginas",
+      "wcag20": [
+        "3.2.5"
+      ]
+    },
+    {
+      "id": "2.5",
+      "section": "Comportamento (DOM)",
+      "title": "Fornecer alternativa para modificar limite de tempo",
+      "wcag20": [
+        "2.2.1"
+      ]
+    },
+    {
+      "id": "2.6",
+      "section": "Comportamento (DOM)",
+      "title": "Não incluir situações com intermitência de tela",
+      "wcag20": [
+        "2.3.1"
+      ]
+    },
+    {
+      "id": "2.7",
+      "section": "Comportamento (DOM)",
+      "title": "Assegurar o controle do usuário sobre as alterações temporais do conteúdo",
+      "wcag20": [
+        "2.2.2"
+      ]
+    },
+    {
+      "id": "3.1",
+      "section": "Conteúdo/Informação",
+      "title": "Identificar o idioma principal da página",
+      "wcag20": [
+        "3.1.1"
+      ]
+    },
+    {
+      "id": "3.2",
+      "section": "Conteúdo/Informação",
+      "title": "Informar mudança de idioma no conteúdo",
+      "wcag20": [
+        "3.1.2"
+      ]
+    },
+    {
+      "id": "3.3",
+      "section": "Conteúdo/Informação",
+      "title": "Oferecer um título descritivo e informativo à página",
+      "wcag20": [
+        "2.4.2"
+      ]
+    },
+    {
+      "id": "3.4",
+      "section": "Conteúdo/Informação",
+      "title": "Informar o usuário sobre sua localização na página",
+      "wcag20": [
+        "2.4.8"
+      ]
+    },
+    {
+      "id": "3.5",
+      "section": "Conteúdo/Informação",
+      "title": "Descrever links clara e sucintamente",
+      "wcag20": [
+        "2.4.4",
+        "2.4.9"
+      ]
+    },
+    {
+      "id": "3.6",
+      "section": "Conteúdo/Informação",
+      "title": "Fornecer alternativa em texto para as imagens do sítio",
+      "wcag20": [
+        "1.1.1"
+      ]
+    },
+    {
+      "id": "3.7",
+      "section": "Conteúdo/Informação",
+      "title": "Utilizar mapas de imagem de forma acessível",
+      "wcag20": [
+        "1.1.1"
+      ]
+    },
+    {
+      "id": "3.8",
+      "section": "Conteúdo/Informação",
+      "title": "Disponibilizar documentos em formatos acessíveis",
+      "wcag20": []
+    },
+    {
+      "id": "3.9",
+      "section": "Conteúdo/Informação",
+      "title": "Em tabelas, utilizar títulos e resumos de forma apropriada",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "3.10",
+      "section": "Conteúdo/Informação",
+      "title": "Associar células de dados às células de cabeçalho",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "3.11",
+      "section": "Conteúdo/Informação",
+      "title": "Garantir a leitura e compreensão das informações",
+      "wcag20": [
+        "3.1.5"
+      ]
+    },
+    {
+      "id": "3.12",
+      "section": "Conteúdo/Informação",
+      "title": "Disponibilizar uma explicação para siglas, abreviaturas e palavras incomuns",
+      "wcag20": [
+        "3.1.3",
+        "3.1.4"
+      ]
+    },
+    {
+      "id": "4.1",
+      "section": "Apresentação/Design",
+      "title": "Oferecer contraste mínimo entre plano de fundo e primeiro plano",
+      "wcag20": [
+        "1.4.3"
+      ]
+    },
+    {
+      "id": "4.2",
+      "section": "Apresentação/Design",
+      "title": "Não utilizar apenas cor ou outras características sensoriais para diferenciar elementos",
+      "wcag20": [
+        "1.3.3",
+        "1.4.1"
+      ]
+    },
+    {
+      "id": "4.3",
+      "section": "Apresentação/Design",
+      "title": "Permitir redimensionamento sem perda de funcionalidade",
+      "wcag20": [
+        "1.4.4"
+      ]
+    },
+    {
+      "id": "4.4",
+      "section": "Apresentação/Design",
+      "title": "Possibilitar que o elemento com foco seja visualmente evidente",
+      "wcag20": [
+        "2.4.7"
+      ]
+    },
+    {
+      "id": "5.1",
+      "section": "Multimídia",
+      "title": "Fornecer alternativa para vídeo",
+      "wcag20": [
+        "1.2.1",
+        "1.2.2",
+        "1.2.6",
+        "1.2.8"
+      ]
+    },
+    {
+      "id": "5.2",
+      "section": "Multimídia",
+      "title": "Fornecer alternativa para áudio",
+      "wcag20": [
+        "1.2.1",
+        "1.2.2",
+        "1.2.6"
+      ]
+    },
+    {
+      "id": "5.3",
+      "section": "Multimídia",
+      "title": "Oferecer audiodescrição para vídeo pré-gravado",
+      "wcag20": [
+        "1.2.3",
+        "1.2.5",
+        "1.2.7"
+      ]
+    },
+    {
+      "id": "5.4",
+      "section": "Multimídia",
+      "title": "Fornecer controle de áudio para som",
+      "wcag20": [
+        "1.4.2"
+      ]
+    },
+    {
+      "id": "5.5",
+      "section": "Multimídia",
+      "title": "Fornecer controle de animação",
+      "wcag20": [
+        "2.2.2"
+      ]
+    },
+    {
+      "id": "6.1",
+      "section": "Formulário",
+      "title": "Fornecer alternativa em texto para os botões de imagem de formulários",
+      "wcag20": [
+        "1.1.1"
+      ]
+    },
+    {
+      "id": "6.2",
+      "section": "Formulário",
+      "title": "Associar etiquetas aos seus campos",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "6.3",
+      "section": "Formulário",
+      "title": "Estabelecer uma ordem lógica de navegação",
+      "wcag20": [
+        "2.4.3"
+      ]
+    },
+    {
+      "id": "6.4",
+      "section": "Formulário",
+      "title": "Não provocar automaticamente alteração no contexto",
+      "wcag20": [
+        "3.2.2"
+      ]
+    },
+    {
+      "id": "6.5",
+      "section": "Formulário",
+      "title": "Fornecer instruções para entrada de dados",
+      "wcag20": [
+        "3.3.2"
+      ]
+    },
+    {
+      "id": "6.6",
+      "section": "Formulário",
+      "title": "Identificar e descrever erros de entrada de dados e confirmar o envio das informações",
+      "wcag20": [
+        "3.3.1"
+      ]
+    },
+    {
+      "id": "6.7",
+      "section": "Formulário",
+      "title": "Agrupar campos de formulário",
+      "wcag20": [
+        "1.3.1"
+      ]
+    },
+    {
+      "id": "6.8",
+      "section": "Formulário",
+      "title": "Fornecer estratégias de segurança específicas ao invés de CAPTCHA",
+      "wcag20": [
+        "1.1.1"
+      ]
+    }
+  ]
+}

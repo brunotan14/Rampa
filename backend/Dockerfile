@@ -2,8 +2,9 @@
 # (React) em `priv/static`: o app serve a interface, a API e o canal na mesma origem.
 #
 # Contexto de build: a RAIZ do repositório, porque o backend embute
-# `shared/scanner-contract.schema.json` na compilação (`Rampa.Scanner.Contract`) e a imagem
-# leva o build de `frontend/` e o `infra/docker-compose.prod.yml` (lido pelo `infra/deploy.sh`):
+# `shared/scanner-contract.schema.json` (`Rampa.Scanner.Contract`) e `shared/wcag/`
+# (`Rampa.Wcag`) na compilação, e a imagem leva o build de `frontend/` e o
+# `infra/docker-compose.prod.yml` (lido pelo `infra/deploy.sh`):
 #
 #   docker build -f backend/Dockerfile .                          # MIX_ENV=prod (deploy)
 #   docker build -f backend/Dockerfile --build-arg MIX_ENV=e2e .  # Compose de teste
@@ -56,8 +57,11 @@ ENV MIX_ENV=${MIX_ENV}
 COPY backend/config/config.exs backend/config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 
-# `shared/` ao lado de `backend/`, como no repositório.
+# `shared/` ao lado de `backend/`, como no repositório: o contrato do scanner
+# (`Rampa.Scanner.Contract`) e o conteúdo dos critérios WCAG (`Rampa.Wcag`), embutidos na
+# compilação.
 COPY shared/scanner-contract.schema.json /app/shared/
+COPY shared/wcag/ /app/shared/wcag/
 COPY backend/priv priv
 COPY --from=frontend /build/frontend/dist priv/static
 COPY backend/lib lib
