@@ -1,7 +1,8 @@
 // Hooks finos sobre o cliente da API, um por endpoint do relatório (PRD §9).
-import { useInfiniteQuery, useMutation, useQueries, useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
-import { createAudit, getAudit, getFinding, getPage, isApiError, listFindings, listPages } from "./client";
+import { queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { catalogFrom } from "../criteria";
+import { createAudit, getAudit, getFinding, getPage, getWcagCriteria, isApiError, listFindings, listPages } from "./client";
 import { isRunning } from "../report";
 import { queryKeys } from "./queryKeys";
 import type { CreateAuditRequest, FindingsFilters } from "./types";
@@ -71,6 +72,36 @@ export function useFinding(auditId: string, findingId: string, { refetchInterval
     queryFn: ({ signal }) => getFinding(auditId, findingId, { signal }),
     refetchInterval,
   });
+}
+
+// O catálogo é conteúdo fixo do deploy: uma busca por sessão, nunca descartada do cache. Sem
+// novas tentativas: na falha, o detalhe monta na hora sem o catálogo (FR-017), em vez de esperar
+// o limite de `CATALOG_WAIT_MS`; a próxima tela que montar busca de novo.
+const wcagCriteriaQuery = queryOptions({
+  queryKey: queryKeys.wcagCriteria,
+  queryFn: ({ signal }) => getWcagCriteria({ signal }),
+  staleTime: Infinity,
+  gcTime: Infinity,
+  retry: false,
+});
+
+/**
+ * Catálogo dos critérios WCAG (RF-RA007), já como `CriteriaCatalog` (procura por número). Em
+ * qualquer falha, quem usa mostra só os números, como no M2.
+ */
+export function useWcagCriteria() {
+  return useQuery({ ...wcagCriteriaQuery, select: catalogFrom });
+}
+
+/**
+ * Busca o catálogo antes de alguém precisar dele (rotas do relatório): quem abre o detalhe de
+ * um problema por link direto já o encontra no cache. Não busca de novo o que já chegou.
+ */
+export function usePrefetchWcagCriteria(enabled = true) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (enabled) void queryClient.prefetchQuery(wcagCriteriaQuery);
+  }, [enabled, queryClient]);
 }
 
 function randomKey(): string {

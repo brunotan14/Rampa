@@ -12,7 +12,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Tab, TabList, TabPanel, Tabs, type Key } from "react-aria-components";
 import { useParams, useSearchParams } from "react-router";
-import { useFindings, usePage } from "../api/hooks";
+import { useFindings, usePage, useWcagCriteria } from "../api/hooks";
 import type { PageDetail } from "../api/types";
 import { AxeText } from "../components/AxeText";
 import { Button } from "../components/Button";
@@ -22,6 +22,7 @@ import { PageStatus } from "../components/PageStatus";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { SeverityBar } from "../components/SeverityBar";
 import { StateMessage } from "../components/StateMessage";
+import { criteriaText } from "../criteria";
 import { formatAt, formatNumber, t } from "../i18n";
 import {
   SOURCES,
@@ -199,6 +200,7 @@ function FindingsPanel({
   const filters = readFindingFilters(params);
   const filtered = hasFindingFilters(filters);
   const findings = useFindings(auditId, toApiFilters(pageId, filters), { refetchInterval });
+  const catalog = useWcagCriteria();
   const all = findings.data?.pages.flatMap((p) => p.data) ?? [];
   const total = findings.data?.pages[0]?.total ?? null;
   // Depois de "Mostrar mais", o foco vai para o primeiro elemento novo da lista. A posição dele
@@ -262,7 +264,7 @@ function FindingsPanel({
           {total !== null && <p className="rp-caption">{t.report.page.showing(all.length, total)}</p>}
           <div className="rp-findings__list">
             {groupFindings(all).map((group) => (
-              <FindingGroup key={group.key} auditId={auditId} group={group} />
+              <FindingGroup key={group.key} auditId={auditId} group={group} catalog={catalog.data} />
             ))}
           </div>
           {findings.isFetchNextPageError && (
@@ -425,6 +427,7 @@ function FindingFilterForm({
 // --- Aprovados (RF-RA017) ----------------------------------------------------------------
 
 function PassedPanel({ page }: { page: PageDetail }) {
+  const catalog = useWcagCriteria();
   const rules = page.passed_rules;
   if (rules === null) {
     return (
@@ -454,7 +457,7 @@ function PassedPanel({ page }: { page: PageDetail }) {
               <span className="rp-caption">
                 <code>{rule.rule_id}</code>
                 {t.report.separator}
-                {rule.wcag_criteria.length > 0 ? rule.wcag_criteria.map(t.report.criterion).join(", ") : t.report.noCriteria}
+                {criteriaText(rule.wcag_criteria, catalog.data)}
                 {t.report.separator}
                 {t.report.passed.nodes(rule.nodes_total)}
               </span>

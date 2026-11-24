@@ -140,6 +140,11 @@ export function getFinding(auditId: string, findingId: string, options: RequestO
   return request<JsonOk<"getFinding">>(`/audits/${encode(auditId)}/findings/${encode(findingId)}`, options);
 }
 
+/** Catálogo dos critérios WCAG (conteúdo fixo, igual para todas as auditorias). */
+export function getWcagCriteria(options: RequestOptions = {}) {
+  return request<JsonOk<"listWcagCriteria">>("/wcag/criteria", options);
+}
+
 /**
  * Cria uma auditoria. Com a mesma `idempotencyKey`, repetir o pedido (depois de uma queda de
  * rede, por exemplo) devolve o mesmo `id` sem criar outra auditoria (PRD §9).

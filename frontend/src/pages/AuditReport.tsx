@@ -6,6 +6,7 @@
 // Fora no M2: Exportar PDF, Compartilhar, variação desde a última auditoria, "Quem é impactado" e
 // "Conformidade" (dependem do M3 e de contas).
 import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useWcagCriteria } from "../api/hooks";
 import type { AuditSummary } from "../api/types";
 import { AuditAgainButton } from "../components/AuditAgainButton";
 import { Button } from "../components/Button";
@@ -18,6 +19,7 @@ import { SeverityBadge } from "../components/SeverityBadge";
 import { SeverityBar } from "../components/SeverityBar";
 import { StatCard, StatGrid } from "../components/StatCard";
 import { StateMessage } from "../components/StateMessage";
+import { criteriaText } from "../criteria";
 import { formatAt, formatNumber, t } from "../i18n";
 import { findingPath, pagesPath } from "../report";
 import { API_SEVERITIES, fromApiSeverity, severityTotals, totalProblems } from "../severity";
@@ -215,6 +217,7 @@ function SeverityTable({ summary }: { summary: AuditSummary }) {
 }
 
 function TopIssues({ auditId, summary }: { auditId: string; summary: AuditSummary }) {
+  const catalog = useWcagCriteria();
   const top = summary.top_issues;
   return (
     <Reveal as="section" className="rp-section" aria-labelledby="mais-frequentes">
@@ -246,7 +249,7 @@ function TopIssues({ auditId, summary }: { auditId: string; summary: AuditSummar
                   {[
                     t.report.summary.top.pages(issue.pages_affected),
                     t.report.summary.top.occurrences(issue.occurrences),
-                    issue.wcag_criteria.map(t.report.criterion).join(", ") || t.report.noCriteria,
+                    criteriaText(issue.wcag_criteria, catalog.data),
                   ].join(t.report.separator)}
                 </p>
                 <Link href={findingPath(auditId, issue.sample_finding_id)} standalone>

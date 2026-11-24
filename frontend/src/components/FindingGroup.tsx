@@ -2,6 +2,7 @@
 // elementos afetados. O título é um h3 (a tecla H do leitor de tela lista os problemas como um
 // índice); o card não é clicável por inteiro: cada elemento é um link para o detalhe.
 import type { Finding } from "../api/types";
+import { criteriaText, type CriteriaCatalog } from "../criteria";
 import { t } from "../i18n";
 import { confidenceBand, findingPath } from "../report";
 import { fromApiSeverity } from "../severity";
@@ -36,7 +37,16 @@ export function groupFindings(findings: readonly Finding[]): FindingGroupData[] 
 /** Id do link de um achado na lista, para levar o foco ao primeiro de um lote novo. */
 export const findingLinkId = (findingId: string) => `achado-${findingId}`;
 
-export function FindingGroup({ auditId, group }: { auditId: string; group: FindingGroupData }) {
+export function FindingGroup({
+  auditId,
+  group,
+  catalog,
+}: {
+  auditId: string;
+  group: FindingGroupData;
+  /** Catálogo dos critérios WCAG: com ele, número e título; sem ele, só o número. */
+  catalog?: CriteriaCatalog | null;
+}) {
   const titleId = useId();
   const { first, findings } = group;
   return (
@@ -56,11 +66,7 @@ export function FindingGroup({ auditId, group }: { auditId: string; group: Findi
           <code>{first.rule_id}</code>
         </dd>
         <dt>{t.report.group.criteria}</dt>
-        <dd>
-          {first.wcag_criteria.length > 0
-            ? first.wcag_criteria.map(t.report.criterion).join(", ")
-            : t.report.noCriteria}
-        </dd>
+        <dd>{criteriaText(first.wcag_criteria, catalog)}</dd>
         <dt>{t.report.group.source}</dt>
         <dd>{t.report.sources[first.source]}</dd>
       </dl>

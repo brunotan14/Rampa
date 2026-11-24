@@ -2,7 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { stubApi } from "../../test/api";
 import { FakeSocket } from "../../test/fakeSocket";
-import { AUDIT_ID, FINDING_ID, auditSummary, progress } from "../../test/fixtures";
+import { AUDIT_ID, FINDING_ID, WCAG_CRITERIA_PATH, auditSummary, progress, wcagCatalog } from "../../test/fixtures";
 import { axeViolations, renderRoute } from "../../test/render";
 import type { AuditSummary } from "../api/types";
 import { SUMMARY_RETRIES, SUMMARY_RETRY_MS } from "./AuditReport";
@@ -140,6 +140,16 @@ describe("Relatório resumido (RF-RA005)", () => {
     // Sem barreira de login, sem aviso (RF-RA028 CA3).
     expect(screen.queryByText(/pede login/)).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/(é|está) (acessível|conforme)/);
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("CA1.3: com o catálogo, o top 5 mostra o critério com número e título", async () => {
+    const { container } = await open(completed(), { [WCAG_CRITERIA_PATH]: wcagCatalog() });
+    const top = screen.getByRole("heading", { level: 2, name: "Os problemas mais frequentes" }).closest("section")!;
+    const items = within(top).getAllByRole("listitem");
+    await vi.waitFor(() => expect(items[0]).toHaveTextContent("Em 1 página · 2 ocorrências · 1.1.1 Conteúdo Não Textual"));
+    expect(items[0]).not.toHaveTextContent("WCAG 1.1.1");
+    expect(items[1]).toHaveTextContent("Sem critério WCAG associado");
     expect(await axeViolations(container)).toEqual([]);
   });
 

@@ -1,7 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { AUDIT_ID, PAGE_ID, auditSummary } from "../../test/fixtures";
+import { AUDIT_ID, PAGE_ID, WCAG_CRITERIA_PATH, auditSummary, wcagCatalog } from "../../test/fixtures";
 import { jsonResponse, testQueryClient, withQueryClient } from "../../test/render";
-import { idempotencyScope, useAudit, useCreateAudit, useFinding, useFindings, usePage, usePages } from "./hooks";
+import {
+  idempotencyScope,
+  useAudit,
+  useCreateAudit,
+  useFinding,
+  useFindings,
+  usePage,
+  usePages,
+  usePrefetchWcagCriteria,
+  useWcagCriteria,
+} from "./hooks";
 import { queryKeys } from "./queryKeys";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -151,5 +161,48 @@ describe("hooks da API", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.error).toMatchObject({ code: "rate_limited", status: 429 }));
+  });
+
+  it("useWcagCriteria busca o catálogo uma vez por sessão (staleTime e gcTime infinitos) e procura por número", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(wcagCatalog()));
+    const client = testQueryClient();
+    const wrapper = withQueryClient(client);
+    const first = renderHook(() => useWcagCriteria(), { wrapper });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    expect(urls()).toEqual([WCAG_CRITERIA_PATH]);
+    expect(first.result.current.data?.byId.get("1.1.1")?.title).toBe("Conteúdo Não Textual");
+    expect(first.result.current.data?.sources.emag.url).toBe("https://emag.governoeletronico.gov.br/");
+
+    const query = client.getQueryCache().find({ queryKey: queryKeys.wcagCriteria })!;
+    expect(query.options.gcTime).toBe(Infinity);
+    expect((query.observers[0]!.options as { staleTime?: unknown }).staleTime).toBe(Infinity);
+
+    // Outra tela que monta o hook usa o cache, sem buscar de novo; desmontar não descarta.
+    first.unmount();
+    const second = renderHook(() => useWcagCriteria(), { wrapper });
+    expect(second.result.current.data?.byId.size).toBe(9);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("useWcagCriteria com falha da API: erro, sem dados (as telas mostram só os números)", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 404 }));
+    const { result } = renderHook(() => useWcagCriteria(), { wrapper: withQueryClient() });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data).toBeUndefined();
+  });
+
+  it("usePrefetchWcagCriteria põe o catálogo no cache antes de alguém pedir; desligado, não busca", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(wcagCatalog()));
+    const client = testQueryClient();
+    renderHook(() => usePrefetchWcagCriteria(false), { wrapper: withQueryClient(client) });
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    renderHook(() => usePrefetchWcagCriteria(), { wrapper: withQueryClient(client) });
+    await waitFor(() => expect(client.getQueryData(queryKeys.wcagCriteria)).toEqual(wcagCatalog()));
+    // Já no cache: montar de novo não busca outra vez.
+    renderHook(() => usePrefetchWcagCriteria(), { wrapper: withQueryClient(client) });
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

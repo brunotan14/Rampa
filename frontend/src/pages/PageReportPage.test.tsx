@@ -1,7 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { apiError, stubApi } from "../../test/api";
-import { AUDIT_ID, PAGE_ID, auditSummary, finding, pageDetail } from "../../test/fixtures";
+import { AUDIT_ID, PAGE_ID, WCAG_CRITERIA_PATH, auditSummary, finding, pageDetail, wcagCatalog } from "../../test/fixtures";
 import { axeViolations, jsonResponse, renderRoute } from "../../test/render";
 import type { Finding, PageDetail } from "../api/types";
 import { LIVE_REFRESH_MS } from "../report";
@@ -34,11 +34,13 @@ const items: Finding[] = [
 function stub({
   detail = page,
   findings = (() => jsonResponse({ data: items, next_cursor: null, total: items.length })) as (url: URL) => Response,
+  extra = {} as Record<string, unknown>,
 } = {}) {
   return stubApi({
     [`/api/audits/${AUDIT_ID}`]: auditSummary({ status: "completed", pages_scanned: 1 }),
     [`/api/audits/${AUDIT_ID}/pages/${PAGE_ID}`]: detail,
     [FINDINGS]: findings,
+    ...extra,
   });
 }
 
@@ -77,7 +79,8 @@ describe("Relatório de uma página (RF-RA006, RF-RA017, RF-RA028)", () => {
       "Elements must meet minimum color contrast ratio thresholds",
     ]);
     expect(within(cards[0]!).getAllByRole("link")).toHaveLength(2);
-    expect(cards[1]).toHaveTextContent("WCAG 2.4.4, WCAG 4.1.2");
+    // Sem o catálogo (não está no `stub`), só os números, como no M2.
+    expect(cards[1]).toHaveTextContent("WCAG 2.4.4; WCAG 4.1.2");
     expect(cards[2]).toHaveTextContent("O axe não conseguiu decidir: confirme manualmente");
 
     const [request] = api.calls(FINDINGS);
@@ -179,6 +182,23 @@ describe("Relatório de uma página (RF-RA006, RF-RA017, RF-RA028)", () => {
     expect(rules[0]!.querySelector('[lang="en"]')).toHaveTextContent("Images must have alternative text");
     expect(panel).toHaveTextContent('"Aprovado" vale para cada regra, não para a página inteira.');
     expect(document.body).not.toHaveTextContent(/acessível|conforme/i);
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("CA1.3: com o catálogo, cards e aba Aprovados mostram o número e o título do critério", async () => {
+    stub({ extra: { [WCAG_CRITERIA_PATH]: wcagCatalog() } });
+    const { container } = await open();
+    await screen.findByRole("status");
+    const cards = await screen.findAllByRole("article");
+    await vi.waitFor(() => expect(cards[0]).toHaveTextContent("1.1.1 Conteúdo Não Textual"));
+    expect(cards[1]).toHaveTextContent("2.4.4 Finalidade do Link (Em Contexto); 4.1.2 Nome, Função, Valor");
+    expect(cards[1]).not.toHaveTextContent("WCAG 2.4.4");
+
+    await userEvent.click(screen.getByRole("tab", { name: "Aprovados 2" }));
+    const rules = within(screen.getByRole("list", { name: "Regras aprovadas" })).getAllByRole("listitem");
+    expect(rules[0]).toHaveTextContent("image-alt · 1.1.1 Conteúdo Não Textual · Em 1 elemento");
+    // 3.1.1 não está no catálogo simulado: fica só o número.
+    expect(rules[1]).toHaveTextContent("html-has-lang · WCAG 3.1.1 · Em 1 elemento");
     expect(await axeViolations(container)).toEqual([]);
   });
 

@@ -21,6 +21,11 @@ export type FindingDetail = Schemas["FindingDetail"];
 export type FindingsPage = Schemas["FindingsPage"];
 export type CreateAuditRequest = Schemas["CreateAuditRequest"];
 export type CreateAuditResponse = Schemas["CreateAuditResponse"];
+/** Catálogo dos critérios WCAG em português, com o eMAG (`GET /api/wcag/criteria`). */
+export type WcagCriteriaResponse = Schemas["WcagCriteriaResponse"];
+export type WcagCriterion = Schemas["WcagCriterion"];
+export type WcagLevel = WcagCriterion["level"];
+export type WcagSource = Schemas["WcagSource"];
 
 /** Severidade com os nomes do axe, como a API manda. Na interface, ver `src/severity.ts`. */
 export type ApiSeverity = Finding["severity"];

@@ -1,17 +1,18 @@
 import { render, screen, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import { AUDIT_ID, finding } from "../../test/fixtures";
+import { AUDIT_ID, finding, wcagCatalog } from "../../test/fixtures";
 import { axeViolations } from "../../test/render";
+import { catalogFrom, type CriteriaCatalog } from "../criteria";
 import { FindingGroup, groupFindings } from "./FindingGroup";
 
-function renderGroups(items: Parameters<typeof groupFindings>[0]) {
+function renderGroups(items: Parameters<typeof groupFindings>[0], catalog?: CriteriaCatalog) {
   const router = createMemoryRouter([
     {
       path: "*",
       element: (
         <>
           {groupFindings(items).map((group) => (
-            <FindingGroup key={group.key} auditId={AUDIT_ID} group={group} />
+            <FindingGroup key={group.key} auditId={AUDIT_ID} group={group} catalog={catalog} />
           ))}
         </>
       ),
@@ -50,6 +51,17 @@ describe("FindingGroup", () => {
       `/auditorias/${AUDIT_ID}/problemas/${id(1)}`,
     );
     expect(within(card).getByRole("link", { name: "Ver o problema no elemento Elemento sem seletor" })).toBeInTheDocument();
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("CA1.3: com o catálogo, os critérios vêm com número e título; fora dele, só o número", async () => {
+    const { container } = renderGroups(
+      [finding({ id: id(1), wcag_criteria: ["4.1.2", "2.4.4", "4.1.1"] })],
+      catalogFrom(wcagCatalog()),
+    );
+    const card = screen.getByRole("article");
+    const criteria = within(card).getByText("Critérios", { selector: "dt" }).nextElementSibling;
+    expect(criteria).toHaveTextContent("2.4.4 Finalidade do Link (Em Contexto); WCAG 4.1.1; 4.1.2 Nome, Função, Valor");
     expect(await axeViolations(container)).toEqual([]);
   });
 
