@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WcagContent",
+  "description": "Formato dos arquivos de conteúdo de `shared/wcag/` (RF-RA007): `criteria.pt-BR.json` (`CriteriaFile`) e `emag-3.1.pt-BR.json` (`EmagFile`). O backend valida os dois na compilação (`Rampa.Wcag.Catalog`) e falha o build se algum estiver fora deste schema; as regras que um JSON Schema não expressa (os 55 critérios A e AA obrigatórios, citações só de critérios da WCAG 2.0, ids sem repetição, seção de cada recomendação) também são conferidas lá. O scanner lê `criteria.pt-BR.json` no teste de cobertura das regras do axe (`scanner/test/wcag-coverage.test.ts`).",
+  "$comment": "Mudou este schema: confira `Rampa.Wcag.Catalog` (que lê daqui os níveis e as versões), o schema `WcagCriteriaResponse` do OpenAPI e rode `make openapi` e `make api-types`.",
+  "oneOf": [{ "$ref": "#/definitions/CriteriaFile" }, { "$ref": "#/definitions/EmagFile" }],
+  "definitions": {
+    "CriterionId": {
+      "title": "CriterionId",
+      "description": "Número do critério de sucesso da WCAG (princípio.diretriz.critério), ex.: \"1.4.3\".",
+      "type": "string",
+      "pattern": "^[1-4]\\.\\d{1,2}\\.\\d{1,2}$"
+    },
+    "Level": {
+      "title": "Level",
+      "description": "Nível do critério na WCAG 2.2.",
+      "type": "string",
+      "enum": ["A", "AA", "AAA"]
+    },
+    "Since": {
+      "title": "Since",
+      "description": "Versão da WCAG em que o critério surgiu; escolhe o aviso mostrado quando nenhuma recomendação do eMAG 3.1 o cita.",
+      "type": "string",
+      "enum": ["2.0", "2.1", "2.2"]
+    },
+    "Criterion": {
+      "title": "Criterion",
+      "description": "Um critério de sucesso da WCAG 2.2.",
+      "type": "object",
+      "required": ["id", "level", "since", "title", "summary", "who_is_affected", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/CriterionId" },
+        "level": { "$ref": "#/definitions/Level" },
+        "since": { "$ref": "#/definitions/Since" },
+        "title": {
+          "description": "Título da Tradução Autorizada da WCAG 2.2 para o português do Brasil (W3C).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "summary": {
+          "description": "Texto do Rampa: o que o critério pede, em linguagem simples.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "who_is_affected": {
+          "description": "Texto do Rampa: quem é afetado e o que acontece com essas pessoas.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "url": {
+          "description": "Critério na tradução autorizada da W3C, com o fragmento do original em inglês.",
+          "type": "string",
+          "pattern": "^https://www\\.w3\\.org/Translations/WCAG22-pt-BR/#[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 200
+        }
+      }
+    },
+    "CriteriaFile": {
+      "title": "CriteriaFile",
+      "description": "`criteria.pt-BR.json`: os 55 critérios A e AA da WCAG 2.2 e os AAA citados pelas regras do axe que o Rampa roda.",
+      "type": "object",
+      "required": ["criteria"],
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 86,
+          "items": { "$ref": "#/definitions/Criterion" }
+        }
+      }
+    },
+    "Recommendation": {
+      "title": "Recommendation",
+      "description": "Uma recomendação do eMAG 3.1.",
+      "type": "object",
+      "required": ["id", "section", "title", "wcag20"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Número da recomendação, ex.: \"3.6\".",
+          "type": "string",
+          "pattern": "^[1-6]\\.\\d{1,2}$"
+        },
+        "section": {
+          "description": "Seção do eMAG 3.1 a que a recomendação pertence.",
+          "type": "string",
+          "enum": [
+            "Marcação",
+            "Comportamento (DOM)",
+            "Conteúdo/Informação",
+            "Apresentação/Design",
+            "Multimídia",
+            "Formulário"
+          ]
+        },
+        "title": {
+          "description": "Título do documento oficial, sem o prefixo \"Recomendação N –\".",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "wcag20": {
+          "description": "Todas as citações \"Ver WCAG 2.0 Critério(s) de Sucesso\" da recomendação, inclusive as de nível AAA e o 4.1.1. Vazio quando o documento não cita nenhum critério.",
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 20,
+          "items": { "$ref": "#/definitions/CriterionId" }
+        }
+      }
+    },
+    "EmagFile": {
+      "title": "EmagFile",
+      "description": "`emag-3.1.pt-BR.json`: as 45 recomendações do eMAG 3.1 e o endereço do documento oficial (sem âncora por recomendação).",
+      "type": "object",
+      "required": ["url", "recommendations"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://(www\\.gov\\.br/governodigital/|emag\\.governoeletronico\\.gov\\.br/)",
+          "maxLength": 300
+        },
+        "recommendations": {
+          "type": "array",
+          "minItems": 45,
+          "maxItems": 45,
+          "items": { "$ref": "#/definitions/Recommendation" }
+        }
+      }
+    }
+  }
+}

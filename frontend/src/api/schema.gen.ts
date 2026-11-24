@@ -142,6 +142,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wcag/criteria": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Critérios WCAG em português
+         * @description Número, nível, título, resumo, quem é afetado, link oficial e recomendações do eMAG 3.1 de cada critério conhecido. Sem parâmetros. O cliente busca uma vez por sessão e cruza com os números de `wcag_criteria` dos achados; em qualquer falha, mostra só os números.
+         */
+        get: operations["listWcagCriteria"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -315,7 +335,7 @@ export interface components {
         };
         /**
          * FindingDetail
-         * @description Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número no M2; o título em português e o eMAG entram no M3.
+         * @description Um achado por inteiro (RF-RA007). Os critérios WCAG vêm só como número; o título em português, o resumo e o eMAG vêm do catálogo (`GET /api/wcag/criteria`).
          */
         FindingDetail: {
             ai_model: string | null;
@@ -622,6 +642,61 @@ export interface components {
              */
             severity: "critical" | "serious" | "moderate" | "minor";
             wcag_criteria: string[];
+        };
+        /**
+         * WcagCriteriaResponse
+         * @description Catálogo dos critérios WCAG em português: os 55 critérios A e AA da WCAG 2.2 e os AAA citados pelas regras do axe que o Rampa roda, em ordem numérica, com as recomendações do eMAG 3.1 que citam cada um. Conteúdo fixo, igual para todas as auditorias.
+         */
+        WcagCriteriaResponse: {
+            /** @description Muda quando qualquer texto, link ou correspondência do catálogo muda. */
+            content_version: string;
+            data: components["schemas"]["WcagCriterion"][];
+            sources: {
+                emag: components["schemas"]["WcagSource"];
+                wcag: components["schemas"]["WcagSource"];
+            };
+        };
+        /**
+         * WcagCriterion
+         * @description Um critério de sucesso da WCAG 2.2 (RF-RA007). O achado traz só o número (`wcag_criteria`); o cliente cruza com este catálogo. Número fora do catálogo (ex.: 4.1.1, removido na WCAG 2.2) aparece só como número.
+         */
+        WcagCriterion: {
+            /** @description Recomendações do eMAG 3.1 que citam o critério, em ordem numérica; vazio quando nenhuma cita. O link do documento é `sources.emag.url`. */
+            emag: {
+                /** @example 3.6 */
+                id: string;
+                title: string;
+            }[];
+            /** @example 1.1.1 */
+            id: string;
+            /** @enum {string} */
+            level: "A" | "AA" | "AAA";
+            /**
+             * @description Versão da WCAG em que o critério surgiu. O eMAG 3.1 (2014) só cita critérios da 2.0.
+             * @enum {string}
+             */
+            since: "2.0" | "2.1" | "2.2";
+            /** @description O que o critério pede, em linguagem simples. */
+            summary: string;
+            /** @description Título da Tradução Autorizada da WCAG 2.2 para o português do Brasil. */
+            title: string;
+            /**
+             * Format: uri
+             * @description O critério na tradução autorizada da W3C (em português).
+             */
+            url: string;
+            /** @description Quem é afetado e o que acontece. O `who_is_affected` do próprio achado, quando houver, tem precedência sobre este (FR-008). */
+            who_is_affected: string;
+        };
+        /**
+         * WcagSource
+         * @description Fonte de uma parte do conteúdo, para a atribuição.
+         */
+        WcagSource: {
+            license: string;
+            name: string;
+            /** Format: uri */
+            url: string;
         };
     };
     responses: never;
@@ -931,6 +1006,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    listWcagCriteria: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catálogo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WcagCriteriaResponse"];
                 };
             };
         };

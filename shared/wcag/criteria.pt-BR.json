@@ -1,0 +1,508 @@
+{
+  "criteria": [
+    {
+      "id": "1.1.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Conteúdo Não Textual",
+      "summary": "Imagens, ícones, gráficos e controles que transmitem informação têm um texto equivalente. Imagens só decorativas ficam ocultas para as tecnologias assistivas.",
+      "who_is_affected": "Pessoas cegas que usam leitor de tela ouvem o texto alternativo no lugar da imagem. Sem ele, ouvem o nome do arquivo ou nada, e perdem a informação. O texto também ajuda quem usa linha braille e quem navega com as imagens desligadas.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#non-text-content"
+    },
+    {
+      "id": "1.2.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Apenas Áudio e Apenas Vídeo (Pré-gravado)",
+      "summary": "Áudio gravado, como um podcast, tem transcrição em texto. Vídeo gravado sem som tem transcrição ou trilha de áudio que descreva o que aparece.",
+      "who_is_affected": "Pessoas surdas ou com perda auditiva não ouvem o áudio. Pessoas cegas não veem o vídeo sem som. Sem uma alternativa, as duas ficam sem o conteúdo.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#audio-only-and-video-only-prerecorded"
+    },
+    {
+      "id": "1.2.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Legendas (Pré-gravadas)",
+      "summary": "Vídeos gravados com som têm legendas sincronizadas com as falas e os sons importantes.",
+      "who_is_affected": "Pessoas surdas ou com perda auditiva acompanham o vídeo pelas legendas. Elas também ajudam quem assiste sem som ou num lugar barulhento.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#captions-prerecorded"
+    },
+    {
+      "id": "1.2.3",
+      "level": "A",
+      "since": "2.0",
+      "title": "Audiodescrição ou Mídia Alternativa (Pré-gravada)",
+      "summary": "Vídeos gravados têm audiodescrição das cenas importantes ou um texto que descreve o vídeo inteiro.",
+      "who_is_affected": "Pessoas cegas ou com baixa visão ouvem a fala, mas perdem o que só aparece na imagem: ações, textos na tela e mudanças de cena. A audiodescrição ou o texto contam o que está acontecendo.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#audio-description-or-media-alternative-prerecorded"
+    },
+    {
+      "id": "1.2.4",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Legendas (Ao Vivo)",
+      "summary": "Transmissões ao vivo com som têm legendas em tempo real.",
+      "who_is_affected": "Pessoas surdas ou com perda auditiva acompanham lives, eventos e reuniões transmitidas pelas legendas ao vivo.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#captions-live"
+    },
+    {
+      "id": "1.2.5",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Audiodescrição (Pré-gravada)",
+      "summary": "Vídeos gravados têm audiodescrição: uma narração que conta o que aparece na imagem nas pausas das falas.",
+      "who_is_affected": "Pessoas cegas ou com baixa visão entendem o vídeo sem depender da imagem, porque a narração descreve ações, textos e cenas importantes.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#audio-description-prerecorded"
+    },
+    {
+      "id": "1.3.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Informações e Relações",
+      "summary": "A estrutura que se vê na tela também está no código: títulos são títulos, listas são listas, tabelas têm cabeçalhos e cada campo tem seu rótulo.",
+      "who_is_affected": "Quem usa leitor de tela navega pelos títulos, ouve quantos itens tem uma lista e qual cabeçalho vale para cada célula. Se a estrutura existe só no visual, essa pessoa não sabe como o conteúdo se organiza nem o que cada campo pede.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#info-and-relationships"
+    },
+    {
+      "id": "1.3.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Sequência com Significado",
+      "summary": "Quando a ordem do conteúdo muda o sentido, o código apresenta o conteúdo nessa mesma ordem.",
+      "who_is_affected": "Leitores de tela leem na ordem do código, não na ordem visual. Se as duas divergem, quem usa leitor de tela ouve frases fora de ordem e pode entender outra coisa.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#meaningful-sequence"
+    },
+    {
+      "id": "1.3.3",
+      "level": "A",
+      "since": "2.0",
+      "title": "Características Sensoriais",
+      "summary": "Instruções não dependem só de forma, tamanho, posição ou som, como em \"clique no botão redondo à direita\".",
+      "who_is_affected": "Pessoas cegas não veem a forma nem a posição de um botão. Pessoas com baixa visão, com a tela ampliada, podem não achar o que fica \"à direita\". Dizer o nome do controle resolve para todos.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#sensory-characteristics"
+    },
+    {
+      "id": "1.3.4",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Orientação",
+      "summary": "O conteúdo funciona com a tela em pé e deitada, sem travar numa orientação, a menos que ela seja essencial.",
+      "who_is_affected": "Quem tem o celular ou o tablet preso numa posição, por exemplo numa cadeira de rodas, não consegue girar o aparelho. Se o site só funciona na outra orientação, essa pessoa fica sem acesso.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#orientation"
+    },
+    {
+      "id": "1.3.5",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Identificar o Propósito de Entrada",
+      "summary": "Campos que pedem dados da própria pessoa, como nome, e-mail, telefone e endereço, informam no código qual dado esperam, para o navegador preencher sozinho.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, de memória ou motora preenchem formulários com menos esforço e menos erros quando o navegador completa os dados.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#identify-input-purpose"
+    },
+    {
+      "id": "1.4.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Uso de Cores",
+      "summary": "A cor não é o único meio de passar uma informação, indicar uma ação ou distinguir um elemento. Há também texto, ícone ou outro sinal.",
+      "who_is_affected": "Pessoas com daltonismo ou baixa visão podem não perceber a diferença entre cores. Um campo marcado só em vermelho ou um link que se distingue só pela cor passa despercebido para elas.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#use-of-color"
+    },
+    {
+      "id": "1.4.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Controle de Áudio",
+      "summary": "Áudio que toca sozinho por mais de 3 segundos tem como pausar ou parar, ou ter o volume ajustado à parte do volume do sistema.",
+      "who_is_affected": "Quem usa leitor de tela deixa de ouvir o leitor quando outro som toca por cima. Pessoas com dificuldade de concentração também se perdem com sons que começam sozinhos.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#audio-control"
+    },
+    {
+      "id": "1.4.3",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Contraste (Mínimo)",
+      "summary": "Texto e imagens de texto têm contraste mínimo de 4,5:1 com o fundo, ou de 3:1 em texto grande.",
+      "who_is_affected": "Pessoas com baixa visão, daltonismo ou visão reduzida pela idade têm dificuldade para ler texto claro sobre fundo claro. O contraste baixo também atrapalha qualquer pessoa no sol ou numa tela ruim.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#contrast-minimum"
+    },
+    {
+      "id": "1.4.4",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Redimensionar Texto",
+      "summary": "O texto pode ser ampliado até 200% sem perder conteúdo nem função.",
+      "who_is_affected": "Pessoas com baixa visão aumentam o texto para conseguir ler. Se o texto ampliado fica cortado, sobreposto ou esconde botões, elas não conseguem usar a página.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#resize-text"
+    },
+    {
+      "id": "1.4.5",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Imagens de Texto",
+      "summary": "Texto aparece como texto, não dentro de imagens, a não ser quando a forma é essencial, como num logotipo.",
+      "who_is_affected": "Pessoas com baixa visão ou dislexia ajustam fonte, tamanho, cor e espaçamento do texto. Texto dentro de imagem não muda com esses ajustes e fica borrado ao ampliar.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#images-of-text"
+    },
+    {
+      "id": "1.4.10",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Realinhar",
+      "summary": "O conteúdo se reorganiza numa coluna em telas estreitas ou com zoom de 400%, sem exigir rolagem para os lados.",
+      "who_is_affected": "Pessoas com baixa visão usam zoom alto. Se precisam rolar para os lados a cada linha, perdem o fio da leitura. Também ajuda quem usa o celular.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#reflow"
+    },
+    {
+      "id": "1.4.11",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Contraste Não textual",
+      "summary": "Bordas de campos, ícones, indicadores de foco e partes de gráficos necessárias para entender a tela têm contraste mínimo de 3:1 com o que está em volta.",
+      "who_is_affected": "Pessoas com baixa visão podem não enxergar onde fica um campo, um botão ou a linha de um gráfico quando o contraste é baixo. Assim, não sabem onde clicar nem conseguem ler a informação.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#non-text-contrast"
+    },
+    {
+      "id": "1.4.12",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Espaçamento de Texto",
+      "summary": "O conteúdo continua legível e funcionando quando a pessoa aumenta o espaço entre linhas, parágrafos, letras e palavras.",
+      "who_is_affected": "Pessoas com dislexia ou baixa visão leem melhor com mais espaço entre letras e linhas. Se o texto fica cortado ou sobreposto com esses ajustes, elas perdem conteúdo.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#text-spacing"
+    },
+    {
+      "id": "1.4.13",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Conteúdo em foco por mouse ou teclado",
+      "summary": "Conteúdo que aparece ao passar o mouse ou ao receber o foco, como dicas e menus, pode ser fechado sem mover o ponteiro, fica visível enquanto o ponteiro está sobre ele e não some sozinho.",
+      "who_is_affected": "Pessoas com baixa visão que usam ampliação precisam mover o ponteiro para ler a dica inteira. Se ela some ou cobre o conteúdo sem poder ser fechada, a pessoa perde informação ou não vê o que está embaixo.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#content-on-hover-or-focus"
+    },
+    {
+      "id": "2.1.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Teclado",
+      "summary": "Tudo o que se faz com o mouse também se faz pelo teclado.",
+      "who_is_affected": "Pessoas cegas, pessoas com deficiência motora e quem usa teclado alternativo, acionador ou comando de voz não usam mouse. Se um botão ou menu só responde ao mouse, elas não conseguem concluir a tarefa.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#keyboard"
+    },
+    {
+      "id": "2.1.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Sem Bloqueio do Teclado",
+      "summary": "Quando o foco do teclado entra num componente, também consegue sair dele pelo teclado.",
+      "who_is_affected": "Quem navega só pelo teclado fica presa num componente sem saída, como um player de vídeo ou uma janela, e não chega ao resto da página.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#no-keyboard-trap"
+    },
+    {
+      "id": "2.1.3",
+      "level": "AAA",
+      "since": "2.0",
+      "title": "Teclado (Sem Exceção)",
+      "summary": "Tudo funciona pelo teclado, sem as exceções que o critério 2.1.1 admite. É um critério de nível AAA.",
+      "who_is_affected": "Quem usa só o teclado, inclusive quem usa leitor de tela, precisa alcançar todas as partes da página. Uma área com rolagem que o teclado não alcança deixa o conteúdo dela fora de alcance.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#keyboard-no-exception"
+    },
+    {
+      "id": "2.1.4",
+      "level": "A",
+      "since": "2.1",
+      "title": "Atalhos de teclado por caractere",
+      "summary": "Atalhos de uma tecla só, como uma letra, um número ou um símbolo, podem ser desligados ou trocados, ou só funcionam quando o componente tem o foco.",
+      "who_is_affected": "Quem usa comando de voz pode disparar atalhos sem querer ao falar. Pessoas com tremor também apertam teclas por engano. Atalhos de uma tecla sem esse controle fazem ações que a pessoa não pediu.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#character-key-shortcuts"
+    },
+    {
+      "id": "2.2.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Tempo ajustável",
+      "summary": "Quando há limite de tempo, a pessoa pode desligar, ajustar ou estender o prazo, com aviso antes de ele acabar.",
+      "who_is_affected": "Pessoas com deficiência motora, cognitiva ou visual e quem usa leitor de tela costumam precisar de mais tempo para ler e preencher. Um prazo curto e sem aviso faz essas pessoas perderem o que já tinham feito.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#timing-adjustable"
+    },
+    {
+      "id": "2.2.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Colocar em Pausa, Parar, Ocultar",
+      "summary": "Conteúdo que se move, pisca, rola ou se atualiza sozinho por mais de 5 segundos tem como pausar, parar ou esconder.",
+      "who_is_affected": "Pessoas com dificuldade de atenção, deficiência cognitiva ou baixa visão se distraem ou não conseguem ler um carrossel que passa sozinho. Quem usa leitor de tela pode perder o ponto em que estava.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#pause-stop-hide"
+    },
+    {
+      "id": "2.3.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Três Flashes ou Abaixo do Limite",
+      "summary": "Nada pisca mais de 3 vezes por segundo, a menos que o clarão fique abaixo dos limites de segurança.",
+      "who_is_affected": "Pessoas com epilepsia fotossensível podem ter uma crise com luzes que piscam rápido. Outras pessoas podem sentir enjoo ou dor de cabeça.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#three-flashes-or-below-threshold"
+    },
+    {
+      "id": "2.4.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Contornar Blocos",
+      "summary": "Há um jeito de pular blocos que se repetem em todas as páginas, como o menu, e ir direto ao conteúdo.",
+      "who_is_affected": "Quem usa teclado ou leitor de tela passa por todos os links do menu em cada página antes de chegar ao conteúdo. Um link para pular ou regiões bem marcadas encurtam esse caminho.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#bypass-blocks"
+    },
+    {
+      "id": "2.4.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Página com Título",
+      "summary": "Cada página tem um título que diz o assunto ou a finalidade dela.",
+      "who_is_affected": "O título da página é a primeira coisa que o leitor de tela anuncia e é o que aparece na aba do navegador. Sem ele, quem usa leitor de tela ou tem várias abas abertas não sabe onde está.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#page-titled"
+    },
+    {
+      "id": "2.4.3",
+      "level": "A",
+      "since": "2.0",
+      "title": "Ordem do Foco",
+      "summary": "A ordem do foco pelo teclado segue a lógica da página e preserva o sentido.",
+      "who_is_affected": "Quem navega pelo teclado ou pelo leitor de tela segue o foco. Se ele pula de um lado para outro da tela, a pessoa se perde e pode preencher campos na ordem errada.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#focus-order"
+    },
+    {
+      "id": "2.4.4",
+      "level": "A",
+      "since": "2.0",
+      "title": "Finalidade do Link (Em contexto)",
+      "summary": "O texto de cada link, junto com o contexto próximo, diz para onde ele leva.",
+      "who_is_affected": "Quem usa leitor de tela costuma ouvir a lista de links da página fora do texto. Vários links \"saiba mais\" ou \"clique aqui\" não dizem nada sozinhos.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#link-purpose-in-context"
+    },
+    {
+      "id": "2.4.5",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Várias Formas",
+      "summary": "Há mais de um caminho para encontrar uma página do site, como menu, busca ou mapa do site.",
+      "who_is_affected": "Cada pessoa encontra conteúdo de um jeito. Pessoas com deficiência cognitiva ou visual podem achar a busca mais fácil que um menu longo, e o contrário também acontece.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#multiple-ways"
+    },
+    {
+      "id": "2.4.6",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Cabeçalhos e Rótulos",
+      "summary": "Títulos e rótulos dizem do que trata o conteúdo ou o que o campo pede.",
+      "who_is_affected": "Quem usa leitor de tela navega pelos títulos e ouve o rótulo de cada campo. Pessoas com deficiência cognitiva também se orientam por eles. Títulos e rótulos vagos fazem todo mundo adivinhar.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#headings-and-labels"
+    },
+    {
+      "id": "2.4.7",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Foco Visível",
+      "summary": "Quem navega pelo teclado sempre vê onde está o foco.",
+      "who_is_affected": "Quem usa só o teclado precisa ver qual elemento está selecionado. Sem o foco visível, é como usar o mouse sem ver o ponteiro.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#focus-visible"
+    },
+    {
+      "id": "2.4.11",
+      "level": "AA",
+      "since": "2.2",
+      "title": "Foco não Obscurecido (Mínimo)",
+      "summary": "O elemento com foco não fica totalmente escondido por outros conteúdos da página, como cabeçalhos fixos ou avisos de cookies.",
+      "who_is_affected": "Quem navega pelo teclado perde o ponto em que está quando o foco vai para um elemento coberto por uma barra fixa ou um aviso. Pessoas com baixa visão que usam ampliação sofrem ainda mais com isso.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#focus-not-obscured-minimum"
+    },
+    {
+      "id": "2.5.1",
+      "level": "A",
+      "since": "2.1",
+      "title": "Gestos de Acionamento",
+      "summary": "Ações feitas com gestos de vários dedos ou de trajeto, como pinça ou deslizar, também podem ser feitas com um toque ou clique simples.",
+      "who_is_affected": "Pessoas com deficiência motora ou que usam ponteiro de cabeça, de boca ou acionador não conseguem fazer gestos complexos. Elas precisam de botões ou toques simples para a mesma ação.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#pointer-gestures"
+    },
+    {
+      "id": "2.5.2",
+      "level": "A",
+      "since": "2.1",
+      "title": "Cancelamento de Acionamento",
+      "summary": "Ações acionadas por toque ou clique só acontecem quando a pessoa solta, e dá para desistir afastando o dedo ou o ponteiro antes de soltar.",
+      "who_is_affected": "Pessoas com tremor ou deficiência motora tocam no lugar errado com frequência. Poder desistir antes de soltar evita ações por engano.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#pointer-cancellation"
+    },
+    {
+      "id": "2.5.3",
+      "level": "A",
+      "since": "2.1",
+      "title": "Rótulo em Nome",
+      "summary": "O nome que o leitor de tela e o comando de voz usam para um controle contém o texto que aparece nele.",
+      "who_is_affected": "Quem usa comando de voz fala o texto que vê no botão. Se o nome no código é outro, o comando não funciona. Quem usa leitor de tela e enxerga parte da tela também se confunde.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#label-in-name"
+    },
+    {
+      "id": "2.5.4",
+      "level": "A",
+      "since": "2.1",
+      "title": "Atuação por Movimento",
+      "summary": "Funções ativadas por movimento do aparelho, como sacudir ou inclinar, também funcionam por um controle na tela, e o movimento pode ser desligado.",
+      "who_is_affected": "Pessoas com deficiência motora podem não conseguir mover o aparelho, ou ele pode estar preso numa cadeira de rodas. Outras disparam a ação sem querer por causa de tremores.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#motion-actuation"
+    },
+    {
+      "id": "2.5.7",
+      "level": "AA",
+      "since": "2.2",
+      "title": "Movimentos de arrastar",
+      "summary": "O que se faz arrastando também pode ser feito com cliques ou toques simples.",
+      "who_is_affected": "Pessoas com deficiência motora ou que usam ponteiro de cabeça ou acionador têm dificuldade para segurar e arrastar. Elas precisam de outra forma de mover itens, como botões.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#dragging-movements"
+    },
+    {
+      "id": "2.5.8",
+      "level": "AA",
+      "since": "2.2",
+      "title": "Tamanho do Alvo (Mínimo)",
+      "summary": "Alvos de clique ou toque têm pelo menos 24 por 24 pixels, ou espaço suficiente em volta, salvo algumas exceções.",
+      "who_is_affected": "Pessoas com tremor, com deficiência motora ou com dedos maiores têm dificuldade para acertar alvos pequenos e acionam o vizinho por engano. Isso pesa mais no celular.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#target-size-minimum"
+    },
+    {
+      "id": "3.1.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Idioma da Página",
+      "summary": "O código informa o idioma principal da página.",
+      "who_is_affected": "Leitores de tela usam o idioma informado para escolher a pronúncia. Sem ele, um texto em português pode ser lido com a pronúncia do inglês e ficar incompreensível.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#language-of-page"
+    },
+    {
+      "id": "3.1.2",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Idioma das Partes",
+      "summary": "Trechos em outro idioma são marcados com o idioma deles.",
+      "who_is_affected": "Quem usa leitor de tela ouve as palavras estrangeiras com a pronúncia certa quando o trecho está marcado. Sem a marcação, o leitor pronuncia com as regras do português.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#language-of-parts"
+    },
+    {
+      "id": "3.2.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Em Foco",
+      "summary": "Receber o foco não muda o contexto sozinho, como abrir outra página ou enviar um formulário.",
+      "who_is_affected": "Quem navega pelo teclado ou pelo leitor de tela passa o foco por todos os elementos. Se algo muda só por receber o foco, a pessoa é levada para outro lugar sem ter pedido.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#on-focus"
+    },
+    {
+      "id": "3.2.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Em Entrada",
+      "summary": "Mudar o valor de um campo não muda o contexto sozinho, a não ser que a pessoa tenha sido avisada antes.",
+      "who_is_affected": "Pessoas que usam leitor de tela ou teclado e pessoas com deficiência cognitiva se perdem quando escolher uma opção numa lista já envia o formulário ou troca de página.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#on-input"
+    },
+    {
+      "id": "3.2.3",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Navegação Consistente",
+      "summary": "Menus e blocos de navegação que se repetem aparecem na mesma ordem em todas as páginas.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, com baixa visão ou que usam leitor de tela memorizam onde as coisas ficam. Se a ordem muda a cada página, elas precisam reaprender o caminho.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#consistent-navigation"
+    },
+    {
+      "id": "3.2.4",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Identificação Consistente",
+      "summary": "Elementos com a mesma função têm o mesmo nome e o mesmo ícone em todo o site.",
+      "who_is_affected": "Quem usa leitor de tela reconhece os controles pelo nome. Pessoas com deficiência cognitiva se orientam pelos ícones e rótulos. Nomes diferentes para a mesma função confundem.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#consistent-identification"
+    },
+    {
+      "id": "3.2.6",
+      "level": "A",
+      "since": "2.2",
+      "title": "Ajuda Consistente",
+      "summary": "Quando o site oferece ajuda, como contato, chat ou perguntas frequentes, ela fica no mesmo lugar em todas as páginas.",
+      "who_is_affected": "Pessoas com deficiência cognitiva ou que precisam de apoio para concluir uma tarefa acham a ajuda mais rápido quando ela está sempre no mesmo lugar.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#consistent-help"
+    },
+    {
+      "id": "3.3.1",
+      "level": "A",
+      "since": "2.0",
+      "title": "Identificação do Erro",
+      "summary": "Quando um erro de preenchimento é detectado, o campo com erro é indicado e o erro é descrito em texto.",
+      "who_is_affected": "Pessoas cegas não veem um campo destacado em vermelho. Pessoas com deficiência cognitiva precisam saber o que está errado. Sem a descrição em texto, elas não conseguem corrigir e enviar.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#error-identification"
+    },
+    {
+      "id": "3.3.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Rótulos ou Instruções",
+      "summary": "Campos que pedem dados têm rótulos ou instruções.",
+      "who_is_affected": "Todas as pessoas precisam saber o que digitar. Quem usa leitor de tela depende do rótulo no código. Pessoas com deficiência cognitiva precisam de instruções claras, como o formato de uma data.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#labels-or-instructions"
+    },
+    {
+      "id": "3.3.3",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Sugestão de Erro",
+      "summary": "Quando um erro é detectado e há uma correção conhecida, o site sugere como corrigir, a menos que isso comprometa a segurança.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, com dislexia ou que usam leitor de tela corrigem o erro mais rápido quando o site diz o que esperava, como \"Digite a data no formato 10/11/2026\".",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#error-suggestion"
+    },
+    {
+      "id": "3.3.4",
+      "level": "AA",
+      "since": "2.0",
+      "title": "Prevenção de erros (legais, financeiros, de dados)",
+      "summary": "Em páginas com compromisso legal ou financeiro, ou que alteram dados, a pessoa pode revisar, corrigir ou desfazer antes de concluir.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, motora ou visual erram com mais facilidade ao digitar ou clicar. Revisar antes de confirmar evita compras, contratos ou envios por engano.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#error-prevention-legal-financial-data"
+    },
+    {
+      "id": "3.3.7",
+      "level": "A",
+      "since": "2.2",
+      "title": "Entrada Redundante",
+      "summary": "Dados que a pessoa já informou no mesmo processo são preenchidos de novo pelo site ou podem ser escolhidos, sem precisar digitar outra vez.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, de memória ou motora se cansam e erram ao repetir os mesmos dados. Reaproveitar o que já foi informado reduz o esforço e os erros.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#redundant-entry"
+    },
+    {
+      "id": "3.3.8",
+      "level": "AA",
+      "since": "2.2",
+      "title": "Autenticação Acessível (Mínimo)",
+      "summary": "Entrar no site não exige teste cognitivo, como lembrar uma senha de cabeça ou resolver um quebra-cabeça, sem uma alternativa ou ajuda, como colar a senha ou usar um gerenciador de senhas.",
+      "who_is_affected": "Pessoas com deficiência cognitiva, de memória ou com dislexia podem não conseguir digitar uma senha de cabeça ou resolver um desafio. Bloquear o colar ou o preenchimento automático impede essas pessoas de entrar.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#accessible-authentication-minimum"
+    },
+    {
+      "id": "4.1.2",
+      "level": "A",
+      "since": "2.0",
+      "title": "Nome, Função, Valor",
+      "summary": "Todo controle da interface tem nome, função e estado expostos no código, e as mudanças de estado chegam às tecnologias assistivas.",
+      "who_is_affected": "Quem usa leitor de tela ou comando de voz depende do código para saber o que é cada controle e se ele está marcado, aberto ou selecionado. Um botão sem nome é anunciado só como \"botão\".",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#name-role-value"
+    },
+    {
+      "id": "4.1.3",
+      "level": "AA",
+      "since": "2.1",
+      "title": "Mensagens de Status",
+      "summary": "Mensagens de status, como \"item adicionado\" ou \"3 resultados\", são anunciadas pelas tecnologias assistivas sem tirar o foco do lugar.",
+      "who_is_affected": "Quem usa leitor de tela não vê uma mensagem que aparece na tela. Se ela não é anunciada, a pessoa não sabe se a ação deu certo, deu erro ou se a busca trouxe resultados.",
+      "url": "https://www.w3.org/Translations/WCAG22-pt-BR/#status-messages"
+    }
+  ]
+}

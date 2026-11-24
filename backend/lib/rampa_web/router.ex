@@ -26,6 +26,8 @@ defmodule RampaWeb.Router do
     get "/audits/:audit_id/pages/:id", PageController, :show
     get "/audits/:audit_id/findings", FindingController, :index
     get "/audits/:audit_id/findings/:id", FindingController, :show
+
+    get "/wcag/criteria", WcagController, :index
   end
 
   # Especificação OpenAPI (`RampaWeb.ApiSpec`), em todos os ambientes.
