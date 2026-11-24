@@ -200,7 +200,7 @@ test.describe("RF-RA007: critérios WCAG e eMAG no detalhe do problema", () => {
       "6.1 Fornecer alternativa em texto para os botões de imagem de formulários",
       "6.8 Fornecer estratégias de segurança específicas ao invés de CAPTCHA",
     ]);
-    const doc = section.getByRole("link", { name: new RegExp(`^${EMAG_DOC.replace(/[.()]/g, "\\$&")}`) });
+    const doc = section.getByRole("link", { name: new RegExp(`^${EMAG_DOC.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}`) });
     await expect(doc).toHaveCount(1);
     await expect(doc).toHaveAttribute("href", "https://emag.governoeletronico.gov.br/");
   });
