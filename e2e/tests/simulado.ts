@@ -3,7 +3,8 @@
 // `page.routeWebSocket`, falando o protocolo do cliente `phoenix` (serializador V2, JSON:
 // `[join_ref, ref, topic, event, payload]`). Os formatos seguem os contratos
 // (`shared/openapi.json` e `shared/channel-events.schema.json`).
-import type { Page, WebSocketRoute } from "@playwright/test";
+import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { components } from "../../frontend/src/api/schema.gen.js";
 
 export const AUDIT_ID = "3f2b8c1e-7a4d-4e5f-9b0c-1d2e3f4a5b6c";
 export const PAGE_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -54,8 +55,116 @@ export function summary(revision: number, p: Progress, startUrl = "https://exemp
   };
 }
 
+export type WcagCriteriaResponse = components["schemas"]["WcagCriteriaResponse"];
+
+/**
+ * Catálogo de `GET /api/wcag/criteria` (RF-RA007), reduzido aos critérios das fixtures do
+ * simulado, com os textos de `shared/wcag/`: 1.1.1 e 4.1.2 citados pelo eMAG, 1.4.3, 2.4.2 e
+ * 3.1.1 das regras aprovadas, e 2.5.8 (WCAG 2.2, que o eMAG 3.1 não cita). As rotas do relatório
+ * pedem o catálogo; sem ele, a tela cai no "só o número" do M2.
+ */
+export const WCAG_CATALOG: WcagCriteriaResponse = {
+  content_version: "simulado",
+  sources: {
+    wcag: {
+      name: "WCAG 2.2, Tradução Autorizada para o português do Brasil (W3C, 27/03/2025)",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR-20250327/",
+      license: "W3C Document License",
+    },
+    emag: {
+      name: "Modelo de Acessibilidade em Governo Eletrônico (eMAG) 3.1",
+      url: "https://emag.governoeletronico.gov.br/",
+      license: "CC BY 4.0",
+    },
+  },
+  data: [
+    {
+      id: "1.1.1",
+      level: "A",
+      since: "2.0",
+      title: "Conteúdo Não Textual",
+      summary:
+        "Imagens, ícones, gráficos e controles que transmitem informação têm um texto equivalente. Imagens só decorativas ficam ocultas para as tecnologias assistivas.",
+      who_is_affected:
+        "Pessoas cegas que usam leitor de tela ouvem o texto alternativo no lugar da imagem. Sem ele, ouvem o nome do arquivo ou nada, e perdem a informação. O texto também ajuda quem usa linha braille e quem navega com as imagens desligadas.",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#non-text-content",
+      emag: [
+        { id: "3.6", title: "Fornecer alternativa em texto para as imagens do sítio" },
+        { id: "3.7", title: "Utilizar mapas de imagem de forma acessível" },
+        { id: "6.1", title: "Fornecer alternativa em texto para os botões de imagem de formulários" },
+        { id: "6.8", title: "Fornecer estratégias de segurança específicas ao invés de CAPTCHA" },
+      ],
+    },
+    {
+      id: "1.4.3",
+      level: "AA",
+      since: "2.0",
+      title: "Contraste (Mínimo)",
+      summary: "Texto e imagens de texto têm contraste mínimo de 4,5:1 com o fundo, ou de 3:1 em texto grande.",
+      who_is_affected:
+        "Pessoas com baixa visão, daltonismo ou visão reduzida pela idade têm dificuldade para ler texto claro sobre fundo claro. O contraste baixo também atrapalha qualquer pessoa no sol ou numa tela ruim.",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#contrast-minimum",
+      emag: [{ id: "4.1", title: "Oferecer contraste mínimo entre plano de fundo e primeiro plano" }],
+    },
+    {
+      id: "2.4.2",
+      level: "A",
+      since: "2.0",
+      title: "Página com Título",
+      summary: "Cada página tem um título que diz o assunto ou a finalidade dela.",
+      who_is_affected:
+        "O título da página é a primeira coisa que o leitor de tela anuncia e é o que aparece na aba do navegador. Sem ele, quem usa leitor de tela ou tem várias abas abertas não sabe onde está.",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#page-titled",
+      emag: [{ id: "3.3", title: "Oferecer um título descritivo e informativo à página" }],
+    },
+    {
+      id: "2.5.8",
+      level: "AA",
+      since: "2.2",
+      title: "Tamanho do Alvo (Mínimo)",
+      summary:
+        "Alvos de clique ou toque têm pelo menos 24 por 24 pixels, ou espaço suficiente em volta, salvo algumas exceções.",
+      who_is_affected:
+        "Pessoas com tremor, com deficiência motora ou com dedos maiores têm dificuldade para acertar alvos pequenos e acionam o vizinho por engano. Isso pesa mais no celular.",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#target-size-minimum",
+      emag: [],
+    },
+    {
+      id: "3.1.1",
+      level: "A",
+      since: "2.0",
+      title: "Idioma da Página",
+      summary: "O código informa o idioma principal da página.",
+      who_is_affected:
+        "Leitores de tela usam o idioma informado para escolher a pronúncia. Sem ele, um texto em português pode ser lido com a pronúncia do inglês e ficar incompreensível.",
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#language-of-page",
+      emag: [{ id: "3.1", title: "Identificar o idioma principal da página" }],
+    },
+    {
+      id: "4.1.2",
+      level: "A",
+      since: "2.0",
+      title: "Nome, Função, Valor",
+      summary:
+        "Todo controle da interface tem nome, função e estado expostos no código, e as mudanças de estado chegam às tecnologias assistivas.",
+      who_is_affected:
+        'Quem usa leitor de tela ou comando de voz depende do código para saber o que é cada controle e se ele está marcado, aberto ou selecionado. Um botão sem nome é anunciado só como "botão".',
+      url: "https://www.w3.org/Translations/WCAG22-pt-BR/#name-role-value",
+      emag: [{ id: "1.1", title: "Respeitar os Padrões Web" }],
+    },
+  ],
+};
+
+export const WCAG_CRITERIA_PATH = "/api/wcag/criteria";
+
+/** Responde o catálogo dos critérios (para quem trata `/api/**` numa rota só). */
+export function fulfillWcagCriteria(route: Route) {
+  return route.fulfill({ json: WCAG_CATALOG });
+}
+
 /** Responde `GET /api/audits/:id` e `/pages` com o estado atual (mutável pelo teste). */
 export async function mockAuditApi(page: Page, state: { revision: number; progress: Progress }) {
+  await page.route(`**${WCAG_CRITERIA_PATH}`, fulfillWcagCriteria);
   await page.route(`**/api/audits/${AUDIT_ID}`, (route) =>
     route.fulfill({ json: summary(state.revision, state.progress) }),
   );

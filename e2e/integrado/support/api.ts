@@ -250,6 +250,31 @@ export async function getFinding(request: APIRequestContext, id: string, finding
   return (await response.json()) as FindingDetail;
 }
 
+/** Um critério do catálogo `GET /api/wcag/criteria` (RF-RA007, M3). */
+export interface WcagCriterion {
+  id: string;
+  level: "A" | "AA" | "AAA";
+  since: "2.0" | "2.1" | "2.2";
+  title: string;
+  summary: string;
+  who_is_affected: string;
+  url: string;
+  emag: { id: string; title: string }[];
+}
+
+export interface WcagCatalog {
+  content_version: string;
+  sources: Record<"wcag" | "emag", { name: string; url: string; license: string }>;
+  data: WcagCriterion[];
+}
+
+/** `GET /api/wcag/criteria`: o catálogo dos critérios WCAG, oráculo do detalhe do problema. */
+export async function getWcagCriteria(request: APIRequestContext): Promise<WcagCatalog> {
+  const response = await request.get(`${env.apiUrl}/api/wcag/criteria`);
+  expect(response.status(), `GET /api/wcag/criteria: ${await response.text()}`).toBe(200);
+  return (await response.json()) as WcagCatalog;
+}
+
 /**
  * Quantas vezes o documento de uma rota com contador do site de fixtures foi pedido
  * (`/instavel/<uuid>`, `/sempre-503/<uuid>` ou `/proibido/<uuid>`, RF-RA029): `GET <rota>/hits`.

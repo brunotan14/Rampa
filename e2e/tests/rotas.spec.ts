@@ -6,6 +6,7 @@ import {
   expectNoHorizontalScroll,
   reflowOverflow,
 } from "./a11y.js";
+import { WCAG_CRITERIA_PATH, fulfillWcagCriteria } from "./simulado.js";
 
 // Rotas da base do frontend (M2, feat/frontend-base): o 404, com axe, teclado, reflow e
 // espaçamento de texto. As telas da auditoria têm specs próprios (`tela-progresso.spec.ts` e
@@ -16,6 +17,12 @@ const SCREENS = [
   { path: "/auditorias/nao-e-um-id", h1: "Página não encontrada" },
   { path: "/nao-existe", h1: "Página não encontrada" },
 ];
+
+// As rotas sob `/auditorias/:id` buscam o catálogo dos critérios WCAG mesmo no 404: sem a API
+// simulada, o pedido cairia no proxy do `vite preview`, sem backend.
+test.beforeEach(async ({ page }) => {
+  await page.route(`**${WCAG_CRITERIA_PATH}`, fulfillWcagCriteria);
+});
 
 for (const { path, h1 } of SCREENS) {
   test.describe(`${path}`, () => {

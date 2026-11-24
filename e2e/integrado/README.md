@@ -43,6 +43,7 @@ compartilhada, e a origem da conexão (confiável ou não) deixa de ser previsí
 - `listFindings(request, id, { filters })`: todos os achados, seguindo o cursor (filtros `page_id`, `severity`, `source`, `wcag`, `needs_review`).
 - `listPages(request, id)`: as páginas da auditoria (`http_status`, `error`, `login_wall`).
 - `getPage(request, id, pageId)` e `getFinding(request, id, findingId)`: o detalhe da página (com `passed_rules`) e o do achado, oráculos das telas do relatório.
+- `getWcagCriteria(request)`: o catálogo dos critérios WCAG (título, nível, resumo, link e eMAG), oráculo do detalhe do problema (RF-RA007, M3).
 - `fixtureHits(request, "instavel/<uuid>")`: quantas vezes uma rota com contador do site de fixtures foi pedida.
 - `scanDirect(request, url)`: resposta do scanner, com `blocked_requests` (não é gravado no banco).
 - `retryAfterSeconds(result)`: o cabeçalho `Retry-After` de uma recusa 429.
